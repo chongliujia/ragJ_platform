@@ -84,6 +84,7 @@
       "documentsCount": "documents",
       "createdAt": "Created",
       "manageDocuments": "Manage Documents",
+      "uploadDocuments": "Upload Documents",
       "noDescription": "No description"
     },
     "status": {
@@ -115,6 +116,28 @@
     "title": "Document Management",
     "comingSoon": "Document management feature is under development",
     "description": "This feature will support document upload, processing and management"
+  },
+  "document": {
+    "upload": {
+      "title": "Upload Document",
+      "upload": "Upload",
+      "uploading": "Uploading...",
+      "error": "Upload failed",
+      "file": {
+        "select": "Click to select file",
+        "selected": "Selected",
+        "required": "Please select a file to upload",
+        "supportedFormats": "Supports PDF, DOCX, TXT, MD formats"
+      },
+      "chunking": {
+        "title": "Chunking Strategy Configuration",
+        "strategy": "Chunking Strategy",
+        "parameters": "Parameter Settings"
+      },
+      "strategies": {
+        "fetchError": "Failed to fetch chunking strategies"
+      }
+    }
   },
   "settings": {
     "title": "Model Configuration",

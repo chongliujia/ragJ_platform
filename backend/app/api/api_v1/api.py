@@ -11,7 +11,8 @@ from app.api.api_v1.endpoints import (
     agents,
     auth,
     test,
-    llm_test
+    llm_test,
+    model_config
 )
 
 api_router = APIRouter()
@@ -25,4 +26,10 @@ api_router.include_router(llm_test.router, prefix="/llm", tags=["LLM Testing"])
 
 # Mount documents router under knowledge bases
 knowledge_bases.router.include_router(documents.router, prefix="/{kb_name}/documents", tags=["Documents"])
-api_router.include_router(knowledge_bases.router, prefix="/knowledge-bases", tags=["Knowledge Bases"]) 
+api_router.include_router(knowledge_bases.router, prefix="/knowledge-bases", tags=["Knowledge Bases"])
+
+# Add separate documents endpoints for global operations
+api_router.include_router(documents.router, prefix="/documents", tags=["Documents Global"])
+
+# Add model configuration endpoints
+api_router.include_router(model_config.router, prefix="/model-config", tags=["Model Configuration"]) 

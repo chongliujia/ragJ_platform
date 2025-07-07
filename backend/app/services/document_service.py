@@ -7,9 +7,9 @@ from fastapi import UploadFile
 from app.services.llm_service import llm_service
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import get_elasticsearch_service
+from app.services.chunking_service import chunking_service, ChunkingStrategy
 from app.services import parser_service
 from app.core.config import settings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,14 @@ class DocumentService:
     """
     Orchestrates the document processing workflow.
     """
-    async def process_document(self, content: bytes, filename: str, kb_name: str):
+    async def process_document(
+        self, 
+        content: bytes, 
+        filename: str, 
+        kb_name: str,
+        chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE,
+        chunking_params: dict = None
+    ):
         """
         Process an uploaded document.
         """
@@ -46,14 +53,15 @@ class DocumentService:
                 logger.error(f"Failed to parse text from {filename}")
                 return
 
-            # 3. Split document into chunks
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=200,
-                length_function=len,
-                is_separator_regex=False,
+            # 3. Split document into chunks using specified strategy
+            if chunking_params is None:
+                chunking_params = {}
+            
+            chunks = await chunking_service.chunk_document(
+                text=document_text,
+                strategy=chunking_strategy,
+                **chunking_params
             )
-            chunks = text_splitter.split_text(document_text)
 
             # 4. Get embeddings for chunks
             embedding_response = await llm_service.get_embeddings(texts=chunks)

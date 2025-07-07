@@ -202,7 +202,7 @@ class MilvusService:
             logger.error(f"Failed to insert data into '{collection_name}': {e}", exc_info=True)
             raise
 
-    def search(self, collection_name: str, query_vector: list[float], top_k: int = 5) -> list[dict]:
+    async def search(self, collection_name: str, query_vector: list[float], top_k: int = 5) -> list[dict]:
         """
         Searches for similar vectors in a collection.
 
@@ -259,6 +259,31 @@ class MilvusService:
         except Exception as e:
             logger.error(f"Failed to search in collection '{collection_name}': {e}", exc_info=True)
             raise
+
+    def get_collection_count(self, collection_name: str) -> int:
+        """
+        Gets the number of entities in a collection.
+
+        Args:
+            collection_name: The name of the collection.
+
+        Returns:
+            The number of entities in the collection.
+        """
+        if not self.initialized:
+            logger.error("Milvus connection not initialized. Cannot get collection count.")
+            return 0
+
+        if not self.has_collection(collection_name):
+            logger.warning(f"Collection '{collection_name}' does not exist.")
+            return 0
+
+        try:
+            collection = Collection(name=collection_name, using=self.alias)
+            return collection.num_entities
+        except Exception as e:
+            logger.error(f"Failed to get count for collection '{collection_name}': {e}", exc_info=True)
+            return 0
 
 
 # Singleton instance of the service

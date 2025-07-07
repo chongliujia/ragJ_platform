@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.services.llm_service import llm_service
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import elasticsearch_service
+from app.services.reranking_service import reranking_service, RerankingProvider
 
 logger = structlog.get_logger(__name__)
 
@@ -75,7 +76,11 @@ class ChatService:
             logger.error("Standard chat processing failed", error=str(e), exc_info=True)
             raise
 
-    async def rag_chat(self, request: ChatRequest) -> ChatResponse:
+    async def rag_chat(
+        self, 
+        request: ChatRequest, 
+        rerank_provider: RerankingProvider = RerankingProvider.BGE
+    ) -> ChatResponse:
         """
         Handles a chat request using the RAG (Retrieval-Augmented Generation) pipeline.
         """
@@ -117,28 +122,41 @@ class ChatService:
             vector_results, keyword_results = await asyncio.gather(vector_search_task, keyword_search_task)
 
             # 2. Fuse the results
-            # A simple fusion strategy: combine, score, and unique
-            all_docs = {res['text']: res.get('distance', res.get('score')) for res in vector_results}
+            # Convert results to unified format for reranking
+            unified_docs = []
+            
+            # Add vector search results
+            for res in vector_results:
+                unified_docs.append({
+                    'text': res['text'],
+                    'score': 1.0 / (1.0 + res.get('distance', 0)),  # Convert distance to similarity
+                    'source': 'vector'
+                })
+            
+            # Add keyword search results (avoid duplicates)
+            existing_texts = {doc['text'] for doc in unified_docs}
             for res in keyword_results:
-                if res['text'] not in all_docs:
-                    all_docs[res['text']] = res['score']
+                if res['text'] not in existing_texts:
+                    unified_docs.append({
+                        'text': res['text'],
+                        'score': res.get('score', 0),
+                        'source': 'keyword'
+                    })
             
-            unique_docs = list(all_docs.keys())
-            
-            if not unique_docs:
+            if not unified_docs:
                 logger.warning("No documents found after fusion. Falling back to standard chat.")
                 return await self.chat(ChatRequest(message=request.message, model=request.model, chat_id=request.chat_id))
 
-            # 3. Rerank the fused results
-            logger.info(f"Reranking {len(unique_docs)} fused documents...")
-            rerank_response = await llm_service.rerank(query=query_text, documents=unique_docs, top_n=3)
+            # 3. Rerank the fused results using the new reranking service
+            logger.info(f"Reranking {len(unified_docs)} fused documents using {rerank_provider.value}...")
+            reranked_docs = await reranking_service.rerank_documents(
+                query=query_text, 
+                documents=unified_docs, 
+                provider=rerank_provider,
+                top_k=3
+            )
 
-            if not rerank_response.get("success"):
-                logger.warning("Reranking failed. Using fused results directly.")
-                final_docs = unique_docs[:3] # Fallback to top 3 fused results
-            else:
-                reranked_results = rerank_response.get("documents", [])
-                final_docs = [doc["document"]["text"] for doc in reranked_results]
+            final_docs = [doc['text'] for doc in reranked_docs]
 
             context = "\n\n---\n\n".join(final_docs)
             

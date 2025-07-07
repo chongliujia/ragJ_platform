@@ -84,6 +84,7 @@
       "documentsCount": "个文档",
       "createdAt": "创建时间",
       "manageDocuments": "管理文档",
+      "uploadDocuments": "上传文档",
       "noDescription": "暂无描述"
     },
     "status": {
@@ -115,6 +116,28 @@
     "title": "文档管理",
     "comingSoon": "文档管理功能开发中",
     "description": "此功能将支持文档上传、处理和管理"
+  },
+  "document": {
+    "upload": {
+      "title": "上传文档",
+      "upload": "上传",
+      "uploading": "上传中...",
+      "error": "上传失败",
+      "file": {
+        "select": "点击选择文件",
+        "selected": "已选择",
+        "required": "请选择要上传的文件",
+        "supportedFormats": "支持 PDF、DOCX、TXT、MD 格式"
+      },
+      "chunking": {
+        "title": "分片策略配置",
+        "strategy": "分片策略",
+        "parameters": "参数设置"
+      },
+      "strategies": {
+        "fetchError": "获取分片策略失败"
+      }
+    }
   },
   "settings": {
     "title": "模型配置",

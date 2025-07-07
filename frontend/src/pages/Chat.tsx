@@ -74,7 +74,7 @@ const Chat: React.FC = () => {
     setMessages([
       {
         id: '1',
-        content: t('chat.welcome'),
+        content: '您好！我是 RAG Platform 的智能助手。您可以选择知识库进行基于文档的问答，或者直接进行普通对话。',
         sender: 'bot',
         timestamp: new Date(),
       },
@@ -84,11 +84,6 @@ const Chat: React.FC = () => {
   // 发送消息
   const sendMessage = async () => {
     if (!inputMessage.trim()) return;
-    
-    if (!selectedKb) {
-      setError(t('chat.selectKnowledgeBaseFirst'));
-      return;
-    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -103,14 +98,20 @@ const Chat: React.FC = () => {
     setError(null);
 
     try {
-      const response = await chatApi.sendMessage({
+      const requestData: any = {
         message: inputMessage,
-        knowledge_base_id: selectedKb,
-      });
+      };
+      
+      // 只有选择了知识库才传递knowledge_base_id
+      if (selectedKb) {
+        requestData.knowledge_base_id = selectedKb;
+      }
+
+      const response = await chatApi.sendMessage(requestData);
 
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: response.data.response,
+        content: response.data.message || response.data.response || '抱歉，我无法生成回复',
         sender: 'bot',
         timestamp: new Date(),
       };
@@ -151,6 +152,9 @@ const Chat: React.FC = () => {
             label={t('chat.selectKnowledgeBase')}
             onChange={(e) => setSelectedKb(e.target.value)}
           >
+            <MenuItem value="">
+              <em>普通对话（无知识库）</em>
+            </MenuItem>
             {knowledgeBases.map((kb) => (
               <MenuItem key={kb.id} value={kb.id}>
                 {kb.name}

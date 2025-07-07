@@ -45,7 +45,7 @@ class ChatResponse(BaseModel):
     message: str = Field(..., description="AI回复内容")
     chat_id: str = Field(..., description="聊天会话ID")
     model: str = Field(..., description="使用的模型")
-    usage: Optional[Dict[str, int]] = Field(default=None, description="token使用统计")
+    usage: Optional[Dict[str, Any]] = Field(default=None, description="token使用统计")
     sources: Optional[List[Dict[str, Any]]] = Field(default=None, description="引用来源")
     workflow_state: Optional[Dict[str, Any]] = Field(default=None, description="工作流状态")
     timestamp: datetime = Field(default_factory=datetime.now, description="响应时间")

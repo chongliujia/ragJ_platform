@@ -2,7 +2,8 @@
 This module defines the Pydantic schemas for Knowledge Base resources.
 """
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Literal
+from datetime import datetime
 
 # Base schema for a Knowledge Base
 class KnowledgeBaseBase(BaseModel):
@@ -20,9 +21,10 @@ class KnowledgeBaseCreate(KnowledgeBaseBase):
 # Schema for reading/returning a Knowledge Base from the API
 class KnowledgeBase(KnowledgeBaseBase):
     """Schema for representing a knowledge base in API responses."""
-    # In the future, we can add more fields that are returned by the API,
-    # such as id, creation_date, etc.
-    # For now, it's the same as the base.
+    id: str = Field(..., description="The unique identifier of the knowledge base.")
+    document_count: int = Field(default=0, description="Number of documents in the knowledge base.")
+    created_at: datetime = Field(..., description="When the knowledge base was created.")
+    status: Literal["active", "processing", "error"] = Field(default="active", description="Current status of the knowledge base.")
     
     class Config:
         # This allows the model to be created from arbitrary class instances
@@ -32,5 +34,5 @@ class KnowledgeBase(KnowledgeBaseBase):
 # Schema for the response when a knowledge base is created
 class KnowledgeBaseCreateResponse(BaseModel):
     """Response schema after creating a knowledge base."""
-    msg: str
-    knowledge_base_name: str 
+    data: KnowledgeBase
+    msg: str = "Knowledge base created successfully" 

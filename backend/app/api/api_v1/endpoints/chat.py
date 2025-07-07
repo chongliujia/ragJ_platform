@@ -8,6 +8,7 @@ import structlog
 
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
+from app.services.reranking_service import reranking_service
 
 # Use a single instance of the service
 chat_service = ChatService()
@@ -85,4 +86,14 @@ async def execute_workflow(
         
     except Exception as e:
         logger.error("工作流执行失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"工作流执行失败: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"工作流执行失败: {str(e)}")
+
+
+@router.get("/reranking-providers")
+async def get_reranking_providers():
+    """
+    Get available reranking providers.
+    """
+    return {
+        "providers": reranking_service.get_available_providers()
+    } 

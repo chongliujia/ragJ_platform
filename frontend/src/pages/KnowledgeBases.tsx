@@ -22,17 +22,12 @@ import {
   Delete as DeleteIcon,
   Storage as StorageIcon,
   Description as DocumentIcon,
+  CloudUpload as UploadIcon,
 } from '@mui/icons-material';
 import { knowledgeBaseApi } from '../services/api';
+import type { KnowledgeBase } from '../types/models';
+import DocumentUpload from '../components/DocumentUpload';
 
-interface KnowledgeBase {
-  id: string;
-  name: string;
-  description: string;
-  document_count: number;
-  created_at: string;
-  status: 'active' | 'processing' | 'error';
-}
 
 const KnowledgeBases: React.FC = () => {
   const { t } = useTranslation();
@@ -43,6 +38,10 @@ const KnowledgeBases: React.FC = () => {
   const [newKbDescription, setNewKbDescription] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // 文档上传相关状态
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [selectedKbId, setSelectedKbId] = useState<string>('');
 
   // 获取知识库列表
   const fetchKnowledgeBases = async () => {
@@ -76,7 +75,7 @@ const KnowledgeBases: React.FC = () => {
       });
 
       // 添加新创建的知识库到列表
-      setKnowledgeBases(prev => [...prev, response.data]);
+      setKnowledgeBases(prev => [...prev, response.data.data]);
       
       // 重置表单
       setNewKbName('');
@@ -104,6 +103,17 @@ const KnowledgeBases: React.FC = () => {
       console.error('Failed to delete knowledge base:', error);
       setError(error.response?.data?.detail || t('knowledgeBase.messages.deleteError'));
     }
+  };
+
+  // 处理文档上传
+  const handleUploadDocuments = (kbId: string) => {
+    setSelectedKbId(kbId);
+    setUploadDialogOpen(true);
+  };
+
+  // 上传成功后刷新知识库列表
+  const handleUploadSuccess = () => {
+    fetchKnowledgeBases();
   };
 
   useEffect(() => {
@@ -207,6 +217,14 @@ const KnowledgeBases: React.FC = () => {
                 </CardContent>
                 
                 <CardActions>
+                  <Button 
+                    size="small" 
+                    color="primary"
+                    onClick={() => handleUploadDocuments(kb.id)}
+                    startIcon={<UploadIcon />}
+                  >
+                    {t('knowledgeBase.card.uploadDocuments')}
+                  </Button>
                   <Button size="small" color="primary">
                     {t('knowledgeBase.card.manageDocuments')}
                   </Button>
@@ -262,6 +280,14 @@ const KnowledgeBases: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* 文档上传对话框 */}
+      <DocumentUpload
+        open={uploadDialogOpen}
+        onClose={() => setUploadDialogOpen(false)}
+        knowledgeBaseId={selectedKbId}
+        onUploadSuccess={handleUploadSuccess}
+      />
     </Box>
   );
 };

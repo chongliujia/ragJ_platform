@@ -87,4 +87,49 @@ export const DEFAULT_MODEL_CONFIG: ModelsConfig = {
     apiKey: '',
     model: 'gte-rerank',
   },
-}; 
+};
+
+// 分片策略类型
+export type ChunkingStrategy = 'recursive' | 'semantic' | 'sliding_window' | 'sentence' | 'token_based';
+
+// 分片策略配置
+export interface ChunkingStrategyConfig {
+  value: ChunkingStrategy;
+  label: string;
+  description: string;
+  params: Record<string, {
+    type: 'number' | 'select';
+    default: number | string;
+    min?: number;
+    max?: number;
+    options?: string[];
+  }>;
+}
+
+// 重排提供商类型
+export type RerankingProvider = 'none' | 'bge' | 'cohere' | 'qwen' | 'local';
+
+// 重排提供商配置
+export interface RerankingProviderConfig {
+  value: RerankingProvider;
+  label: string;
+  description: string;
+  available: boolean;
+}
+
+// 知识库类型
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description: string;
+  document_count: number;
+  created_at: string;
+  status: 'active' | 'processing' | 'error';
+}
+
+// 文档上传参数
+export interface DocumentUploadParams {
+  file: File;
+  chunking_strategy: ChunkingStrategy;
+  chunking_params: Record<string, any>;
+}

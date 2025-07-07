@@ -4,6 +4,7 @@ Knowledge Base Management API Endpoints
 import logging
 import re
 from typing import List
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Depends
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import ElasticsearchService, get_elasticsearch_service
@@ -64,11 +65,21 @@ async def create_knowledge_base(
             milvus_service.drop_collection(kb_name)
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail=f"Failed to create Elasticsearch index: {es_err}")
+        
+        # Create knowledge base object for response
+        kb = KnowledgeBase(
+            id=kb_name,
+            name=kb_name,
+            description=kb_create.description or "",
+            document_count=0,
+            created_at=datetime.now(),
+            status="active"
+        )
                                 
-        return {
-            "msg": "Knowledge base created successfully in both Milvus and Elasticsearch",
-            "knowledge_base_name": kb_name
-        }
+        return KnowledgeBaseCreateResponse(
+            data=kb,
+            msg="Knowledge base created successfully in both Milvus and Elasticsearch"
+        )
     except HTTPException as http_exc:
         raise http_exc # Re-raise HTTPException to preserve status code and detail
     except Exception as e:
@@ -85,9 +96,25 @@ async def list_knowledge_bases():
     """
     try:
         collection_names = milvus_service.list_collections()
-        # This is a simplified response. We are not storing metadata like description
-        # in Milvus itself. This should be handled by a relational DB in a real scenario.
-        kbs = [KnowledgeBase(name=name, description=f"Milvus collection: {name}") for name in collection_names]
+        kbs = []
+        for name in collection_names:
+            # Get document count from Milvus collection
+            try:
+                count = milvus_service.get_collection_count(name)
+            except Exception:
+                count = 0
+            
+            # Create knowledge base object
+            kb = KnowledgeBase(
+                id=name,
+                name=name,
+                description=f"Knowledge base: {name}",
+                document_count=count,
+                created_at=datetime.now(),  # In a real app, this would be stored in DB
+                status="active"
+            )
+            kbs.append(kb)
+        
         return kbs
     except Exception as e:
         logger.error(f"Failed to list knowledge bases: {e}", exc_info=True)
@@ -105,8 +132,25 @@ async def get_knowledge_base(kb_name: str):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Knowledge base '{kb_name}' not found.")
         
-        # As before, we return a simplified representation.
-        return KnowledgeBase(name=kb_name, description=f"Milvus collection: {kb_name}")
+        # Get document count from Milvus collection
+        try:
+            count = milvus_service.get_collection_count(kb_name)
+        except Exception:
+            count = 0
+            
+        # Create knowledge base object
+        kb = KnowledgeBase(
+            id=kb_name,
+            name=kb_name,
+            description=f"Knowledge base: {kb_name}",
+            document_count=count,
+            created_at=datetime.now(),  # In a real app, this would be stored in DB
+            status="active"
+        )
+        
+        return kb
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as e:
         logger.error(f"Failed to get knowledge base '{kb_name}': {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

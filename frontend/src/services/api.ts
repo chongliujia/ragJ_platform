@@ -53,8 +53,12 @@ export const knowledgeBaseApi = {
 // 聊天相关 API
 export const chatApi = {
   // 发送消息
-  sendMessage: (data: { message: string; knowledge_base_id: string; model?: string }) =>
+  sendMessage: (data: { message: string; knowledge_base_id?: string; model?: string }) =>
     api.post('/api/v1/chat', data),
+  
+  // 获取重排提供商
+  getRerankingProviders: () => 
+    api.get('/api/v1/chat/reranking-providers'),
 };
 
 // 文档相关 API
@@ -74,6 +78,10 @@ export const documentApi = {
   // 删除文档
   delete: (knowledgeBaseId: string, documentId: string) => 
     api.delete(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`),
+  
+  // 获取分片策略
+  getChunkingStrategies: () => 
+    api.get('/api/v1/documents/chunking-strategies'),
 };
 
 // 系统状态相关 API
