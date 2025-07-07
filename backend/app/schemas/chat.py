@@ -31,10 +31,11 @@ class ChatRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "message": "什么是人工智能？",
-                "knowledge_base_id": "kb_123",
-                "model": "gpt-3.5-turbo",
-                "stream": false
+                "message": "Hello, what is RAG?",
+                "knowledge_base_id": "kb_12345",
+                "model": "qwen-turbo",
+                "temperature": 0.7,
+                "stream": False
             }
         }
 

@@ -1,136 +1,78 @@
 """
-聊天API端点
-支持文本消息、文件上传和工作流执行
+Chat API Endpoints
+Handles regular and RAG-based chat completions, both streaming and non-streaming.
 """
-
-from typing import Optional, List, Any
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-import json
 import structlog
 
-from app.schemas.chat import (
-    ChatRequest, 
-    ChatResponse, 
-    ChatMessage,
-    FileUploadResponse
-)
+from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
-from app.services.file_service import FileService
+
+# Use a single instance of the service
+chat_service = ChatService()
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
-# 依赖注入
-def get_chat_service() -> ChatService:
-    return ChatService()
 
-def get_file_service() -> FileService:
-    return FileService()
-
-
-@router.post("/completions", response_model=ChatResponse)
-async def chat_completions(
-    request: ChatRequest,
-    chat_service: ChatService = Depends(get_chat_service)
-):
+@router.post("/", response_model=ChatResponse)
+async def handle_chat(request: ChatRequest):
     """
-    聊天补全接口
-    支持基于知识库的RAG问答和LangGraph工作流
+    Main chat endpoint for non-streaming responses.
+    Dispatches to RAG or standard chat based on the request.
     """
     try:
-        logger.info("收到聊天请求", 
-                   message=request.message[:100], 
-                   knowledge_base_id=request.knowledge_base_id)
-        
-        # 执行聊天
-        if request.stream:
-            # 流式响应
-            return StreamingResponse(
-                chat_service.stream_chat(request),
-                media_type="text/plain"
-            )
-        else:
-            # 普通响应
-            response = await chat_service.chat(request)
-            return response
-            
+        logger.info("Handling non-streaming chat request", knowledge_base_id=request.knowledge_base_id)
+        response = await chat_service.chat(request)
+        return response
     except Exception as e:
-        logger.error("聊天处理失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"聊天处理失败: {str(e)}")
+        logger.error("Chat completion failed", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"An error occurred during chat processing: {e}")
 
 
-@router.post("/upload", response_model=FileUploadResponse)
-async def upload_file(
-    file: UploadFile = File(...),
-    knowledge_base_id: Optional[str] = Form(None),
-    chat_id: Optional[str] = Form(None),
-    file_service: FileService = Depends(get_file_service)
-):
+@router.post("/stream")
+async def handle_stream_chat(request: ChatRequest):
     """
-    文件上传接口
-    支持上传文档到知识库或聊天中使用
+    Chat endpoint for streaming responses.
     """
     try:
-        logger.info("收到文件上传", 
-                   filename=file.filename, 
-                   content_type=file.content_type,
-                   knowledge_base_id=knowledge_base_id)
-        
-        # 验证文件类型和大小
-        if not await file_service.validate_file(file):
-            raise HTTPException(status_code=400, detail="不支持的文件类型或文件过大")
-        
-        # 处理文件上传
-        result = await file_service.upload_file(
-            file=file,
-            knowledge_base_id=knowledge_base_id,
-            chat_id=chat_id
+        logger.info("Handling streaming chat request", knowledge_base_id=request.knowledge_base_id)
+        return StreamingResponse(
+            chat_service.stream_chat(request),
+            media_type="text/event-stream"
         )
-        
-        return result
-        
     except Exception as e:
-        logger.error("文件上传失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"文件上传失败: {str(e)}")
+        logger.error("Streaming chat failed", error=str(e), exc_info=True)
+        return StreamingResponse(None, status_code=500)
 
 
 @router.get("/history/{chat_id}")
-async def get_chat_history(
-    chat_id: str,
-    limit: int = 50,
-    chat_service: ChatService = Depends(get_chat_service)
-):
-    """获取聊天历史"""
+async def get_history(chat_id: str):
+    """Get chat history."""
     try:
-        history = await chat_service.get_chat_history(chat_id, limit)
+        history = await chat_service.get_chat_history(chat_id)
         return {"chat_id": chat_id, "messages": history}
-        
     except Exception as e:
-        logger.error("获取聊天历史失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"获取聊天历史失败: {str(e)}")
+        logger.error("Failed to get chat history", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve chat history.")
 
 
 @router.delete("/history/{chat_id}")
-async def clear_chat_history(
-    chat_id: str,
-    chat_service: ChatService = Depends(get_chat_service)
-):
-    """清除聊天历史"""
+async def clear_history(chat_id: str):
+    """Clear chat history."""
     try:
         await chat_service.clear_chat_history(chat_id)
-        return {"message": "聊天历史已清除", "chat_id": chat_id}
-        
+        return {"message": "Chat history cleared successfully", "chat_id": chat_id}
     except Exception as e:
-        logger.error("清除聊天历史失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"清除聊天历史失败: {str(e)}")
+        logger.error("Failed to clear chat history", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to clear chat history.")
 
 
 @router.post("/workflows/{workflow_id}/execute")
 async def execute_workflow(
     workflow_id: str,
-    request: dict,
-    chat_service: ChatService = Depends(get_chat_service)
+    request: dict
 ):
     """
     执行LangGraph工作流

@@ -1,0 +1,188 @@
+{
+  "common": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "create": "创建",
+    "confirm": "确认",
+    "loading": "加载中...",
+    "success": "成功",
+    "error": "错误",
+    "warning": "警告",
+    "info": "信息",
+    "refresh": "刷新",
+    "test": "测试",
+    "apply": "应用",
+    "close": "关闭",
+    "back": "返回",
+    "next": "下一步",
+    "previous": "上一步",
+    "search": "搜索",
+    "filter": "筛选",
+    "sort": "排序",
+    "export": "导出",
+    "import": "导入",
+    "upload": "上传",
+    "download": "下载"
+  },
+  "nav": {
+    "dashboard": "仪表板",
+    "knowledgeBases": "知识库",
+    "documents": "文档管理",
+    "chat": "智能对话",
+    "settings": "系统设置",
+    "title": "RAG Platform",
+    "subtitle": "智能检索增强平台"
+  },
+  "dashboard": {
+    "title": "仪表板",
+    "overview": "系统概览",
+    "quickActions": "快速操作",
+    "welcome": "欢迎使用 RAG Platform 智能检索增强平台！",
+    "description": "当前系统运行状态良好，您可以通过左侧导航栏访问各个功能模块：",
+    "features": {
+      "knowledgeBase": "知识库：管理您的知识库，创建、删除和配置知识库",
+      "documents": "文档管理：上传、处理和管理文档，支持多种格式",
+      "chat": "智能对话：与 AI 进行基于知识库的智能问答",
+      "settings": "系统设置：配置模型参数和系统选项"
+    },
+    "stats": {
+      "knowledgeBases": "知识库总数",
+      "documents": "文档总数",
+      "chats": "对话次数",
+      "systemStatus": "系统状态"
+    },
+    "status": {
+      "healthy": "运行正常",
+      "warning": "需要注意",
+      "error": "系统异常",
+      "unknown": "未知状态"
+    },
+    "actions": {
+      "createKnowledgeBase": "创建新知识库",
+      "uploadDocument": "上传文档",
+      "startChat": "开始对话"
+    }
+  },
+  "knowledgeBase": {
+    "title": "知识库管理",
+    "create": "创建知识库",
+    "name": "知识库名称",
+    "description": "描述（可选）",
+    "createDialog": {
+      "title": "创建新知识库",
+      "nameLabel": "知识库名称",
+      "descriptionLabel": "描述（可选）",
+      "nameRequired": "请输入知识库名称"
+    },
+         "empty": {
+       "title": "还没有创建任何知识库",
+       "description": "点击\"创建知识库\"按钮开始构建您的第一个知识库"
+     },
+    "card": {
+      "documentsCount": "个文档",
+      "createdAt": "创建时间",
+      "manageDocuments": "管理文档",
+      "noDescription": "暂无描述"
+    },
+    "status": {
+      "active": "正常",
+      "processing": "处理中",
+      "error": "错误",
+      "unknown": "未知"
+    },
+    "messages": {
+      "createSuccess": "知识库创建成功",
+      "createError": "创建知识库失败",
+      "deleteSuccess": "知识库删除成功",
+      "deleteError": "删除知识库失败",
+      "fetchError": "获取知识库列表失败",
+      "deleteConfirm": "确定要删除这个知识库吗？此操作不可恢复。"
+    }
+  },
+  "chat": {
+    "title": "智能对话",
+    "selectKnowledgeBase": "选择知识库",
+    "inputPlaceholder": "输入您的问题...",
+    "thinking": "正在思考...",
+    "welcome": "您好！我是 RAG Platform 的智能助手。请选择一个知识库，然后开始对话。",
+    "selectKnowledgeBaseFirst": "请先选择一个知识库",
+    "errorResponse": "抱歉，我暂时无法回答您的问题。请稍后再试。",
+    "fetchKnowledgeBasesError": "获取知识库列表失败"
+  },
+  "documents": {
+    "title": "文档管理",
+    "comingSoon": "文档管理功能开发中",
+    "description": "此功能将支持文档上传、处理和管理"
+  },
+  "settings": {
+    "title": "模型配置",
+    "reload": "重新加载",
+    "save": "保存配置",
+    "saving": "保存中...",
+    "description": {
+      "title": "配置说明",
+      "subtitle": "请配置您的模型 API 密钥和参数。系统支持以下三种模型提供商：",
+      "providers": {
+        "deepseek": "DeepSeek：优秀的代码生成和聊天模型",
+        "qwen": "通义千问：阿里云的全能型大语言模型",
+        "siliconflow": "硅基流动：提供多种开源模型的 API 服务"
+      }
+    },
+    "presets": {
+      "title": "快速配置预设",
+      "description": "选择一个预设配置快速开始，您仍需要填入相应的 API Key",
+      "economy": {
+        "name": "经济配置",
+        "description": "成本优化，适合日常使用"
+      },
+      "premium": {
+        "name": "高质量配置",
+        "description": "性能优先，适合专业使用"
+      },
+      "chinese": {
+        "name": "中文优化",
+        "description": "针对中文场景优化"
+      }
+    },
+    "models": {
+      "chat": "聊天模型 (Chat Model)",
+      "embedding": "嵌入模型 (Embedding Model)",
+      "rerank": "重排模型 (Rerank Model)"
+    },
+    "config": {
+      "provider": "提供商",
+      "apiKey": "API Key",
+      "baseUrl": "基础 URL",
+      "model": "模型",
+      "temperature": "温度",
+      "maxTokens": "最大 Token 数",
+      "topP": "Top P",
+      "testConnection": "测试连接",
+      "testing": "测试中...",
+      "connected": "已连接",
+      "connectionFailed": "连接失败",
+      "enterApiKey": "请先输入 API Key",
+      "testSuccess": "连接测试成功！",
+      "testFailed": "连接测试失败"
+    },
+    "recommendations": {
+      "title": "使用建议",
+      "economy": "经济配置：聊天使用 DeepSeek，嵌入和重排使用硅基流动",
+      "premium": "高质量配置：全部使用通义千问的高端模型",
+      "chinese": "中文优化：使用通义千问聊天模型配合硅基流动的中文嵌入模型"
+    },
+    "messages": {
+      "loadError": "加载配置失败，使用默认配置",
+      "saveSuccess": "配置保存成功！",
+      "saveError": "保存配置失败",
+      "presetApplied": "预设配置已应用，请填入相应的 API Key"
+    }
+  },
+  "language": {
+    "switch": "切换语言",
+    "chinese": "中文",
+    "english": "English"
+  }
+} 

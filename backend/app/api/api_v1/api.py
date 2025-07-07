@@ -10,15 +10,19 @@ from app.api.api_v1.endpoints import (
     documents,
     agents,
     auth,
-    test
+    test,
+    llm_test
 )
 
 api_router = APIRouter()
 
-# 注册各个端点路由
-api_router.include_router(auth.router, prefix="/auth", tags=["认证"])
-api_router.include_router(chat.router, prefix="/chat", tags=["聊天"])
-api_router.include_router(knowledge_bases.router, prefix="/knowledge-bases", tags=["知识库"])
-api_router.include_router(documents.router, prefix="/documents", tags=["文档"])
-api_router.include_router(agents.router, prefix="/agents", tags=["智能体"])
-api_router.include_router(test.router, prefix="/test", tags=["测试"]) 
+# Register endpoint routers
+api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
+api_router.include_router(agents.router, prefix="/agents", tags=["Agents"])
+api_router.include_router(test.router, prefix="/test", tags=["Testing"])
+api_router.include_router(llm_test.router, prefix="/llm", tags=["LLM Testing"])
+
+# Mount documents router under knowledge bases
+knowledge_bases.router.include_router(documents.router, prefix="/{kb_name}/documents", tags=["Documents"])
+api_router.include_router(knowledge_bases.router, prefix="/knowledge-bases", tags=["Knowledge Bases"]) 

@@ -1,247 +1,243 @@
 # RAG Platform (ragJ_platform)
 
-基于Rust和Python构建的高性能RAG（检索增强生成）平台，提供企业级文档智能问答和AI助手服务。
+An open-source, high-performance RAG (Retrieval-Augmented Generation) platform built with Python and Rust, designed for enterprise-level document-based AI assistants.
 
-## 🚀 项目概述
+## 🚀 Project Overview
 
-RAG Platform是一个模仿Dify但使用Rust优化核心性能的开源RAG平台，旨在为企业提供高效、可扩展的文档智能服务。平台采用微服务架构，结合Rust的高性能文档处理能力和Python的灵活业务逻辑处理。
+This project aims to create a powerful RAG platform, inspired by systems like Dify, but with a focus on performance by leveraging Rust for core data processing tasks. The platform uses a microservices architecture, combining Rust's performance for document handling with Python's flexibility for business logic and API services.
 
-### 核心特性
+### Core Features
 
-- 🚀 **高性能文档处理**: 使用Rust实现文档解析、分块和向量化
-- 🧠 **智能问答系统**: 基于RAG技术的文档问答
-- 🤖 **LangGraph智能体**: 支持复杂的多智能体工作流和状态管理
-- 🔄 **工作流编排**: 可视化的智能体工作流设计和执行
-- 🔌 **灵活的API接口**: 支持多种LLM模型，易于集成
-- 📚 **多格式支持**: PDF、DOCX、TXT、Markdown等文档格式
-- 🎯 **企业级部署**: 支持容器化部署和水平扩展
-- 🌐 **Web管理界面**: 直观的知识库管理和配置界面
+-   🧠 **Intelligent Q&A**: Perform complex question-answering on your documents using a RAG pipeline.
+-   📚 **Knowledge Base Management**: Easily create and manage distinct knowledge bases.
+-   📄 **Multi-Format Document Support**: Upload and process various document formats (starting with `.txt` and `.md`).
+-   🔌 **Flexible API**: A straightforward RESTful API for integration with any application.
+-   🤖 **Multi-Model Support**: Supports DeepSeek, Qwen, and SiliconFlow APIs for different use cases.
+-   ⚡ **High-Performance Backend**: FastAPI-based backend for asynchronous request handling.
+-   🎨 **Modern Web Interface**: React-based frontend with Material-UI for intuitive management.
+-   ⚙️ **Flexible Configuration**: Easy model switching and configuration management.
+-   🌍 **Internationalization**: Support for Chinese and English language switching.
 
-## 🏗️ 系统架构
+## 🏗️ System Architecture
 
-```
-用户界面 → API网关 → Python后端 ← Rust服务
-                        ↓
-                    关系型数据库
-                        ↓
-                    向量数据库 ← LLM服务
-```
+The system is designed with a clean separation of concerns:
 
-### 技术栈
+-   **FastAPI Backend (Python)**: Handles all API requests, business logic, and orchestration.
+-   **React Frontend (TypeScript)**: Modern web interface with Material-UI components.
+-   **Milvus**: Acts as the vector database for storing and retrieving document embeddings.
+-   **Elasticsearch**: Provides full-text search capabilities for hybrid retrieval.
+-   **Multi-Model Support**: Integrates with DeepSeek, Qwen, and SiliconFlow APIs.
 
-**后端服务**:
-- Python: FastAPI、SQLAlchemy、Celery、LangGraph
-- Rust: 文档处理、向量操作、gRPC服务
+## 📦 Quick Start
 
-**数据存储**:
-- PostgreSQL: 元数据存储
-- Qdrant/Milvus: 向量数据库
-- MinIO/S3: 文档存储
+This guide will help you get the Python backend up and running from the source code.
 
-**其他组件**:
-- Docker: 容器化部署
-- gRPC: 服务间通信
-- Redis: 缓存和消息队列
+### Prerequisites
 
-## 📦 快速开始
+-   Python 3.9+
+-   An available Milvus instance.
+-   A Dashscope API Key for the Qwen models.
 
-### 环境要求
+### Local Setup
 
-- Python 3.8+
-- Rust 1.70+
-- Docker & Docker Compose
-- PostgreSQL 12+
-- Redis 6+
+1.  **Clone the Repository**
+    ```bash
+    git clone <your-repo-url>
+    cd ragJ_platform/backend
+    ```
 
-### 源码部署
+2.  **Configure Environment Variables**
+    Create a `.env` file in the `backend/` directory by copying the example:
+    ```bash
+    cp .env.example .env
+    ```
+    Now, edit the `.env` file and set your credentials:
+    ```
+    # backend/.env
 
-1. **克隆项目**
-```bash
-git clone <your-repo-url>
-cd ragJ_platform
-```
+    # Your Dashscope API Key for Qwen models
+    DASHSCOPE_API_KEY="your_sk_key_here"
 
-2. **环境配置**
-```bash
-cp .env.example .env
-# 编辑 .env 文件，配置数据库连接等信息
-```
+    # Connection details for your Milvus instance
+    MILVUS_HOST="localhost"
+    MILVUS_PORT="19530"
+    ```
 
-3. **启动基础服务**
-```bash
-# 启动数据库和缓存服务
-docker-compose up -d postgres redis minio qdrant
-```
+3.  **Install Dependencies**
+    It is highly recommended to use a virtual environment.
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install --upgrade pip
+    pip install -r requirements.txt
+    ```
 
-4. **构建Rust服务**
-```bash
-cd rust_services
-cargo build --release
-```
+4.  **Run the Server**
+    ```bash
+    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+    ```
 
-5. **安装Python依赖**
-```bash
-cd backend
-pip install -r requirements.txt
-```
+5.  **Access the API**
+    Once the server is running, you can access the interactive API documentation at:
+    [http://localhost:8000/docs](http://localhost:8000/docs)
 
-6. **数据库初始化**
-```bash
-cd backend
-python -m alembic upgrade head
-```
+### Frontend Setup
 
-7. **启动服务**
-```bash
-# 启动Python后端
-cd backend
-python main.py
+The platform includes a modern React-based web interface for easy management.
 
-# 启动Rust文档处理服务（新终端）
-cd rust_services/document_processor
-cargo run --release
+1.  **Navigate to Frontend Directory**
+    ```bash
+    cd frontend
+    ```
 
-# 启动Rust向量存储服务（新终端）
-cd rust_services/vector_store_service
-cargo run --release
-```
+2.  **Install Dependencies**
+    ```bash
+    npm install
+    ```
 
-8. **访问服务**
-- API文档: http://localhost:8000/docs
-- 管理界面: http://localhost:3000 (需要启动前端)
+3.  **Start Development Server**
+    ```bash
+    npm run dev
+    ```
 
-### Docker Compose部署
+4.  **Access Web Interface**
+    The frontend will be available at:
+    [http://localhost:5173](http://localhost:5173)
 
-```bash
-# 一键启动所有服务
-docker-compose up -d
+### Web Interface Features
 
-# 查看服务状态
-docker-compose ps
+-   📊 **Dashboard**: System overview and statistics
+-   📚 **Knowledge Base Management**: Create, delete, and manage knowledge bases
+-   💬 **Intelligent Chat**: Interactive chat interface with knowledge base selection
+-   ⚙️ **Model Configuration**: Easy setup for DeepSeek, Qwen, and SiliconFlow APIs
+-   📝 **Document Management**: Upload and manage documents (coming soon)
+-   🌍 **Language Support**: Switch between Chinese and English interface
 
-# 查看日志
-docker-compose logs -f
-```
+## 🔧 API Usage Guide
 
-## 🔧 API使用指南
+Here is how to use the core RAG pipeline via the API.
 
-### AI助手接口
+### Step 1: Create a Knowledge Base
 
-平台提供标准的RESTful API，方便网站集成AI助手功能。
-
-#### 1. 文档上传
+First, create a new knowledge base. This corresponds to a new "collection" in Milvus.
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/documents/upload" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -F "file=@document.pdf" \
-  -F "knowledge_base_id=kb_123"
-```
-
-#### 2. 知识库问答
-
-```bash
-curl -X POST "http://localhost:8000/api/v1/chat/completions" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+curl -X 'POST' \
+  'http://localhost:8000/api/v1/knowledge-bases/' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
   -d '{
-    "knowledge_base_id": "kb_123",
-    "message": "什么是人工智能？",
-    "model": "gpt-3.5-turbo",
-    "stream": false
+    "name": "my_first_kb",
+    "description": "A knowledge base for testing."
   }'
 ```
 
-#### 3. 创建知识库
+A successful response will confirm that the knowledge base was created.
+
+### Step 2: Upload a Document
+
+Next, upload a document (`.txt` or `.md`) to your new knowledge base. The system will process it in the background (chunking, embedding, and indexing).
+
+**Note:** Make sure you have a file named `sample.txt` in your current directory.
 
 ```bash
-curl -X POST "http://localhost:8000/api/v1/knowledge-bases" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+curl -X 'POST' \
+  'http://localhost:8000/api/v1/knowledge-bases/my_first_kb/documents/' \
+  -H 'accept: application/json' \
+  -F 'file=@sample.txt;type=text/plain'
+```
+
+The API will respond immediately, confirming that the file has been accepted for processing.
+
+### Step 3: Chat with Your Knowledge Base
+
+Once the document has been processed, you can start asking questions. The system will retrieve relevant context from your documents to generate an answer.
+
+```bash
+curl -X 'POST' \
+  'http://localhost:8000/api/v1/chat/' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
   -d '{
-    "name": "我的知识库",
-    "description": "企业文档知识库",
-    "embedding_model": "text-embedding-ada-002"
+    "message": "What is this document about?",
+    "knowledge_base_id": "my_first_kb",
+    "model": "qwen-turbo"
   }'
 ```
 
-#### 4. 创建智能体工作流
+The response will contain the AI's answer, generated based on the content of the document you uploaded.
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/agents/workflows" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{
-    "name": "客服助手工作流",
-    "description": "基于知识库的智能客服",
-    "graph": {
-      "nodes": [
-        {
-          "id": "intent_detection",
-          "type": "classifier",
-          "config": {"model": "gpt-3.5-turbo"}
-        },
-        {
-          "id": "knowledge_retrieval", 
-          "type": "rag_retriever",
-          "config": {"knowledge_base_id": "kb_123"}
-        },
-        {
-          "id": "response_generation",
-          "type": "generator",
-          "config": {"model": "gpt-4"}
-        }
-      ],
-      "edges": [
-        {"from": "intent_detection", "to": "knowledge_retrieval"},
-        {"from": "knowledge_retrieval", "to": "response_generation"}
-      ]
-    }
-  }'
-```
+## 🤖 Model Configuration
 
-#### 5. 执行智能体工作流
+The platform supports multiple AI model providers for different use cases:
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/agents/workflows/{workflow_id}/execute" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -d '{
-    "input": {
-      "message": "如何退换货？",
-      "context": {"user_id": "user_123", "session_id": "session_456"}
-    },
-    "config": {
-      "stream": true,
-      "debug": false
-    }
-  }'
-```
+### Supported Providers
 
-### JavaScript SDK示例
+#### DeepSeek
+- **Best for**: Code generation, technical documentation
+- **Models**: `deepseek-chat`, `deepseek-coder`
+- **API**: https://api.deepseek.com/v1
 
-```javascript
-// 安装: npm install @ragj/platform-sdk
+#### Qwen (通义千问)
+- **Best for**: Chinese language tasks, comprehensive AI capabilities
+- **Models**: `qwen-turbo`, `qwen-plus`, `qwen-max`
+- **API**: https://dashscope.aliyuncs.com/compatible-mode/v1
 
-import { RAGClient } from '@ragj/platform-sdk';
+#### SiliconFlow (硅基流动)
+- **Best for**: Cost-effective embedding and reranking
+- **Models**: Various open-source models including BGE series
+- **API**: https://api.siliconflow.cn/v1
 
-const client = new RAGClient({
-  baseURL: 'http://localhost:8000',
-  apiKey: 'YOUR_API_KEY'
-});
+### Configuration Presets
 
-// 问答对话
-const response = await client.chat({
-  knowledgeBaseId: 'kb_123',
-  message: '什么是RAG技术？',
-  stream: true
-});
+The web interface provides three pre-configured setups:
 
-// 流式响应处理
-for await (const chunk of response) {
-  console.log(chunk.content);
-}
-```
+1. **Economic Configuration** (经济配置)
+   - Chat: DeepSeek
+   - Embedding: SiliconFlow BGE
+   - Rerank: SiliconFlow BGE
+
+2. **Premium Configuration** (高质量配置)
+   - Chat: Qwen Max
+   - Embedding: Qwen Embedding
+   - Rerank: Qwen Rerank
+
+3. **Chinese Optimized** (中文优化)
+   - Chat: Qwen Plus
+   - Embedding: SiliconFlow BGE Chinese
+   - Rerank: SiliconFlow BGE Reranker
+
+### API Key Setup
+
+To configure your models:
+
+1. Visit the **Settings** page in the web interface
+2. Choose a preset or configure manually
+3. Add your API keys for each provider
+4. Test the connections
+5. Save the configuration
+
+### Language Support
+
+The web interface supports both Chinese and English:
+
+- **Language Switching**: Click the language switcher in the sidebar to change between Chinese (中文) and English
+- **Auto Detection**: The system automatically detects your browser language preference
+- **Persistent Settings**: Your language preference is saved locally and remembered across sessions
+
+#### Supported Languages
+
+- **Chinese (中文)**: Full interface translation for Chinese users
+- **English**: Complete English interface for international users
+
+All interface elements, including:
+- Navigation menus
+- Form labels and buttons
+- Error messages and notifications
+- Help text and descriptions
+- Model configuration options
+
+Are fully translated and localized for both languages.
 
 ## 📚 功能模块
 

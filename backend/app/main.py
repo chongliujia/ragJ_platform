@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.api.api_v1.api import api_router
 from app.db.init_db import init_db
+from app.services.elasticsearch_service import startup_es_service, shutdown_es_service
 
 # 配置日志
 configure_logging()
@@ -32,11 +33,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("数据库初始化失败", error=str(e))
         raise
+
+    # 启动 Elasticsearch 服务
+    try:
+        await startup_es_service()
+        logger.info("Elasticsearch 服务启动完成")
+    except Exception as e:
+        logger.error("Elasticsearch 服务启动失败", error=str(e))
+        # Decide if you want to raise or just log
     
     yield
     
     # 关闭时执行
     logger.info("关闭 RAG Platform...")
+    await shutdown_es_service()
 
 
 def create_application() -> FastAPI:

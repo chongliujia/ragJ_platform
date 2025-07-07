@@ -1,0 +1,188 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "confirm": "Confirm",
+    "loading": "Loading...",
+    "success": "Success",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Info",
+    "refresh": "Refresh",
+    "test": "Test",
+    "apply": "Apply",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "search": "Search",
+    "filter": "Filter",
+    "sort": "Sort",
+    "export": "Export",
+    "import": "Import",
+    "upload": "Upload",
+    "download": "Download"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "knowledgeBases": "Knowledge Bases",
+    "documents": "Documents",
+    "chat": "Chat",
+    "settings": "Settings",
+    "title": "RAG Platform",
+    "subtitle": "Intelligent Retrieval Augmented Generation Platform"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "overview": "System Overview",
+    "quickActions": "Quick Actions",
+    "welcome": "Welcome to RAG Platform - Intelligent Retrieval Augmented Generation Platform!",
+    "description": "The system is running well. You can access various functional modules through the left navigation bar:",
+    "features": {
+      "knowledgeBase": "Knowledge Bases: Manage your knowledge bases, create, delete and configure knowledge bases",
+      "documents": "Document Management: Upload, process and manage documents, supporting multiple formats",
+      "chat": "Intelligent Chat: Conduct intelligent Q&A with AI based on knowledge bases",
+      "settings": "System Settings: Configure model parameters and system options"
+    },
+    "stats": {
+      "knowledgeBases": "Total Knowledge Bases",
+      "documents": "Total Documents",
+      "chats": "Chat Sessions",
+      "systemStatus": "System Status"
+    },
+    "status": {
+      "healthy": "Healthy",
+      "warning": "Warning",
+      "error": "Error",
+      "unknown": "Unknown"
+    },
+    "actions": {
+      "createKnowledgeBase": "Create Knowledge Base",
+      "uploadDocument": "Upload Document",
+      "startChat": "Start Chat"
+    }
+  },
+  "knowledgeBase": {
+    "title": "Knowledge Base Management",
+    "create": "Create Knowledge Base",
+    "name": "Knowledge Base Name",
+    "description": "Description (Optional)",
+    "createDialog": {
+      "title": "Create New Knowledge Base",
+      "nameLabel": "Knowledge Base Name",
+      "descriptionLabel": "Description (Optional)",
+      "nameRequired": "Please enter knowledge base name"
+    },
+    "empty": {
+      "title": "No knowledge bases created yet",
+      "description": "Click \"Create Knowledge Base\" button to start building your first knowledge base"
+    },
+    "card": {
+      "documentsCount": "documents",
+      "createdAt": "Created",
+      "manageDocuments": "Manage Documents",
+      "noDescription": "No description"
+    },
+    "status": {
+      "active": "Active",
+      "processing": "Processing",
+      "error": "Error",
+      "unknown": "Unknown"
+    },
+    "messages": {
+      "createSuccess": "Knowledge base created successfully",
+      "createError": "Failed to create knowledge base",
+      "deleteSuccess": "Knowledge base deleted successfully",
+      "deleteError": "Failed to delete knowledge base",
+      "fetchError": "Failed to fetch knowledge bases",
+      "deleteConfirm": "Are you sure you want to delete this knowledge base? This action cannot be undone."
+    }
+  },
+  "chat": {
+    "title": "Intelligent Chat",
+    "selectKnowledgeBase": "Select Knowledge Base",
+    "inputPlaceholder": "Enter your question...",
+    "thinking": "Thinking...",
+    "welcome": "Hello! I'm the intelligent assistant of RAG Platform. Please select a knowledge base and start chatting.",
+    "selectKnowledgeBaseFirst": "Please select a knowledge base first",
+    "errorResponse": "Sorry, I cannot answer your question at the moment. Please try again later.",
+    "fetchKnowledgeBasesError": "Failed to fetch knowledge bases"
+  },
+  "documents": {
+    "title": "Document Management",
+    "comingSoon": "Document management feature is under development",
+    "description": "This feature will support document upload, processing and management"
+  },
+  "settings": {
+    "title": "Model Configuration",
+    "reload": "Reload",
+    "save": "Save Configuration",
+    "saving": "Saving...",
+    "description": {
+      "title": "Configuration Instructions",
+      "subtitle": "Please configure your model API keys and parameters. The system supports the following three model providers:",
+      "providers": {
+        "deepseek": "DeepSeek: Excellent code generation and chat models",
+        "qwen": "Qwen: Alibaba Cloud's comprehensive large language model",
+        "siliconflow": "SiliconFlow: API services providing various open-source models"
+      }
+    },
+    "presets": {
+      "title": "Quick Configuration Presets",
+      "description": "Choose a preset configuration to get started quickly. You still need to fill in the corresponding API Keys",
+      "economy": {
+        "name": "Economic Configuration",
+        "description": "Cost-optimized, suitable for daily use"
+      },
+      "premium": {
+        "name": "Premium Configuration",
+        "description": "Performance-first, suitable for professional use"
+      },
+      "chinese": {
+        "name": "Chinese Optimized",
+        "description": "Optimized for Chinese scenarios"
+      }
+    },
+    "models": {
+      "chat": "Chat Model",
+      "embedding": "Embedding Model",
+      "rerank": "Rerank Model"
+    },
+    "config": {
+      "provider": "Provider",
+      "apiKey": "API Key",
+      "baseUrl": "Base URL",
+      "model": "Model",
+      "temperature": "Temperature",
+      "maxTokens": "Max Tokens",
+      "topP": "Top P",
+      "testConnection": "Test Connection",
+      "testing": "Testing...",
+      "connected": "Connected",
+      "connectionFailed": "Connection Failed",
+      "enterApiKey": "Please enter API Key first",
+      "testSuccess": "Connection test successful!",
+      "testFailed": "Connection test failed"
+    },
+    "recommendations": {
+      "title": "Usage Recommendations",
+      "economy": "Economic Configuration: Use DeepSeek for chat, SiliconFlow for embedding and reranking",
+      "premium": "Premium Configuration: Use Qwen's premium models for all services",
+      "chinese": "Chinese Optimized: Use Qwen chat model with SiliconFlow's Chinese embedding models"
+    },
+    "messages": {
+      "loadError": "Failed to load configuration, using default settings",
+      "saveSuccess": "Configuration saved successfully!",
+      "saveError": "Failed to save configuration",
+      "presetApplied": "Preset configuration applied, please fill in the corresponding API Keys"
+    }
+  },
+  "language": {
+    "switch": "Switch Language",
+    "chinese": "中文",
+    "english": "English"
+  }
+} 

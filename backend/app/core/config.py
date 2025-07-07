@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: Optional[str] = None
     
+    # Elasticsearch配置
+    ELASTICSEARCH_HOSTS: list[str] = ["http://localhost:9200"]
+    
     # 对象存储配置
     MINIO_ENDPOINT: str = "localhost:9000"
     MINIO_ACCESS_KEY: str = "minioadmin"
@@ -49,11 +52,29 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     ANTHROPIC_API_KEY: Optional[str] = None
     
+    # DeepSeek配置
+    DEEPSEEK_API_KEY: Optional[str] = "sk-5cf6176d48e248e9a58cebd792196add"
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+    DEEPSEEK_CHAT_MODEL: str = "deepseek-chat"
+    
     # 通义千问配置
     DASHSCOPE_API_KEY: Optional[str] = None
     QWEN_EMBEDDING_MODEL: str = "text-embedding-v2"
     QWEN_RERANK_MODEL: str = "gte-rerank"
     QWEN_CHAT_MODEL: str = "qwen-turbo"
+    
+    # 模型服务配置 - 分别指定不同功能使用的服务
+    # 聊天模型配置
+    CHAT_MODEL_PROVIDER: str = "deepseek"  # deepseek, qwen, openai
+    CHAT_MODEL_NAME: str = "deepseek-chat"
+    
+    # Embedding模型配置
+    EMBEDDING_MODEL_PROVIDER: str = "openai"  # openai, qwen, deepseek
+    EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"
+    
+    # Rerank模型配置
+    RERANK_MODEL_PROVIDER: str = "qwen"  # qwen, cohere, jina
+    RERANK_MODEL_NAME: str = "gte-rerank"
     
     # Hugging Face配置
     HUGGINGFACE_API_KEY: Optional[str] = None

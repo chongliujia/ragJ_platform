@@ -1,100 +1,53 @@
 """
-文档管理API端点
+Document Management API Endpoints
+Handles document uploads and processing within a knowledge base.
 """
-
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+import logging
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, status
 from pydantic import BaseModel
-import uuid
-from datetime import datetime
 
-from app.services.file_service import FileService
+from app.services.document_service import document_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
-class DocumentResponse(BaseModel):
-    id: str
+class DocumentUploadResponse(BaseModel):
+    """Response model for a successful document upload."""
     filename: str
-    file_size: int
-    file_type: str
-    knowledge_base_id: str
-    status: str
-    upload_time: datetime
-    chunk_count: int = 0
+    content_type: str
+    message: str
 
 
-# 简化版本的内存存储
-documents = {}
-
-
-def get_file_service() -> FileService:
-    return FileService()
-
-
-@router.post("/upload", response_model=DocumentResponse)
+@router.post("/", response_model=DocumentUploadResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
-    file: UploadFile = File(...),
-    knowledge_base_id: str = Form(...),
-    file_service: FileService = Depends(get_file_service)
+    kb_name: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...)
 ):
     """
-    上传文档到知识库
+    Upload a document to a specified knowledge base for processing.
+
+    The document processing (chunking, embedding, indexing) is done in the background.
+    The API returns immediately after accepting the file.
+
+    - **kb_name**: The name of the target knowledge base.
+    - **file**: The document file to be uploaded.
     """
-    # 使用文件服务上传
-    upload_result = await file_service.upload_file(
-        file=file,
-        knowledge_base_id=knowledge_base_id
+    logger.info(f"Received file '{file.filename}' for knowledge base '{kb_name}'.")
+
+    content = await file.read()
+
+    # TODO: Add validation for file type based on settings.SUPPORTED_FILE_TYPES
+    # For example, check file.content_type or filename extension
+
+    # Add the processing task to the background
+    background_tasks.add_task(
+        document_service.process_document, content, file.filename, kb_name
     )
-    
-    # 创建文档记录
-    doc = DocumentResponse(
-        id=upload_result.file_id,
-        filename=upload_result.filename,
-        file_size=upload_result.file_size,
-        file_type=upload_result.file_type,
-        knowledge_base_id=knowledge_base_id,
-        status="uploaded",
-        upload_time=upload_result.upload_time
-    )
-    
-    documents[doc.id] = doc
-    return doc
 
-
-@router.get("/", response_model=List[DocumentResponse])
-async def list_documents(knowledge_base_id: Optional[str] = None):
-    """
-    获取文档列表
-    """
-    if knowledge_base_id:
-        return [doc for doc in documents.values() if doc.knowledge_base_id == knowledge_base_id]
-    else:
-        return list(documents.values())
-
-
-@router.get("/{doc_id}", response_model=DocumentResponse)
-async def get_document(doc_id: str):
-    """
-    获取文档详情
-    """
-    if doc_id not in documents:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    return documents[doc_id]
-
-
-@router.delete("/{doc_id}")
-async def delete_document(doc_id: str, file_service: FileService = Depends(get_file_service)):
-    """
-    删除文档
-    """
-    if doc_id not in documents:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # 删除文件
-    await file_service.delete_file(doc_id)
-    
-    # 删除记录
-    del documents[doc_id]
-    return {"message": "Document deleted successfully"} 
+    return {
+        "filename": file.filename,
+        "content_type": file.content_type,
+        "message": "File accepted and is being processed in the background."
+    } 
