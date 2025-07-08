@@ -12,13 +12,17 @@ from app.api.api_v1.endpoints import (
     auth,
     test,
     llm_test,
-    model_config
+    model_config,
+    users,
+    admin
 )
 
 api_router = APIRouter()
 
 # Register endpoint routers
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+api_router.include_router(users.router, prefix="/users", tags=["Users"])
+api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 api_router.include_router(chat.router, prefix="/chat", tags=["Chat"])
 api_router.include_router(agents.router, prefix="/agents", tags=["Agents"])
 api_router.include_router(test.router, prefix="/test", tags=["Testing"])

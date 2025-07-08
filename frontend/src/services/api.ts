@@ -93,4 +93,6 @@ export const systemApi = {
   getInfo: () => api.get('/'),
 };
 
+// 导出 api 实例
+export { api };
 export default api; 

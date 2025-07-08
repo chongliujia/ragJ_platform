@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     # 数据库配置
-    DATABASE_URL: str = "postgresql://ragj_user:ragj_password@localhost:5432/ragj_platform"
+    DATABASE_URL: str = "sqlite:///./ragj_platform.db"
     
     # Redis配置
     REDIS_URL: str = "redis://localhost:6379/0"

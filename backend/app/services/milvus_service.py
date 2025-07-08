@@ -25,6 +25,7 @@ class MilvusService:
         if not hasattr(self, 'initialized'):
             self.alias = "default"
             self.db_name = settings.MILVUS_DATABASE
+            self.tenant_collections = {}  # 缓存租户集合
             try:
                 # First, connect to the default database to check/create the target database
                 logger.info("Connecting to Milvus default database to ensure target DB exists...")

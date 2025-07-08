@@ -6,6 +6,7 @@ python-multipart
 # 数据库
 sqlalchemy
 asyncpg
+psycopg2-binary
 alembic
 
 # 缓存和队列
@@ -44,7 +45,7 @@ anthropic
 sentence-transformers
 
 # 数据处理
-pydantic
+pydantic[email]
 pydantic-settings
 
 # 安全

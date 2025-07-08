@@ -27,16 +27,18 @@ class ChatService:
         self.chat_history: Dict[str, List[ChatMessage]] = {}
         self.workflows: Dict[str, Any] = {}
 
-    async def chat(self, request: ChatRequest) -> ChatResponse:
+    async def chat(self, request: ChatRequest, tenant_id: int = None, user_id: int = None) -> ChatResponse:
         """
         Handles a chat request, dispatching it to the appropriate handler
         (e.g., RAG or a standard LLM call).
         """
         # If a knowledge_base_id is provided, use the RAG pipeline
         if request.knowledge_base_id:
+            if tenant_id is None or user_id is None:
+                raise ValueError("tenant_id and user_id are required for RAG chat.")
             logger.info(f"Dispatching to RAG chat for knowledge base '{request.knowledge_base_id}'.")
             try:
-                return await self.rag_chat(request)
+                return await self.rag_chat(request, tenant_id, user_id)
             except Exception as e:
                 logger.error("RAG chat failed, returning fallback message", error=str(e), exc_info=True)
                 return ChatResponse(
@@ -79,6 +81,8 @@ class ChatService:
     async def rag_chat(
         self, 
         request: ChatRequest, 
+        tenant_id: int,
+        user_id: int,
         rerank_provider: RerankingProvider = RerankingProvider.BGE
     ) -> ChatResponse:
         """
@@ -108,15 +112,29 @@ class ChatService:
             query_text = request.message
             top_k = 5 # Retrieve more results for hybrid search
 
-            logger.info(f"Performing hybrid search in knowledge base '{kb_name}'...")
+            # Create tenant-specific collection and index names
+            tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+            tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
 
-            # --- Hybrid Search ---
-            # 1. Perform vector search and keyword search in parallel
+            logger.info(f"Performing hybrid search in tenant-specific knowledge base '{tenant_collection_name}'...")
+
+            # --- Hybrid Search with Tenant Isolation ---
+            # 1. Perform vector search and keyword search in parallel with tenant filtering
             vector_search_task = asyncio.create_task(
-                milvus_service.search(collection_name=kb_name, query_vector=query_vector, top_k=top_k)
+                milvus_service.search(
+                    collection_name=tenant_collection_name, 
+                    query_vector=query_vector, 
+                    top_k=top_k,
+                    filter_expr=f"tenant_id == {tenant_id}"
+                )
             )
             keyword_search_task = asyncio.create_task(
-                elasticsearch_service.search(index_name=kb_name, query=query_text, top_k=top_k)
+                elasticsearch_service.search(
+                    index_name=tenant_index_name, 
+                    query=query_text, 
+                    top_k=top_k,
+                    filter_query={"term": {"tenant_id": tenant_id}}
+                )
             )
 
             vector_results, keyword_results = await asyncio.gather(vector_search_task, keyword_search_task)

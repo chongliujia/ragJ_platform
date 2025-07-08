@@ -23,6 +23,8 @@ class DocumentService:
         content: bytes, 
         filename: str, 
         kb_name: str,
+        tenant_id: int,
+        user_id: int,
         chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE,
         chunking_params: dict = None
     ):
@@ -85,18 +87,38 @@ class DocumentService:
                 )
                 return
 
-            # 5. Prepare entities for Milvus insertion
+            # 5. Prepare entities for Milvus insertion with tenant/user metadata
             entities = [
-                {"text": chunk, "vector": vector}
+                {
+                    "text": chunk, 
+                    "vector": vector, 
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "document_name": filename,
+                    "knowledge_base": kb_name
+                }
                 for chunk, vector in zip(chunks, embeddings)
             ]
 
-            # 6. Insert into Milvus (synchronous call)
-            milvus_service.insert(collection_name=kb_name, entities=entities)
+            # 6. Create tenant-specific collection name
+            tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
 
-            # 7. Index documents in Elasticsearch
-            es_docs = [{"text": chunk} for chunk in chunks]
-            await es_service.bulk_index_documents(index_name=kb_name, documents=es_docs)
+            # 7. Insert into Milvus (synchronous call)
+            milvus_service.insert(collection_name=tenant_collection_name, entities=entities)
+
+            # 8. Index documents in Elasticsearch with tenant isolation
+            tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+            es_docs = [
+                {
+                    "text": chunk, 
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "document_name": filename,
+                    "knowledge_base": kb_name
+                } 
+                for chunk in chunks
+            ]
+            await es_service.bulk_index_documents(index_name=tenant_index_name, documents=es_docs)
 
             logger.info(f"Successfully processed and indexed document {filename}")
 
