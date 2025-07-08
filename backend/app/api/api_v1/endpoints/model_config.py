@@ -1,17 +1,18 @@
 """
 模型配置管理API端点
 """
+
 import logging
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
 from app.services.model_config_service import (
-    model_config_service, 
-    ModelConfig, 
-    ProviderConfig, 
-    ModelType, 
-    ProviderType
+    model_config_service,
+    ModelConfig,
+    ProviderConfig,
+    ModelType,
+    ProviderType,
 )
 
 router = APIRouter()
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 class ModelConfigResponse(BaseModel):
     """模型配置响应"""
+
     model_type: str
     provider: str
     model_name: str
@@ -29,6 +31,7 @@ class ModelConfigResponse(BaseModel):
 
 class ProviderConfigResponse(BaseModel):
     """提供商配置响应"""
+
     provider: str
     display_name: str
     api_base: str
@@ -40,6 +43,7 @@ class ProviderConfigResponse(BaseModel):
 
 class UpdateModelConfigRequest(BaseModel):
     """更新模型配置请求"""
+
     provider: str
     model_name: str
     api_key: str
@@ -51,6 +55,7 @@ class UpdateModelConfigRequest(BaseModel):
 
 class UpdateProviderRequest(BaseModel):
     """更新提供商请求"""
+
     api_key: str
     api_base: str = None
     enabled: bool = True
@@ -61,24 +66,26 @@ async def get_providers():
     """获取所有提供商配置"""
     try:
         providers = model_config_service.get_providers()
-        
+
         response = []
         for provider_type, provider_config in providers.items():
-            response.append(ProviderConfigResponse(
-                provider=provider_type.value,
-                display_name=provider_config.display_name,
-                api_base=provider_config.api_base,
-                has_api_key=bool(provider_config.api_key),
-                enabled=provider_config.enabled,
-                available_models={
-                    model_type.value: models 
-                    for model_type, models in provider_config.models.items()
-                },
-                description=provider_config.description
-            ))
-        
+            response.append(
+                ProviderConfigResponse(
+                    provider=provider_type.value,
+                    display_name=provider_config.display_name,
+                    api_base=provider_config.api_base,
+                    has_api_key=bool(provider_config.api_key),
+                    enabled=provider_config.enabled,
+                    available_models={
+                        model_type.value: models
+                        for model_type, models in provider_config.models.items()
+                    },
+                    description=provider_config.description,
+                )
+            )
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Failed to get providers: {e}")
         raise HTTPException(status_code=500, detail="Failed to get providers")
@@ -90,12 +97,16 @@ async def get_provider_models(provider: str, model_type: str):
     try:
         provider_enum = ProviderType(provider)
         model_type_enum = ModelType(model_type)
-        
-        models = model_config_service.get_available_models(provider_enum, model_type_enum)
+
+        models = model_config_service.get_available_models(
+            provider_enum, model_type_enum
+        )
         return {"provider": provider, "model_type": model_type, "models": models}
-        
+
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid provider or model type: {e}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid provider or model type: {e}"
+        )
     except Exception as e:
         logger.error(f"Failed to get models: {e}")
         raise HTTPException(status_code=500, detail="Failed to get models")
@@ -106,20 +117,22 @@ async def get_active_models():
     """获取当前活跃的模型配置"""
     try:
         active_models = []
-        
+
         for model_type in ModelType:
             config = model_config_service.get_active_model(model_type)
             if config:
-                active_models.append(ModelConfigResponse(
-                    model_type=model_type.value,
-                    provider=config.provider.value,
-                    model_name=config.model_name,
-                    has_api_key=bool(config.api_key),
-                    enabled=config.enabled
-                ))
-        
+                active_models.append(
+                    ModelConfigResponse(
+                        model_type=model_type.value,
+                        provider=config.provider.value,
+                        model_name=config.model_name,
+                        has_api_key=bool(config.api_key),
+                        enabled=config.enabled,
+                    )
+                )
+
         return active_models
-        
+
     except Exception as e:
         logger.error(f"Failed to get active models: {e}")
         raise HTTPException(status_code=500, detail="Failed to get active models")
@@ -131,15 +144,17 @@ async def update_active_model(model_type: str, request: UpdateModelConfigRequest
     try:
         model_type_enum = ModelType(model_type)
         provider_enum = ProviderType(request.provider)
-        
+
         # 验证模型是否在提供商的可用模型列表中
-        available_models = model_config_service.get_available_models(provider_enum, model_type_enum)
+        available_models = model_config_service.get_available_models(
+            provider_enum, model_type_enum
+        )
         if request.model_name not in available_models:
             raise HTTPException(
-                status_code=400, 
-                detail=f"Model '{request.model_name}' not available for provider '{request.provider}'"
+                status_code=400,
+                detail=f"Model '{request.model_name}' not available for provider '{request.provider}'",
             )
-        
+
         # 创建新的模型配置
         config = ModelConfig(
             provider=provider_enum,
@@ -148,16 +163,18 @@ async def update_active_model(model_type: str, request: UpdateModelConfigRequest
             api_base=request.api_base,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
-            enabled=request.enabled
+            enabled=request.enabled,
         )
-        
+
         # 设置为活跃模型
         model_config_service.set_active_model(model_type_enum, config)
-        
+
         return {"message": f"Active {model_type} model updated successfully"}
-        
+
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid model type or provider: {e}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid model type or provider: {e}"
+        )
     except Exception as e:
         logger.error(f"Failed to update active model: {e}")
         raise HTTPException(status_code=500, detail="Failed to update active model")
@@ -169,20 +186,22 @@ async def update_provider(provider: str, request: UpdateProviderRequest):
     try:
         provider_enum = ProviderType(provider)
         provider_config = model_config_service.get_provider(provider_enum)
-        
+
         if not provider_config:
-            raise HTTPException(status_code=404, detail=f"Provider '{provider}' not found")
-        
+            raise HTTPException(
+                status_code=404, detail=f"Provider '{provider}' not found"
+            )
+
         # 更新配置
         provider_config.api_key = request.api_key
         if request.api_base:
             provider_config.api_base = request.api_base
         provider_config.enabled = request.enabled
-        
+
         model_config_service.update_provider(provider_enum, provider_config)
-        
+
         return {"message": f"Provider '{provider}' updated successfully"}
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid provider: {e}")
     except Exception as e:
@@ -196,7 +215,7 @@ async def get_config_summary():
     try:
         summary = model_config_service.get_config_summary()
         return summary
-        
+
     except Exception as e:
         logger.error(f"Failed to get config summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to get config summary")
@@ -208,19 +227,21 @@ async def test_provider_connection(provider: str):
     try:
         provider_enum = ProviderType(provider)
         provider_config = model_config_service.get_provider(provider_enum)
-        
+
         if not provider_config or not provider_config.api_key:
-            raise HTTPException(status_code=400, detail="Provider not configured or missing API key")
-        
+            raise HTTPException(
+                status_code=400, detail="Provider not configured or missing API key"
+            )
+
         # 这里可以添加实际的连接测试逻辑
         # 目前返回成功，在实际实现中应该调用对应的API进行测试
-        
+
         return {
             "provider": provider,
             "status": "connected",
-            "message": "Connection test successful"
+            "message": "Connection test successful",
         }
-        
+
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid provider: {e}")
     except Exception as e:
@@ -236,56 +257,41 @@ async def get_model_presets():
             "name": "经济配置",
             "description": "成本优化，适合日常使用",
             "models": {
-                "chat": {
-                    "provider": "deepseek",
-                    "model_name": "deepseek-chat"
-                },
+                "chat": {"provider": "deepseek", "model_name": "deepseek-chat"},
                 "embedding": {
                     "provider": "siliconflow",
-                    "model_name": "BAAI/bge-large-zh-v1.5"
+                    "model_name": "BAAI/bge-large-zh-v1.5",
                 },
                 "reranking": {
                     "provider": "siliconflow",
-                    "model_name": "BAAI/bge-reranker-v2-m3"
-                }
-            }
+                    "model_name": "BAAI/bge-reranker-v2-m3",
+                },
+            },
         },
         "premium": {
             "name": "高质量配置",
             "description": "性能优先，适合专业使用",
             "models": {
-                "chat": {
-                    "provider": "qwen",
-                    "model_name": "qwen-max"
-                },
-                "embedding": {
-                    "provider": "qwen",
-                    "model_name": "text-embedding-v2"
-                },
-                "reranking": {
-                    "provider": "qwen",
-                    "model_name": "gte-rerank"
-                }
-            }
+                "chat": {"provider": "qwen", "model_name": "qwen-max"},
+                "embedding": {"provider": "qwen", "model_name": "text-embedding-v2"},
+                "reranking": {"provider": "qwen", "model_name": "gte-rerank"},
+            },
         },
         "chinese": {
             "name": "中文优化",
             "description": "针对中文场景优化",
             "models": {
-                "chat": {
-                    "provider": "qwen",
-                    "model_name": "qwen-plus"
-                },
+                "chat": {"provider": "qwen", "model_name": "qwen-plus"},
                 "embedding": {
                     "provider": "siliconflow",
-                    "model_name": "BAAI/bge-large-zh-v1.5"
+                    "model_name": "BAAI/bge-large-zh-v1.5",
                 },
                 "reranking": {
                     "provider": "siliconflow",
-                    "model_name": "BAAI/bge-reranker-v2-m3"
-                }
-            }
-        }
+                    "model_name": "BAAI/bge-reranker-v2-m3",
+                },
+            },
+        },
     }
-    
+
     return {"presets": presets}

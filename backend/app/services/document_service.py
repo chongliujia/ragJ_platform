@@ -2,6 +2,7 @@
 This service handles the entire document processing pipeline, from ingestion
 to chunking, embedding, and indexing.
 """
+
 import logging
 from fastapi import UploadFile
 from app.services.llm_service import llm_service
@@ -14,19 +15,21 @@ import os
 
 logger = logging.getLogger(__name__)
 
+
 class DocumentService:
     """
     Orchestrates the document processing workflow.
     """
+
     async def process_document(
-        self, 
-        content: bytes, 
-        filename: str, 
+        self,
+        content: bytes,
+        filename: str,
         kb_name: str,
         tenant_id: int,
         user_id: int,
         chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE,
-        chunking_params: dict = None
+        chunking_params: dict = None,
     ):
         """
         Process an uploaded document.
@@ -34,23 +37,8 @@ class DocumentService:
         es_service = None
         try:
             es_service = await get_elasticsearch_service()
-            # 1. Get file extension and select parser
-            _, extension = os.path.splitext(filename)
-            extension = extension.lower()
-
-            parser = None
-            if extension == ".pdf":
-                parser = parser_service.parse_pdf
-            elif extension == ".docx":
-                parser = parser_service.parse_docx
-            elif extension == ".txt":
-                parser = parser_service.parse_txt
-            else:
-                logger.error(f"Unsupported file type: {extension} for file {filename}")
-                return
-
-            # 2. Parse content to text
-            document_text = parser(content)
+            # 1. Parse content to text using unified parser (handles all formats)
+            document_text = parser_service.parse_document(content, filename)
             if not document_text:
                 logger.error(f"Failed to parse text from {filename}")
                 return
@@ -58,11 +46,9 @@ class DocumentService:
             # 3. Split document into chunks using specified strategy
             if chunking_params is None:
                 chunking_params = {}
-            
+
             chunks = await chunking_service.chunk_document(
-                text=document_text,
-                strategy=chunking_strategy,
-                **chunking_params
+                text=document_text, strategy=chunking_strategy, **chunking_params
             )
 
             # 4. Get embeddings for chunks
@@ -90,12 +76,12 @@ class DocumentService:
             # 5. Prepare entities for Milvus insertion with tenant/user metadata
             entities = [
                 {
-                    "text": chunk, 
-                    "vector": vector, 
+                    "text": chunk,
+                    "vector": vector,
                     "tenant_id": tenant_id,
                     "user_id": user_id,
                     "document_name": filename,
-                    "knowledge_base": kb_name
+                    "knowledge_base": kb_name,
                 }
                 for chunk, vector in zip(chunks, embeddings)
             ]
@@ -104,21 +90,25 @@ class DocumentService:
             tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
 
             # 7. Insert into Milvus (synchronous call)
-            milvus_service.insert(collection_name=tenant_collection_name, entities=entities)
+            milvus_service.insert(
+                collection_name=tenant_collection_name, entities=entities
+            )
 
             # 8. Index documents in Elasticsearch with tenant isolation
             tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
             es_docs = [
                 {
-                    "text": chunk, 
+                    "text": chunk,
                     "tenant_id": tenant_id,
                     "user_id": user_id,
                     "document_name": filename,
-                    "knowledge_base": kb_name
-                } 
+                    "knowledge_base": kb_name,
+                }
                 for chunk in chunks
             ]
-            await es_service.bulk_index_documents(index_name=tenant_index_name, documents=es_docs)
+            await es_service.bulk_index_documents(
+                index_name=tenant_index_name, documents=es_docs
+            )
 
             logger.info(f"Successfully processed and indexed document {filename}")
 
@@ -132,5 +122,6 @@ class DocumentService:
             # to avoid affecting other running tasks. The app's lifespan shutdown will handle it.
             pass
 
+
 # Singleton instance of the service
-document_service = DocumentService() 
+document_service = DocumentService()

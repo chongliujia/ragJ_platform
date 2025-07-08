@@ -1,13 +1,75 @@
 """
 Parser Service
 This service is responsible for parsing text content from various file types.
+Integrates with Rust document processor for improved performance.
 """
+
 import fitz  # PyMuPDF
 import docx
 from io import BytesIO
 import logging
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+# Try to import Rust document processor
+try:
+    from app.services.rust_document_service import rust_processor
+
+    RUST_AVAILABLE = rust_processor is not None
+    if RUST_AVAILABLE:
+        logger.info(
+            "Rust document processor available - using high-performance parsing"
+        )
+    else:
+        logger.info(
+            "Rust document processor not available - falling back to Python parsing"
+        )
+except ImportError:
+    RUST_AVAILABLE = False
+    logger.info("Rust document processor not installed - using Python parsing")
+
+
+def parse_document(
+    content: bytes, filename: str, options: Optional[Dict[str, Any]] = None
+) -> str:
+    """
+    Parse document using Rust processor if available, otherwise fallback to Python.
+
+    Args:
+        content: Document content as bytes
+        filename: Original filename (used for format detection)
+        options: Parsing options (OCR, table extraction, etc.)
+
+    Returns:
+        Extracted text content
+    """
+    if RUST_AVAILABLE:
+        try:
+            return rust_processor.parse_content(content, filename, options)
+        except Exception as e:
+            logger.warning(
+                f"Rust parsing failed for {filename}, falling back to Python: {e}"
+            )
+            return _parse_document_python(content, filename)
+    else:
+        return _parse_document_python(content, filename)
+
+
+def _parse_document_python(content: bytes, filename: str) -> str:
+    """Fallback Python-based document parsing."""
+    file_ext = filename.lower().split(".")[-1] if "." in filename else ""
+
+    if file_ext == "txt":
+        return parse_txt(content)
+    elif file_ext == "pdf":
+        return parse_pdf(content)
+    elif file_ext == "docx":
+        return parse_docx(content)
+    else:
+        logger.warning(f"Unsupported file format: {file_ext}")
+        return ""
+
 
 def parse_txt(content: bytes) -> str:
     """Parses text from a .txt file."""
@@ -43,4 +105,32 @@ def parse_docx(content: bytes) -> str:
         return text
     except Exception as e:
         logger.error(f"Error parsing DOCX file: {e}", exc_info=True)
-        return "" 
+        return ""
+
+
+def get_supported_formats() -> list[str]:
+    """Get list of supported document formats."""
+    if RUST_AVAILABLE:
+        try:
+            return rust_processor.supported_formats
+        except Exception as e:
+            logger.warning(f"Failed to get supported formats from Rust: {e}")
+
+    # Fallback to Python-supported formats
+    return ["txt", "pdf", "docx"]
+
+
+def extract_metadata(content: bytes, filename: str) -> Dict[str, Any]:
+    """Extract metadata from document."""
+    if RUST_AVAILABLE:
+        try:
+            return rust_processor.get_metadata_from_content(content, filename)
+        except Exception as e:
+            logger.warning(f"Rust metadata extraction failed: {e}")
+
+    # Basic metadata fallback
+    return {
+        "file_size": len(content),
+        "filename": filename,
+        "format": filename.lower().split(".")[-1] if "." in filename else "unknown",
+    }

@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时执行
     logger.info("启动 RAG Platform...")
-    
+
     # 初始化数据库
     try:
         await init_db()
@@ -41,9 +41,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Elasticsearch 服务启动失败", error=str(e))
         # Decide if you want to raise or just log
-    
+
     yield
-    
+
     # 关闭时执行
     logger.info("关闭 RAG Platform...")
     await shutdown_es_service()
@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
 
 def create_application() -> FastAPI:
     """创建 FastAPI 应用实例"""
-    
+
     app = FastAPI(
         title=settings.PROJECT_NAME,
         description="基于 Rust + Python + LangGraph 的高性能 RAG 平台",
@@ -59,7 +59,7 @@ def create_application() -> FastAPI:
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
         docs_url=f"{settings.API_V1_STR}/docs",
         redoc_url=f"{settings.API_V1_STR}/redoc",
-        lifespan=lifespan
+        lifespan=lifespan,
     )
 
     # CORS中间件
@@ -73,19 +73,19 @@ def create_application() -> FastAPI:
 
     # 注册路由
     app.include_router(api_router, prefix=settings.API_V1_STR)
-    
+
     # 静态文件服务
     app.mount("/static", StaticFiles(directory="static"), name="static")
-    
+
     @app.get("/")
     async def root():
         """根路径健康检查"""
         return {
             "message": "RAG Platform API",
             "version": "1.0.0",
-            "docs": f"{settings.API_V1_STR}/docs"
+            "docs": f"{settings.API_V1_STR}/docs",
         }
-    
+
     @app.get("/health")
     async def health_check():
         """健康检查接口"""
@@ -99,11 +99,7 @@ app = create_application()
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=settings.DEBUG,
-        log_level="info"
-    ) 
+        "main:app", host="0.0.0.0", port=8000, reload=settings.DEBUG, log_level="info"
+    )

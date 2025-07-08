@@ -16,59 +16,61 @@ logger = structlog.get_logger(__name__)
 
 class OpenAIAPIService:
     """Service for OpenAI API integration"""
-    
+
     def __init__(self):
         """Initialize OpenAI API service"""
         self.api_key = settings.OPENAI_API_KEY
         self.base_url = settings.OPENAI_BASE_URL
-        
+
     async def test_connection(self) -> Dict[str, Any]:
         """Test connection to OpenAI API"""
         if not self.api_key:
             return {
                 "success": False,
                 "error": "OPENAI_API_KEY not configured",
-                "message": "Please set OPENAI_API_KEY in environment variables"
+                "message": "Please set OPENAI_API_KEY in environment variables",
             }
-        
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "model": "gpt-3.5-turbo",
                         "messages": [{"role": "user", "content": "Hello"}],
-                        "max_tokens": 10
+                        "max_tokens": 10,
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
-                
+
                 if response.status_code == 200:
                     return {
                         "success": True,
                         "message": "OpenAI API connection successful",
-                        "model": "gpt-3.5-turbo"
+                        "model": "gpt-3.5-turbo",
                     }
                 else:
                     return {
                         "success": False,
                         "error": f"API error {response.status_code}",
-                        "details": response.text
+                        "details": response.text,
                     }
-                    
+
         except Exception as e:
             logger.error("OpenAI API connection test failed", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
-                "message": "Failed to connect to OpenAI API"
+                "message": "Failed to connect to OpenAI API",
             }
 
-    async def get_embeddings(self, texts: list[str], model: str = "text-embedding-3-small") -> dict[str, Any]:
+    async def get_embeddings(
+        self, texts: list[str], model: str = "text-embedding-3-small"
+    ) -> dict[str, Any]:
         """Generate text embeddings using OpenAI API"""
         if not self.api_key:
             return {"success": False, "error": "OPENAI_API_KEY not configured"}
@@ -82,68 +84,66 @@ class OpenAIAPIService:
                     f"{self.base_url}/embeddings",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
-                    json={
-                        "model": model,
-                        "input": texts
-                    },
-                    timeout=60.0
+                    json={"model": model, "input": texts},
+                    timeout=60.0,
                 )
 
                 if response.status_code == 200:
                     result = response.json()
-                    embeddings = [item['embedding'] for item in result['data']]
+                    embeddings = [item["embedding"] for item in result["data"]]
                     return {
                         "success": True,
                         "embeddings": embeddings,
-                        "usage": result.get("usage", {})
+                        "usage": result.get("usage", {}),
                     }
                 else:
                     error_detail = response.text
-                    logger.error("OpenAI Embedding API error",
-                                 status=response.status_code,
-                                 detail=error_detail)
+                    logger.error(
+                        "OpenAI Embedding API error",
+                        status=response.status_code,
+                        detail=error_detail,
+                    )
                     return {
                         "success": False,
                         "error": f"API error {response.status_code}",
-                        "details": error_detail
+                        "details": error_detail,
                     }
         except Exception as e:
-            logger.error("OpenAI embedding generation failed", error=str(e), exc_info=True)
+            logger.error(
+                "OpenAI embedding generation failed", error=str(e), exc_info=True
+            )
             return {"success": False, "error": str(e)}
 
     async def chat_completion(
-        self, 
-        message: str, 
+        self,
+        message: str,
         model: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
-        max_tokens: int = 1000
+        max_tokens: int = 1000,
     ) -> Dict[str, Any]:
         """Generate chat completion using OpenAI API"""
         if not self.api_key:
-            return {
-                "success": False,
-                "error": "OPENAI_API_KEY not configured"
-            }
-        
+            return {"success": False, "error": "OPENAI_API_KEY not configured"}
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "model": model,
                         "messages": [{"role": "user", "content": message}],
                         "temperature": temperature,
-                        "max_tokens": max_tokens
+                        "max_tokens": max_tokens,
                     },
-                    timeout=60.0
+                    timeout=60.0,
                 )
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     return {
@@ -151,40 +151,39 @@ class OpenAIAPIService:
                         "message": result["choices"][0]["message"]["content"],
                         "model": model,
                         "usage": result.get("usage", {}),
-                        "request_id": result.get("id", "")
+                        "request_id": result.get("id", ""),
                     }
                 else:
                     error_detail = response.text
-                    logger.error("OpenAI API error", 
-                               status=response.status_code, 
-                               detail=error_detail)
+                    logger.error(
+                        "OpenAI API error",
+                        status=response.status_code,
+                        detail=error_detail,
+                    )
                     return {
                         "success": False,
                         "error": f"API error {response.status_code}",
-                        "details": error_detail
+                        "details": error_detail,
                     }
-                    
+
         except Exception as e:
             logger.error("OpenAI chat completion failed", error=str(e))
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
 
 class DeepSeekAPIService:
     """Service for DeepSeek API integration"""
-    
+
     def __init__(self):
         """Initialize DeepSeek API service"""
         self.api_key = settings.DEEPSEEK_API_KEY
         self.base_url = settings.DEEPSEEK_BASE_URL
         self.model = settings.DEEPSEEK_CHAT_MODEL
-        
+
     async def test_connection(self) -> Dict[str, Any]:
         """
         Test connection to DeepSeek API
-        
+
         Returns:
             Dict with connection test results
         """
@@ -192,86 +191,80 @@ class DeepSeekAPIService:
             return {
                 "success": False,
                 "error": "DEEPSEEK_API_KEY not configured",
-                "message": "Please set DEEPSEEK_API_KEY in environment variables"
+                "message": "Please set DEEPSEEK_API_KEY in environment variables",
             }
-        
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "model": self.model,
                         "messages": [{"role": "user", "content": "Hello"}],
-                        "max_tokens": 10
+                        "max_tokens": 10,
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
-                
+
                 if response.status_code == 200:
                     return {
                         "success": True,
                         "message": "DeepSeek API connection successful",
-                        "model": self.model
+                        "model": self.model,
                     }
                 else:
                     return {
                         "success": False,
                         "error": f"API error {response.status_code}",
-                        "details": response.text
+                        "details": response.text,
                     }
-                    
+
         except Exception as e:
             logger.error("DeepSeek API connection test failed", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
-                "message": "Failed to connect to DeepSeek API"
+                "message": "Failed to connect to DeepSeek API",
             }
 
     async def chat_completion(
-        self, 
-        message: str, 
-        temperature: float = 0.7,
-        max_tokens: int = 1000
+        self, message: str, temperature: float = 0.7, max_tokens: int = 1000
     ) -> Dict[str, Any]:
         """
         Generate chat completion using DeepSeek API
-        
+
         Args:
             message: User input message
             temperature: Randomness in responses (0.0 to 2.0)
             max_tokens: Maximum tokens to generate
-            
+
         Returns:
             Dict with response data
         """
         if not self.api_key:
-            return {
-                "success": False,
-                "error": "DEEPSEEK_API_KEY not configured"
-            }
-        
+            return {"success": False, "error": "DEEPSEEK_API_KEY not configured"}
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "model": self.model,
                         "messages": [{"role": "user", "content": message}],
                         "temperature": temperature,
-                        "max_tokens": max_tokens
+                        "max_tokens": max_tokens,
                     },
-                    timeout=60.0
+                    timeout=60.0,
                 )
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     return {
@@ -279,25 +272,24 @@ class DeepSeekAPIService:
                         "message": result["choices"][0]["message"]["content"],
                         "model": self.model,
                         "usage": result.get("usage", {}),
-                        "request_id": result.get("id", "")
+                        "request_id": result.get("id", ""),
                     }
                 else:
                     error_detail = response.text
-                    logger.error("DeepSeek API error", 
-                               status=response.status_code, 
-                               detail=error_detail)
+                    logger.error(
+                        "DeepSeek API error",
+                        status=response.status_code,
+                        detail=error_detail,
+                    )
                     return {
                         "success": False,
                         "error": f"API error {response.status_code}",
-                        "details": error_detail
+                        "details": error_detail,
                     }
-                    
+
         except Exception as e:
             logger.error("DeepSeek chat completion failed", error=str(e))
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def get_embeddings(self, texts: list[str]) -> dict[str, Any]:
         """
@@ -314,36 +306,41 @@ class DeepSeekAPIService:
         # DeepSeek doesn't have a dedicated embedding API, so we'll generate mock embeddings
         # In a real implementation, you might want to use a different embedding service
         # or implement a workaround
-        logger.warning("DeepSeek doesn't provide embedding API, generating mock embeddings for testing")
-        
+        logger.warning(
+            "DeepSeek doesn't provide embedding API, generating mock embeddings for testing"
+        )
+
         import random
+
         mock_embeddings = []
         for text in texts:
             # Generate a deterministic mock embedding based on text hash
             random.seed(hash(text) % (2**32))
-            embedding = [random.random() for _ in range(1536)]  # 1536 dimensions like OpenAI
+            embedding = [
+                random.random() for _ in range(1536)
+            ]  # 1536 dimensions like OpenAI
             mock_embeddings.append(embedding)
-        
+
         return {
             "success": True,
             "embeddings": mock_embeddings,
-            "usage": {"total_tokens": sum(len(text.split()) for text in texts)}
+            "usage": {"total_tokens": sum(len(text.split()) for text in texts)},
         }
 
 
 class QwenAPIService:
     """Service for Qwen (通义千问) API integration"""
-    
+
     def __init__(self):
         """Initialize Qwen API service"""
         self.api_key = settings.DASHSCOPE_API_KEY
         self.base_url = "https://dashscope.aliyuncs.com/api/v1"
         self.model = settings.QWEN_CHAT_MODEL
-        
+
     async def test_connection(self) -> Dict[str, Any]:
         """
         Test connection to Qwen API
-        
+
         Returns:
             Dict with connection test results
         """
@@ -351,9 +348,9 @@ class QwenAPIService:
             return {
                 "success": False,
                 "error": "DASHSCOPE_API_KEY not configured",
-                "message": "Please set DASHSCOPE_API_KEY in environment variables"
+                "message": "Please set DASHSCOPE_API_KEY in environment variables",
             }
-        
+
         try:
             # Simple test request to verify API connectivity
             async with httpx.AsyncClient() as client:
@@ -361,7 +358,7 @@ class QwenAPIService:
                     f"{self.base_url}/services/aigc/text-generation/generation",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "model": self.model,
@@ -369,17 +366,15 @@ class QwenAPIService:
                             "messages": [
                                 {
                                     "role": "user",
-                                    "content": "Hello, this is a connection test."
+                                    "content": "Hello, this is a connection test.",
                                 }
                             ]
                         },
-                        "parameters": {
-                            "max_tokens": 50
-                        }
+                        "parameters": {"max_tokens": 50},
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     return {
@@ -387,77 +382,67 @@ class QwenAPIService:
                         "model": self.model,
                         "response": result.get("output", {}).get("text", ""),
                         "usage": result.get("usage", {}),
-                        "message": "Connection successful"
+                        "message": "Connection successful",
                     }
                 else:
                     return {
                         "success": False,
                         "error": f"API returned status {response.status_code}",
                         "details": response.text,
-                        "message": "API connection failed"
+                        "message": "API connection failed",
                     }
-                    
+
         except httpx.TimeoutException:
             return {
                 "success": False,
                 "error": "Request timeout",
-                "message": "API request timed out after 30 seconds"
+                "message": "API request timed out after 30 seconds",
             }
         except Exception as e:
             logger.error("Qwen API test failed", error=str(e))
             return {
                 "success": False,
                 "error": str(e),
-                "message": "Unexpected error during API test"
+                "message": "Unexpected error during API test",
             }
-    
+
     async def chat_completion(
-        self, 
-        message: str, 
-        temperature: float = 0.7,
-        max_tokens: int = 1000
+        self, message: str, temperature: float = 0.7, max_tokens: int = 1000
     ) -> Dict[str, Any]:
         """
         Generate chat completion using Qwen API
-        
+
         Args:
             message: User input message
             temperature: Randomness in responses (0.0 to 2.0)
             max_tokens: Maximum tokens to generate
-            
+
         Returns:
             Dict with response data
         """
         if not self.api_key:
             raise ValueError("DASHSCOPE_API_KEY not configured")
-        
+
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.base_url}/services/aigc/text-generation/generation",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "model": self.model,
-                        "input": {
-                            "messages": [
-                                {
-                                    "role": "user",
-                                    "content": message
-                                }
-                            ]
-                        },
+                        "input": {"messages": [{"role": "user", "content": message}]},
                         "parameters": {
                             "temperature": temperature,
                             "max_tokens": max_tokens,
-                            "top_p": 0.8
-                        }
+                            "top_p": 0.8,
+                        },
                     },
-                    timeout=60.0
+                    timeout=60.0,
                 )
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     return {
@@ -465,50 +450,43 @@ class QwenAPIService:
                         "message": result.get("output", {}).get("text", ""),
                         "model": self.model,
                         "usage": result.get("usage", {}),
-                        "request_id": result.get("request_id", "")
+                        "request_id": result.get("request_id", ""),
                     }
                 else:
                     error_detail = response.text
-                    logger.error("Qwen API error", 
-                               status=response.status_code, 
-                               detail=error_detail)
+                    logger.error(
+                        "Qwen API error",
+                        status=response.status_code,
+                        detail=error_detail,
+                    )
                     return {
                         "success": False,
                         "error": f"API error {response.status_code}",
-                        "details": error_detail
+                        "details": error_detail,
                     }
-                    
+
         except Exception as e:
             logger.error("Chat completion failed", error=str(e))
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
+            return {"success": False, "error": str(e)}
+
     async def stream_chat_completion(
-        self, 
-        message: str, 
-        temperature: float = 0.7,
-        max_tokens: int = 1000
+        self, message: str, temperature: float = 0.7, max_tokens: int = 1000
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Generate streaming chat completion using Qwen API
-        
+
         Args:
             message: User input message
             temperature: Randomness in responses
             max_tokens: Maximum tokens to generate
-            
+
         Yields:
             Dict with streaming response chunks
         """
         if not self.api_key:
-            yield {
-                "success": False,
-                "error": "DASHSCOPE_API_KEY not configured"
-            }
+            yield {"success": False, "error": "DASHSCOPE_API_KEY not configured"}
             return
-        
+
         try:
             async with httpx.AsyncClient() as client:
                 async with client.stream(
@@ -517,36 +495,29 @@ class QwenAPIService:
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
-                        "Accept": "text/event-stream"
+                        "Accept": "text/event-stream",
                     },
                     json={
                         "model": self.model,
-                        "input": {
-                            "messages": [
-                                {
-                                    "role": "user", 
-                                    "content": message
-                                }
-                            ]
-                        },
+                        "input": {"messages": [{"role": "user", "content": message}]},
                         "parameters": {
                             "temperature": temperature,
                             "max_tokens": max_tokens,
                             "top_p": 0.8,
-                            "incremental_output": True
-                        }
+                            "incremental_output": True,
+                        },
                     },
-                    timeout=60.0
+                    timeout=60.0,
                 ) as response:
-                    
+
                     if response.status_code != 200:
                         yield {
                             "success": False,
                             "error": f"API error {response.status_code}",
-                            "details": await response.aread()
+                            "details": await response.aread(),
                         }
                         return
-                    
+
                     async for chunk in response.aiter_lines():
                         if chunk.startswith("data: "):
                             try:
@@ -555,18 +526,17 @@ class QwenAPIService:
                                     yield {
                                         "success": True,
                                         "content": data["output"].get("text", ""),
-                                        "finish_reason": data["output"].get("finish_reason"),
-                                        "model": self.model
+                                        "finish_reason": data["output"].get(
+                                            "finish_reason"
+                                        ),
+                                        "model": self.model,
                                     }
                             except json.JSONDecodeError:
                                 continue
-                                
+
         except Exception as e:
             logger.error("Streaming chat failed", error=str(e))
-            yield {
-                "success": False,
-                "error": str(e)
-            }
+            yield {"success": False, "error": str(e)}
 
     async def get_embeddings(self, texts: list[str]) -> dict[str, Any]:
         """
@@ -590,42 +560,44 @@ class QwenAPIService:
                     f"{self.base_url}/services/embeddings/text-embedding/text-embedding",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "model": settings.QWEN_EMBEDDING_MODEL,
-                        "input": {
-                            "texts": texts
-                        }
+                        "input": {"texts": texts},
                     },
-                    timeout=60.0
+                    timeout=60.0,
                 )
 
                 if response.status_code == 200:
                     result = response.json()
                     # The API returns embeddings in a specific structure
                     embeddings_data = result.get("output", {}).get("embeddings", [])
-                    embeddings = [item['embedding'] for item in embeddings_data]
+                    embeddings = [item["embedding"] for item in embeddings_data]
                     return {
                         "success": True,
                         "embeddings": embeddings,
-                        "usage": result.get("usage", {})
+                        "usage": result.get("usage", {}),
                     }
                 else:
                     error_detail = response.text
-                    logger.error("Qwen Embedding API error",
-                                 status=response.status_code,
-                                 detail=error_detail)
+                    logger.error(
+                        "Qwen Embedding API error",
+                        status=response.status_code,
+                        detail=error_detail,
+                    )
                     return {
                         "success": False,
                         "error": f"API error {response.status_code}",
-                        "details": error_detail
+                        "details": error_detail,
                     }
         except Exception as e:
             logger.error("Embedding generation failed", error=str(e), exc_info=True)
             return {"success": False, "error": str(e)}
 
-    async def rerank(self, query: str, documents: list[str], top_n: int = 5) -> dict[str, Any]:
+    async def rerank(
+        self, query: str, documents: list[str], top_n: int = 5
+    ) -> dict[str, Any]:
         """
         Reranks a list of documents based on a query using the Qwen rerank model.
 
@@ -649,7 +621,7 @@ class QwenAPIService:
                     f"{self.base_url}/services/retrieval/rerank",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
                     json={
                         "model": settings.QWEN_RERANK_MODEL,
@@ -657,7 +629,7 @@ class QwenAPIService:
                         "documents": documents,
                         "top_n": top_n,
                     },
-                    timeout=30.0
+                    timeout=30.0,
                 )
 
                 if response.status_code == 200:
@@ -667,17 +639,19 @@ class QwenAPIService:
                     return {
                         "success": True,
                         "documents": reranked_docs,
-                        "usage": result.get("usage", {})
+                        "usage": result.get("usage", {}),
                     }
                 else:
                     error_detail = response.text
-                    logger.error("Qwen Rerank API error",
-                                 status=response.status_code,
-                                 detail=error_detail)
+                    logger.error(
+                        "Qwen Rerank API error",
+                        status=response.status_code,
+                        detail=error_detail,
+                    )
                     return {
                         "success": False,
                         "error": f"API error {response.status_code}",
-                        "details": error_detail
+                        "details": error_detail,
                     }
         except Exception as e:
             logger.error("Reranking failed", error=str(e), exc_info=True)
@@ -688,37 +662,37 @@ class LLMService:
     """
     Main LLM service that orchestrates different AI models
     """
-    
+
     def __init__(self):
         """Initialize LLM service with available providers"""
         self.qwen = QwenAPIService()
         self.deepseek = DeepSeekAPIService()
         self.openai = OpenAIAPIService()
-        
+
     async def test_all_connections(self) -> Dict[str, Any]:
         """
         Test connections to all configured LLM services
-        
+
         Returns:
             Dict with test results for all providers
         """
         results = {}
-        
+
         # Test Qwen API
         logger.info("Testing Qwen API connection...")
         qwen_result = await self.qwen.test_connection()
         results["qwen"] = qwen_result
-        
+
         # Test DeepSeek API
         logger.info("Testing DeepSeek API connection...")
         deepseek_result = await self.deepseek.test_connection()
         results["deepseek"] = deepseek_result
-        
+
         # Test OpenAI API
         logger.info("Testing OpenAI API connection...")
         openai_result = await self.openai.test_connection()
         results["openai"] = openai_result
-        
+
         # Current configuration
         results["current_config"] = {
             "chat_provider": settings.CHAT_MODEL_PROVIDER,
@@ -726,36 +700,45 @@ class LLMService:
             "embedding_provider": settings.EMBEDDING_MODEL_PROVIDER,
             "embedding_model": settings.EMBEDDING_MODEL_NAME,
             "rerank_provider": settings.RERANK_MODEL_PROVIDER,
-            "rerank_model": settings.RERANK_MODEL_NAME
+            "rerank_model": settings.RERANK_MODEL_NAME,
         }
-        
+
         # Summary
-        all_success = all(r.get("success", False) for r in results.values() if isinstance(r, dict) and "success" in r)
+        all_success = all(
+            r.get("success", False)
+            for r in results.values()
+            if isinstance(r, dict) and "success" in r
+        )
         results["summary"] = {
             "all_connected": all_success,
-            "total_providers": len([r for r in results.values() if isinstance(r, dict) and "success" in r]),
-            "connected_providers": sum(1 for r in results.values() 
-                                     if isinstance(r, dict) and r.get("success", False))
+            "total_providers": len(
+                [r for r in results.values() if isinstance(r, dict) and "success" in r]
+            ),
+            "connected_providers": sum(
+                1
+                for r in results.values()
+                if isinstance(r, dict) and r.get("success", False)
+            ),
         }
-        
+
         return results
-    
+
     async def chat(
-        self, 
-        message: str, 
+        self,
+        message: str,
         model: str = None,
         temperature: float = 0.7,
-        max_tokens: int = 1000
+        max_tokens: int = 1000,
     ) -> Dict[str, Any]:
         """
         Generate chat response using configured provider
-        
+
         Args:
             message: User input message
             model: Model to use (if None, uses configured default)
             temperature: Response randomness
             max_tokens: Maximum response length
-            
+
         Returns:
             Dict with chat response
         """
@@ -773,30 +756,35 @@ class LLMService:
                 provider = "openai"
             else:
                 provider = settings.CHAT_MODEL_PROVIDER
-        
+
         logger.info(f"Using chat provider: {provider}, model: {model}")
-        
+
         try:
             if provider == "deepseek":
-                return await self.deepseek.chat_completion(message, temperature, max_tokens)
+                return await self.deepseek.chat_completion(
+                    message, temperature, max_tokens
+                )
             elif provider == "qwen":
                 return await self.qwen.chat_completion(message, temperature, max_tokens)
             elif provider == "openai":
-                return await self.openai.chat_completion(message, model, temperature, max_tokens)
+                return await self.openai.chat_completion(
+                    message, model, temperature, max_tokens
+                )
             else:
                 return {
                     "success": False,
                     "error": f"Provider {provider} not supported",
-                    "message": "Supported providers: deepseek, qwen, openai"
+                    "message": "Supported providers: deepseek, qwen, openai",
                 }
         except Exception as e:
-            logger.error(f"Chat completion failed with provider {provider}", error=str(e))
-            return {
-                "success": False,
-                "error": str(e)
-            } 
+            logger.error(
+                f"Chat completion failed with provider {provider}", error=str(e)
+            )
+            return {"success": False, "error": str(e)}
 
-    async def get_embeddings(self, texts: list[str], model: str = None) -> dict[str, Any]:
+    async def get_embeddings(
+        self, texts: list[str], model: str = None
+    ) -> dict[str, Any]:
         """
         Get text embeddings using configured provider.
         """
@@ -814,9 +802,9 @@ class LLMService:
                 provider = "openai"
             else:
                 provider = settings.EMBEDDING_MODEL_PROVIDER
-        
+
         logger.info(f"Using embedding provider: {provider}, model: {model}")
-        
+
         try:
             if provider == "openai":
                 return await self.openai.get_embeddings(texts, model)
@@ -825,10 +813,14 @@ class LLMService:
             elif provider == "deepseek":
                 return await self.deepseek.get_embeddings(texts)
             else:
-                logger.warning(f"Unsupported embedding provider: {provider}. Falling back to OpenAI.")
+                logger.warning(
+                    f"Unsupported embedding provider: {provider}. Falling back to OpenAI."
+                )
                 return await self.openai.get_embeddings(texts, model)
         except Exception as e:
-            logger.error(f"Embedding generation failed with provider {provider}", error=str(e))
+            logger.error(
+                f"Embedding generation failed with provider {provider}", error=str(e)
+            )
             return {"success": False, "error": str(e)}
 
     async def rerank(
@@ -847,14 +839,16 @@ class LLMService:
                 provider = "qwen"
             else:
                 provider = settings.RERANK_MODEL_PROVIDER
-        
+
         logger.info(f"Using rerank provider: {provider}, model: {model}")
-        
+
         try:
             if provider == "qwen":
                 return await self.qwen.rerank(query, documents, top_n)
             else:
-                logger.warning(f"Unsupported rerank provider: {provider}. Falling back to Qwen.")
+                logger.warning(
+                    f"Unsupported rerank provider: {provider}. Falling back to Qwen."
+                )
                 return await self.qwen.rerank(query, documents, top_n)
         except Exception as e:
             logger.error(f"Reranking failed with provider {provider}", error=str(e))
@@ -862,4 +856,4 @@ class LLMService:
 
 
 # Singleton instance of the main service
-llm_service = LLMService() 
+llm_service = LLMService()

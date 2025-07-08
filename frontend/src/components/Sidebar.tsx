@@ -17,6 +17,8 @@ import {
   Chip,
   IconButton,
   Collapse,
+  useMediaQuery,
+  Tooltip,
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -34,6 +36,8 @@ import {
   ExpandLess,
   ExpandMore,
   AdminPanelSettings as AdminIcon,
+  Menu as MenuIcon,
+  ChevronLeft as ChevronLeftIcon,
 } from '@mui/icons-material';
 import LanguageSwitcher from './LanguageSwitcher';
 import { AuthManager } from '../services/authApi';
@@ -41,14 +45,21 @@ import { usePermissions } from '../hooks/usePermissions';
 import type { UserInfo } from '../types/auth';
 
 const drawerWidth = 240;
+const collapsedWidth = 64;
 
-const Sidebar: React.FC = () => {
+interface SidebarProps {
+  open: boolean;
+  onToggle: () => void;
+}
+
+const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const isMobile = useMediaQuery('(max-width:768px)');
   
   const authManager = AuthManager.getInstance();
   const permissions = usePermissions();
@@ -68,7 +79,7 @@ const Sidebar: React.FC = () => {
   ];
 
   const adminMenuItems = [
-    { text: '用户管理', icon: <UsersIcon />, path: '/users', role: 'admin' },
+    { text: '用户管理', icon: <UsersIcon />, path: '/users', role: 'tenant_admin' },
     { text: '租户管理', icon: <BusinessIcon />, path: '/tenants', role: 'super_admin' },
     { text: '权限管理', icon: <PermissionsIcon />, path: '/permissions', role: 'super_admin' },
   ];
@@ -90,12 +101,10 @@ const Sidebar: React.FC = () => {
     switch (role) {
       case 'super_admin':
         return 'error';
-      case 'admin':
+      case 'tenant_admin':
         return 'warning';
       case 'user':
         return 'primary';
-      case 'guest':
-        return 'default';
       default:
         return 'default';
     }
@@ -105,12 +114,10 @@ const Sidebar: React.FC = () => {
     switch (role) {
       case 'super_admin':
         return '超级管理员';
-      case 'admin':
-        return '管理员';
+      case 'tenant_admin':
+        return '租户管理员';
       case 'user':
         return '用户';
-      case 'guest':
-        return '访客';
       default:
         return role;
     }
@@ -126,28 +133,50 @@ const Sidebar: React.FC = () => {
 
   return (
     <Drawer
-      variant="permanent"
+      variant={isMobile ? 'temporary' : 'permanent'}
+      open={isMobile ? open : true}
+      onClose={isMobile ? onToggle : undefined}
       sx={{
-        width: drawerWidth,
+        width: open ? drawerWidth : collapsedWidth,
         flexShrink: 0,
         '& .MuiDrawer-paper': {
-          width: drawerWidth,
+          width: open ? drawerWidth : collapsedWidth,
           boxSizing: 'border-box',
-          backgroundColor: '#1e293b',
-          color: 'white',
+          transition: 'width 0.3s ease-in-out',
+          overflowX: 'hidden',
+          // 确保在移动设备上侧边栏的z-index低于TopBar
+          zIndex: (theme) => theme.zIndex.drawer,
+          // 移动设备下的样式调整
+          '@media (max-width: 768px)': {
+            top: 64, // 为TopBar留出空间
+            height: 'calc(100% - 64px)',
+          },
         },
       }}
     >
-      <Box sx={{ p: 2, textAlign: 'center' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-          <BotIcon sx={{ fontSize: 32, color: '#3b82f6', mr: 1 }} />
-          <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
-            {t('nav.title')}
-          </Typography>
+      {/* 在折叠状态下显示切换按钮 */}
+      {!isMobile && (
+        <Box sx={{ display: 'flex', justifyContent: open ? 'flex-end' : 'center', p: 1 }}>
+          <IconButton onClick={onToggle} sx={{ color: 'white' }}>
+            {open ? <ChevronLeftIcon /> : <MenuIcon />}
+          </IconButton>
         </Box>
-        <Typography variant="body2" sx={{ color: '#94a3b8' }}>
-          {t('nav.subtitle')}
-        </Typography>
+      )}
+
+      <Box sx={{ p: open ? 2 : 1, textAlign: 'center', transition: 'all 0.3s ease-in-out' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+          <BotIcon sx={{ fontSize: 32, color: '#3b82f6', mr: open ? 1 : 0 }} />
+          {open && (
+            <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
+              {t('nav.title')}
+            </Typography>
+          )}
+        </Box>
+        {open && (
+          <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+            {t('nav.subtitle')}
+          </Typography>
+        )}
       </Box>
       
       <Divider sx={{ borderColor: '#334155' }} />
@@ -156,31 +185,36 @@ const Sidebar: React.FC = () => {
         {/* 主菜单项 */}
         {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
-            <ListItemButton
-              onClick={() => navigate(item.path)}
-              sx={{
-                mx: 1,
-                mb: 0.5,
-                borderRadius: 1,
-                backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
-                '&:hover': {
-                  backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
-                },
-              }}
-            >
-              <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
-                {item.icon}
-              </ListItemIcon>
-              <ListItemText 
-                primary={item.text}
-                sx={{ 
-                  '& .MuiListItemText-primary': { 
-                    fontSize: '0.9rem',
-                    fontWeight: location.pathname === item.path ? 600 : 400,
-                  } 
+            <Tooltip title={!open ? item.text : ''} placement="right">
+              <ListItemButton
+                onClick={() => navigate(item.path)}
+                sx={{
+                  mx: 1,
+                  mb: 0.5,
+                  borderRadius: 1,
+                  backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
+                  justifyContent: open ? 'initial' : 'center',
+                  '&:hover': {
+                    backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
+                  },
                 }}
-              />
-            </ListItemButton>
+              >
+                <ListItemIcon sx={{ color: 'inherit', minWidth: open ? 40 : 0, justifyContent: 'center' }}>
+                  {item.icon}
+                </ListItemIcon>
+                {open && (
+                  <ListItemText 
+                    primary={item.text}
+                    sx={{ 
+                      '& .MuiListItemText-primary': { 
+                        fontSize: '0.9rem',
+                        fontWeight: location.pathname === item.path ? 600 : 400,
+                      } 
+                    }}
+                  />
+                )}
+              </ListItemButton>
+            </Tooltip>
           </ListItem>
         ))}
 
@@ -188,68 +222,99 @@ const Sidebar: React.FC = () => {
         {canAccessAdminMenu() && (
           <>
             <Divider sx={{ my: 1, borderColor: '#334155' }} />
-            <ListItem disablePadding>
-              <ListItemButton
-                onClick={() => setAdminMenuOpen(!adminMenuOpen)}
-                sx={{
-                  mx: 1,
-                  mb: 0.5,
-                  borderRadius: 1,
-                  '&:hover': {
-                    backgroundColor: '#334155',
-                  },
-                }}
-              >
-                <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
-                  <AdminIcon />
-                </ListItemIcon>
-                <ListItemText 
-                  primary="管理功能"
-                  sx={{ 
-                    '& .MuiListItemText-primary': { 
-                      fontSize: '0.9rem',
-                      fontWeight: 500,
-                    } 
-                  }}
-                />
-                {adminMenuOpen ? <ExpandLess /> : <ExpandMore />}
-              </ListItemButton>
-            </ListItem>
-            <Collapse in={adminMenuOpen} timeout="auto" unmountOnExit>
-              <List component="div" disablePadding>
-                {adminMenuItems.map((item) => (
-                  canAccessMenuItem(item.role) && (
-                    <ListItem key={item.text} disablePadding>
+            {open ? (
+              <>
+                <ListItem disablePadding>
+                  <ListItemButton
+                    onClick={() => setAdminMenuOpen(!adminMenuOpen)}
+                    sx={{
+                      mx: 1,
+                      mb: 0.5,
+                      borderRadius: 1,
+                      '&:hover': {
+                        backgroundColor: '#334155',
+                      },
+                    }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
+                      <AdminIcon />
+                    </ListItemIcon>
+                    <ListItemText 
+                      primary="管理功能"
+                      sx={{ 
+                        '& .MuiListItemText-primary': { 
+                          fontSize: '0.9rem',
+                          fontWeight: 500,
+                        } 
+                      }}
+                    />
+                    {adminMenuOpen ? <ExpandLess /> : <ExpandMore />}
+                  </ListItemButton>
+                </ListItem>
+                <Collapse in={adminMenuOpen} timeout="auto" unmountOnExit>
+                  <List component="div" disablePadding>
+                    {adminMenuItems.map((item) => (
+                      canAccessMenuItem(item.role) && (
+                        <ListItem key={item.text} disablePadding>
+                          <ListItemButton
+                            onClick={() => navigate(item.path)}
+                            sx={{
+                              mx: 2,
+                              mb: 0.5,
+                              borderRadius: 1,
+                              backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
+                              '&:hover': {
+                                backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
+                              },
+                            }}
+                          >
+                            <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
+                              {item.icon}
+                            </ListItemIcon>
+                            <ListItemText 
+                              primary={item.text}
+                              sx={{ 
+                                '& .MuiListItemText-primary': { 
+                                  fontSize: '0.85rem',
+                                  fontWeight: location.pathname === item.path ? 600 : 400,
+                                } 
+                              }}
+                            />
+                          </ListItemButton>
+                        </ListItem>
+                      )
+                    ))}
+                  </List>
+                </Collapse>
+              </>
+            ) : (
+              // 折叠状态下，直接显示管理员菜单项
+              adminMenuItems.map((item) => (
+                canAccessMenuItem(item.role) && (
+                  <ListItem key={item.text} disablePadding>
+                    <Tooltip title={item.text} placement="right">
                       <ListItemButton
                         onClick={() => navigate(item.path)}
                         sx={{
-                          mx: 2,
+                          mx: 1,
                           mb: 0.5,
                           borderRadius: 1,
                           backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
+                          justifyContent: 'center',
                           '&:hover': {
                             backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
                           },
                         }}
                       >
-                        <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
+                        <ListItemIcon sx={{ color: 'inherit', minWidth: 0, justifyContent: 'center' }}>
                           {item.icon}
                         </ListItemIcon>
-                        <ListItemText 
-                          primary={item.text}
-                          sx={{ 
-                            '& .MuiListItemText-primary': { 
-                              fontSize: '0.85rem',
-                              fontWeight: location.pathname === item.path ? 600 : 400,
-                            } 
-                          }}
-                        />
                       </ListItemButton>
-                    </ListItem>
-                  )
-                ))}
-              </List>
-            </Collapse>
+                    </Tooltip>
+                  </ListItem>
+                )
+              ))
+            )}
           </>
         )}
       </List>
@@ -258,42 +323,47 @@ const Sidebar: React.FC = () => {
       <Box sx={{ borderTop: '1px solid #334155' }}>
         {/* 用户信息 */}
         {user && (
-          <Box sx={{ p: 2 }}>
-            <ListItemButton
-              onClick={handleUserMenuOpen}
-              sx={{
-                borderRadius: 1,
-                '&:hover': {
-                  backgroundColor: '#334155',
-                },
-              }}
-            >
-              <ListItemIcon sx={{ minWidth: 40 }}>
-                <Avatar sx={{ width: 32, height: 32, bgcolor: '#3b82f6' }}>
-                  {user.username.charAt(0).toUpperCase()}
-                </Avatar>
-              </ListItemIcon>
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography
-                  variant="body2"
-                  sx={{ 
-                    color: 'white', 
-                    fontWeight: 500,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {user.full_name || user.username}
-                </Typography>
-                <Chip
-                  label={getRoleLabel(user.role)}
-                  color={getRoleColor(user.role) as any}
-                  size="small"
-                  sx={{ fontSize: '0.7rem', height: 16 }}
-                />
-              </Box>
-            </ListItemButton>
+          <Box sx={{ p: open ? 2 : 1 }}>
+            <Tooltip title={!open ? user.full_name || user.username : ''} placement="right">
+              <ListItemButton
+                onClick={handleUserMenuOpen}
+                sx={{
+                  borderRadius: 1,
+                  justifyContent: open ? 'initial' : 'center',
+                  '&:hover': {
+                    backgroundColor: '#334155',
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: open ? 40 : 0, justifyContent: 'center' }}>
+                  <Avatar sx={{ width: 32, height: 32, bgcolor: '#3b82f6' }}>
+                    {user.username.charAt(0).toUpperCase()}
+                  </Avatar>
+                </ListItemIcon>
+                {open && (
+                  <Box sx={{ flex: 1, minWidth: 0 }}>
+                    <Typography
+                      variant="body2"
+                      sx={{ 
+                        color: 'white', 
+                        fontWeight: 500,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {user.full_name || user.username}
+                    </Typography>
+                    <Chip
+                      label={getRoleLabel(user.role)}
+                      color={getRoleColor(user.role) as any}
+                      size="small"
+                      sx={{ fontSize: '0.7rem', height: 16 }}
+                    />
+                  </Box>
+                )}
+              </ListItemButton>
+            </Tooltip>
             
             <Menu
               anchorEl={userMenuAnchor}
@@ -325,14 +395,16 @@ const Sidebar: React.FC = () => {
         )}
         
         {/* 语言切换 */}
-        <Box sx={{ p: 2, pt: 0 }}>
-          <Box sx={{ display: 'flex', justifyContent: 'center' }}>
-            <LanguageSwitcher />
+        {open && (
+          <Box sx={{ p: 2, pt: 0 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+              <LanguageSwitcher />
+            </Box>
           </Box>
-        </Box>
+        )}
       </Box>
     </Drawer>
   );
 };
 
-export default Sidebar; 
+export default Sidebar;

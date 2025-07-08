@@ -173,9 +173,14 @@ export class AuthManager {
     return this.user?.role === role;
   }
 
-  // 是否为管理员（包括超级管理员）
+  // 是否为管理员（包括超级管理员和租户管理员）
   isAdmin(): boolean {
-    return this.user?.role === 'super_admin' || this.user?.role === 'admin';
+    return this.user?.role === 'super_admin' || this.user?.role === 'tenant_admin';
+  }
+
+  // 是否为租户管理员（包括超级管理员）
+  isTenantAdmin(): boolean {
+    return this.user?.role === 'super_admin' || this.user?.role === 'tenant_admin';
   }
 
   // 是否为超级管理员

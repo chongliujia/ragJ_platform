@@ -13,8 +13,10 @@ from app.core.config import settings
 engine = create_engine(
     settings.DATABASE_URL,
     poolclass=StaticPool,
-    connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
-    echo=settings.DEBUG  # 开发模式下打印SQL
+    connect_args=(
+        {"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
+    ),
+    echo=settings.DEBUG,  # 开发模式下打印SQL
 )
 
 # 创建会话工厂

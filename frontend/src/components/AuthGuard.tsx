@@ -49,9 +49,18 @@ const AuthGuard: React.FC<AuthGuardProps> = ({
         }
 
         // 检查角色权限
-        if (requiredRole && !authManager.hasRole(requiredRole)) {
-          setIsAuthorized(false);
-          return;
+        if (requiredRole) {
+          // 超级管理员拥有所有权限
+          if (user.role === 'super_admin') {
+            setIsAuthorized(true);
+            return;
+          }
+          
+          // 其他角色需要精确匹配
+          if (!authManager.hasRole(requiredRole)) {
+            setIsAuthorized(false);
+            return;
+          }
         }
 
         // 检查具体权限

@@ -25,9 +25,11 @@ def create_access_token(
         expire = datetime.utcnow() + timedelta(
             minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
         )
-    
+
     to_encode = {"exp": expire, "sub": str(subject)}
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(
+        to_encode, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+    )
     return encoded_jwt
 
 
@@ -70,7 +72,7 @@ def check_user_permission(user: User, permission: str) -> bool:
     # 超级管理员拥有所有权限
     if user.role == "super_admin":
         return True
-    
+
     # TODO: 实现完整的权限检查逻辑
     # 这里需要查询用户角色对应的权限
     return True

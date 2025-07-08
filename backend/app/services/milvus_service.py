@@ -1,8 +1,17 @@
 """
 This module provides a service for interacting with the Milvus vector database.
 """
+
 import logging
-from pymilvus import utility, connections, Collection, CollectionSchema, FieldSchema, DataType, db
+from pymilvus import (
+    utility,
+    connections,
+    Collection,
+    CollectionSchema,
+    FieldSchema,
+    DataType,
+    db,
+)
 from app.core.config import settings
 
 # Configure logging
@@ -14,6 +23,7 @@ class MilvusService:
     """
     A singleton service for managing connections and operations with Milvus.
     """
+
     _instance = None
 
     def __new__(cls, *args, **kwargs):
@@ -22,13 +32,15 @@ class MilvusService:
         return cls._instance
 
     def __init__(self):
-        if not hasattr(self, 'initialized'):
+        if not hasattr(self, "initialized"):
             self.alias = "default"
             self.db_name = settings.MILVUS_DATABASE
             self.tenant_collections = {}  # 缓存租户集合
             try:
                 # First, connect to the default database to check/create the target database
-                logger.info("Connecting to Milvus default database to ensure target DB exists...")
+                logger.info(
+                    "Connecting to Milvus default database to ensure target DB exists..."
+                )
                 connections.connect(
                     alias="db_check",
                     host=settings.MILVUS_HOST,
@@ -36,25 +48,29 @@ class MilvusService:
                     user=settings.MILVUS_USER,
                     password=settings.MILVUS_PASSWORD,
                 )
-                
+
                 existing_databases = db.list_database(using="db_check")
                 if self.db_name not in existing_databases:
-                    logger.warning(f"Database '{self.db_name}' not found. Creating it now...")
+                    logger.warning(
+                        f"Database '{self.db_name}' not found. Creating it now..."
+                    )
                     db.create_database(self.db_name, using="db_check")
                     logger.info(f"Database '{self.db_name}' created successfully.")
-                
+
                 connections.disconnect("db_check")
                 logger.info("Disconnected from default database.")
 
                 # Now, connect to the target database
-                logger.info(f"Connecting to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}, DB: '{self.db_name}'")
+                logger.info(
+                    f"Connecting to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}, DB: '{self.db_name}'"
+                )
                 connections.connect(
                     alias=self.alias,
                     host=settings.MILVUS_HOST,
                     port=settings.MILVUS_PORT,
                     user=settings.MILVUS_USER,
                     password=settings.MILVUS_PASSWORD,
-                    db_name=self.db_name
+                    db_name=self.db_name,
                 )
                 logger.info("Successfully connected to Milvus target database.")
                 self.initialized = True
@@ -97,10 +113,14 @@ class MilvusService:
         try:
             return utility.has_collection(collection_name, using=self.alias)
         except Exception as e:
-            logger.error(f"Failed to check for collection {collection_name}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to check for collection {collection_name}: {e}", exc_info=True
+            )
             return False
 
-    def create_collection(self, collection_name: str, dim: int = settings.EMBEDDING_DIMENSION):
+    def create_collection(
+        self, collection_name: str, dim: int = settings.EMBEDDING_DIMENSION
+    ):
         """
         Creates a new collection in Milvus with a predefined schema.
 
@@ -119,28 +139,42 @@ class MilvusService:
         try:
             # Define fields for the collection
             # Primary key
-            pk_field = FieldSchema(name="pk", dtype=DataType.INT64, is_primary=True, auto_id=True)
+            pk_field = FieldSchema(
+                name="pk", dtype=DataType.INT64, is_primary=True, auto_id=True
+            )
             # Original text chunk
-            text_field = FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535)
+            text_field = FieldSchema(
+                name="text", dtype=DataType.VARCHAR, max_length=65535
+            )
             # Vector embedding
-            vector_field = FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=dim)
-            
-            schema = CollectionSchema(fields=[pk_field, text_field, vector_field], description=f"{collection_name} collection")
-            
-            collection = Collection(name=collection_name, schema=schema, using=self.alias)
+            vector_field = FieldSchema(
+                name="vector", dtype=DataType.FLOAT_VECTOR, dim=dim
+            )
+
+            schema = CollectionSchema(
+                fields=[pk_field, text_field, vector_field],
+                description=f"{collection_name} collection",
+            )
+
+            collection = Collection(
+                name=collection_name, schema=schema, using=self.alias
+            )
             logger.info(f"Successfully created collection: {collection_name}")
 
             # Create an index for the vector field
             index_params = {
                 "metric_type": "L2",
                 "index_type": "IVF_FLAT",
-                "params": {"nlist": 1024}
+                "params": {"nlist": 1024},
             }
             collection.create_index(field_name="vector", index_params=index_params)
             logger.info(f"Successfully created index for collection: {collection_name}")
 
         except Exception as e:
-            logger.error(f"Failed to create collection or index for '{collection_name}': {e}", exc_info=True)
+            logger.error(
+                f"Failed to create collection or index for '{collection_name}': {e}",
+                exc_info=True,
+            )
             # Optionally re-raise or handle the error
             raise
 
@@ -163,7 +197,9 @@ class MilvusService:
             utility.drop_collection(collection_name, using=self.alias)
             logger.info(f"Successfully dropped collection: {collection_name}")
         except Exception as e:
-            logger.error(f"Failed to drop collection '{collection_name}': {e}", exc_info=True)
+            logger.error(
+                f"Failed to drop collection '{collection_name}': {e}", exc_info=True
+            )
             raise
 
     def insert(self, collection_name: str, entities: list[dict]) -> list[any]:
@@ -181,9 +217,11 @@ class MilvusService:
         if not self.initialized:
             logger.error("Milvus connection not initialized. Cannot insert data.")
             return []
-        
+
         if not self.has_collection(collection_name):
-            logger.error(f"Collection '{collection_name}' does not exist. Cannot insert data.")
+            logger.error(
+                f"Collection '{collection_name}' does not exist. Cannot insert data."
+            )
             return []
 
         try:
@@ -191,19 +229,25 @@ class MilvusService:
             # The 'entities' should be a list of lists, matching the field order.
             # Example: data = [ ["text1", "text2"], [ [vec1], [vec2] ] ]
             # Let's prepare the data in the correct format.
-            texts = [entity['text'] for entity in entities]
-            vectors = [entity['vector'] for entity in entities]
+            texts = [entity["text"] for entity in entities]
+            vectors = [entity["vector"] for entity in entities]
             data_to_insert = [texts, vectors]
 
             result = collection.insert(data_to_insert)
             collection.flush()  # Ensure data is indexed
-            logger.info(f"Successfully inserted {len(entities)} entities into '{collection_name}'.")
+            logger.info(
+                f"Successfully inserted {len(entities)} entities into '{collection_name}'."
+            )
             return result.primary_keys
         except Exception as e:
-            logger.error(f"Failed to insert data into '{collection_name}': {e}", exc_info=True)
+            logger.error(
+                f"Failed to insert data into '{collection_name}': {e}", exc_info=True
+            )
             raise
 
-    async def search(self, collection_name: str, query_vector: list[float], top_k: int = 5) -> list[dict]:
+    async def search(
+        self, collection_name: str, query_vector: list[float], top_k: int = 5
+    ) -> list[dict]:
         """
         Searches for similar vectors in a collection.
 
@@ -221,12 +265,14 @@ class MilvusService:
             return []
 
         if not self.has_collection(collection_name):
-            logger.error(f"Collection '{collection_name}' does not exist. Cannot perform search.")
+            logger.error(
+                f"Collection '{collection_name}' does not exist. Cannot perform search."
+            )
             return []
 
         try:
             collection = Collection(name=collection_name, using=self.alias)
-            collection.load() # Load collection into memory for searching
+            collection.load()  # Load collection into memory for searching
 
             search_params = {
                 "metric_type": "L2",
@@ -238,7 +284,7 @@ class MilvusService:
                 anns_field="vector",
                 param=search_params,
                 limit=top_k,
-                output_fields=["text"]  # Retrieve the original text field
+                output_fields=["text"],  # Retrieve the original text field
             )
 
             # Unload collection after search to free up memory
@@ -248,17 +294,24 @@ class MilvusService:
             hits = results[0]  # Results for the first query vector
             search_results = []
             for hit in hits:
-                search_results.append({
-                    "id": hit.id,
-                    "distance": hit.distance,
-                    "text": hit.entity.get('text')
-                })
-            
-            logger.info(f"Search in '{collection_name}' found {len(search_results)} results.")
+                search_results.append(
+                    {
+                        "id": hit.id,
+                        "distance": hit.distance,
+                        "text": hit.entity.get("text"),
+                    }
+                )
+
+            logger.info(
+                f"Search in '{collection_name}' found {len(search_results)} results."
+            )
             return search_results
 
         except Exception as e:
-            logger.error(f"Failed to search in collection '{collection_name}': {e}", exc_info=True)
+            logger.error(
+                f"Failed to search in collection '{collection_name}': {e}",
+                exc_info=True,
+            )
             raise
 
     def get_collection_count(self, collection_name: str) -> int:
@@ -272,7 +325,9 @@ class MilvusService:
             The number of entities in the collection.
         """
         if not self.initialized:
-            logger.error("Milvus connection not initialized. Cannot get collection count.")
+            logger.error(
+                "Milvus connection not initialized. Cannot get collection count."
+            )
             return 0
 
         if not self.has_collection(collection_name):
@@ -283,9 +338,12 @@ class MilvusService:
             collection = Collection(name=collection_name, using=self.alias)
             return collection.num_entities
         except Exception as e:
-            logger.error(f"Failed to get count for collection '{collection_name}': {e}", exc_info=True)
+            logger.error(
+                f"Failed to get count for collection '{collection_name}': {e}",
+                exc_info=True,
+            )
             return 0
 
 
 # Singleton instance of the service
-milvus_service = MilvusService() 
+milvus_service = MilvusService()

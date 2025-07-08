@@ -12,11 +12,11 @@ from .permission import Permission, RolePermission
 __all__ = [
     "Base",
     "User",
-    "UserRole", 
+    "UserRole",
     "UserConfig",
     "Tenant",
     "KnowledgeBase",
     "Document",
     "Permission",
-    "RolePermission"
+    "RolePermission",
 ]

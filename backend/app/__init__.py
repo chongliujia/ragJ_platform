@@ -1,1 +1,1 @@
-# RAG Platform Backend Application 
+# RAG Platform Backend Application

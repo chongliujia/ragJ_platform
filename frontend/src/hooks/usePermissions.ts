@@ -19,7 +19,7 @@ export const usePermissions = () => {
         isAdmin: false,
         isSuperAdmin: false,
         isUser: false,
-        isGuest: false,
+        isTenantAdmin: false,
         canManageUsers: false,
         canManageTenants: false,
         canManagePermissions: false,
@@ -42,9 +42,6 @@ export const usePermissions = () => {
       if (currentUser.role === 'super_admin') return true;
 
       const rolePermissions: Record<string, string[]> = {
-        'guest': [
-          'view_public_content',
-        ],
         'user': [
           'view_public_content',
           'manage_own_data',
@@ -52,7 +49,7 @@ export const usePermissions = () => {
           'upload_documents',
           'create_knowledge_bases',
         ],
-        'admin': [
+        'tenant_admin': [
           'view_public_content',
           'manage_own_data',
           'chat_access',
@@ -70,17 +67,17 @@ export const usePermissions = () => {
     };
 
     // 角色检查
-    const isAdmin = hasAnyRole(['admin', 'super_admin']);
+    const isAdmin = hasAnyRole(['tenant_admin', 'super_admin']);
     const isSuperAdmin = hasRole('super_admin');
     const isUser = hasRole('user');
-    const isGuest = hasRole('guest');
+    const isTenantAdmin = hasRole('tenant_admin');
 
     // 功能权限检查
-    const canManageUsers = hasAnyRole(['admin', 'super_admin']);
+    const canManageUsers = hasAnyRole(['tenant_admin', 'super_admin']);
     const canManageTenants = hasRole('super_admin');
     const canManagePermissions = hasRole('super_admin');
-    const canViewAnalytics = hasAnyRole(['admin', 'super_admin']);
-    const canManageSystem = hasAnyRole(['admin', 'super_admin']);
+    const canViewAnalytics = hasAnyRole(['tenant_admin', 'super_admin']);
+    const canManageSystem = hasAnyRole(['tenant_admin', 'super_admin']);
 
     return {
       hasRole,
@@ -89,7 +86,7 @@ export const usePermissions = () => {
       isAdmin,
       isSuperAdmin,
       isUser,
-      isGuest,
+      isTenantAdmin,
       canManageUsers,
       canManageTenants,
       canManagePermissions,

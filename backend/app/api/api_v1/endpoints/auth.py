@@ -63,24 +63,24 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    
+
     if not user.is_active:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Inactive user"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
         )
-    
+
     # 更新最后登录时间
     from datetime import datetime
+
     user.last_login_at = datetime.utcnow()
     db.commit()
-    
+
     # 创建访问令牌
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         subject=user.id, expires_delta=access_token_expires
     )
-    
+
     return AuthResponse(
         access_token=access_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
@@ -90,8 +90,8 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
             "email": user.email,
             "full_name": user.full_name,
             "role": user.role,
-            "tenant_id": user.tenant_id
-        }
+            "tenant_id": user.tenant_id,
+        },
     )
 
 
@@ -104,32 +104,29 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == request.username).first():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered"
+            detail="Username already registered",
         )
-    
+
     # 检查邮箱是否已存在
     if db.query(User).filter(User.email == request.email).first():
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered"
         )
-    
+
     # 获取租户
     tenant = db.query(Tenant).filter(Tenant.slug == request.tenant_slug).first()
     if not tenant:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant not found"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant not found"
         )
-    
+
     # 检查租户用户数量限制
     user_count = db.query(User).filter(User.tenant_id == tenant.id).count()
     if user_count >= tenant.max_users:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Tenant user limit exceeded"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant user limit exceeded"
         )
-    
+
     # 创建用户
     user = User(
         username=request.username,
@@ -139,13 +136,13 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         role=UserRole.USER.value,
         tenant_id=tenant.id,
         is_active=True,
-        is_verified=False
+        is_verified=False,
     )
-    
+
     db.add(user)
     db.commit()
     db.refresh(user)
-    
+
     # 创建用户配置
     user_config = UserConfig(
         user_id=user.id,
@@ -153,18 +150,18 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         preferred_embedding_model="text-embedding-v2",
         preferred_rerank_model="gte-rerank",
         theme="light",
-        language="zh"
+        language="zh",
     )
-    
+
     db.add(user_config)
     db.commit()
-    
+
     # 创建访问令牌
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         subject=user.id, expires_delta=access_token_expires
     )
-    
+
     return AuthResponse(
         access_token=access_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
@@ -174,8 +171,8 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
             "email": user.email,
             "full_name": user.full_name,
             "role": user.role,
-            "tenant_id": user.tenant_id
-        }
+            "tenant_id": user.tenant_id,
+        },
     )
 
 
@@ -189,8 +186,7 @@ async def logout():
 
 @router.get("/me", response_model=UserResponse)
 async def get_current_user_info(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)
 ):
     """
     获取当前用户信息
@@ -204,40 +200,41 @@ async def get_current_user_info(
         is_active=current_user.is_active,
         tenant_id=current_user.tenant_id,
         tenant_name=current_user.tenant.name,
-        created_at=current_user.created_at.isoformat()
+        created_at=current_user.created_at.isoformat(),
     )
 
 
 @router.get("/permissions")
 async def get_user_permissions(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)
 ):
     """
     获取当前用户的权限列表
     """
     from app.db.models.permission import Permission, RolePermission
-    
+
     if current_user.role == "super_admin":
         # 超级管理员拥有所有权限
         permissions = db.query(Permission).filter(Permission.is_active == True).all()
     else:
         # 根据角色获取权限
-        permissions = db.query(Permission).join(
-            RolePermission, Permission.id == RolePermission.permission_id
-        ).filter(
-            RolePermission.role == current_user.role,
-            Permission.is_active == True
-        ).all()
-    
+        permissions = (
+            db.query(Permission)
+            .join(RolePermission, Permission.id == RolePermission.permission_id)
+            .filter(
+                RolePermission.role == current_user.role, Permission.is_active == True
+            )
+            .all()
+        )
+
     return {
         "permissions": [
             {
                 "name": p.name,
                 "display_name": p.display_name,
                 "description": p.description,
-                "category": p.category
+                "category": p.category,
             }
             for p in permissions
         ]
-    } 
+    }

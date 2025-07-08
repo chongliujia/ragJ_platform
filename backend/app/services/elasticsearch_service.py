@@ -2,6 +2,7 @@
 Elasticsearch Service
 Handles all interactions with Elasticsearch for keyword-based search.
 """
+
 import logging
 from elasticsearch import AsyncElasticsearch, NotFoundError
 from elasticsearch.helpers import async_bulk
@@ -16,6 +17,7 @@ class ElasticsearchService:
     """
     A singleton service for managing connections and operations with Elasticsearch.
     """
+
     _instance: Optional["ElasticsearchService"] = None
     _es_client: Optional[AsyncElasticsearch] = None
 
@@ -24,11 +26,15 @@ class ElasticsearchService:
         if cls._instance is None:
             cls._instance = ElasticsearchService()
             try:
-                logger.info(f"Connecting to Elasticsearch at {settings.ELASTICSEARCH_HOSTS}")
+                logger.info(
+                    f"Connecting to Elasticsearch at {settings.ELASTICSEARCH_HOSTS}"
+                )
                 cls._es_client = AsyncElasticsearch(hosts=settings.ELASTICSEARCH_HOSTS)
                 # Use client.info() for a more robust health check against modern ES versions
                 info = await cls._es_client.info()
-                logger.info(f"Successfully connected to Elasticsearch. Version: {info['version']['number']}")
+                logger.info(
+                    f"Successfully connected to Elasticsearch. Version: {info['version']['number']}"
+                )
             except Exception as e:
                 logger.error(f"Failed to connect to Elasticsearch: {e}", exc_info=True)
                 cls._es_client = None
@@ -43,7 +49,7 @@ class ElasticsearchService:
         if self._es_client is None:
             raise ConnectionError("Elasticsearch client is not initialized.")
         return self._es_client
-    
+
     async def close(self):
         if self._es_client:
             await self._es_client.close()
@@ -56,7 +62,9 @@ class ElasticsearchService:
         try:
             return await self.client.indices.exists(index=index_name)
         except Exception as e:
-            logger.error(f"Error checking if index '{index_name}' exists: {e}", exc_info=True)
+            logger.error(
+                f"Error checking if index '{index_name}' exists: {e}", exc_info=True
+            )
             return False
 
     async def create_index(self, index_name: str):
@@ -74,7 +82,9 @@ class ElasticsearchService:
         }
         try:
             await self.client.indices.create(index=index_name, body=body)
-            logger.info(f"Successfully created index '{index_name}' with 'standard' analyzer.")
+            logger.info(
+                f"Successfully created index '{index_name}' with 'standard' analyzer."
+            )
         except Exception as e:
             logger.error(f"Failed to create index '{index_name}': {e}", exc_info=True)
             raise
@@ -93,7 +103,9 @@ class ElasticsearchService:
             logger.error(f"Failed to delete index '{index_name}': {e}", exc_info=True)
             raise
 
-    async def bulk_index_documents(self, index_name: str, documents: List[Dict[str, Any]]):
+    async def bulk_index_documents(
+        self, index_name: str, documents: List[Dict[str, Any]]
+    ):
         """
         Indexes a batch of documents into the specified index.
         Each document should be a dictionary, e.g., {"text": "some content"}.
@@ -110,49 +122,58 @@ class ElasticsearchService:
         ]
 
         try:
-            success, errors = await async_bulk(self.client, actions, raise_on_error=False)
+            success, errors = await async_bulk(
+                self.client, actions, raise_on_error=False
+            )
             if errors:
-                logger.error(f"Bulk indexing to '{index_name}' had {len(errors)} errors.")
-                for error in errors[:5]: # Log first 5 errors
+                logger.error(
+                    f"Bulk indexing to '{index_name}' had {len(errors)} errors."
+                )
+                for error in errors[:5]:  # Log first 5 errors
                     logger.error(f"Bulk indexing error: {error}")
             logger.info(f"Successfully indexed {success} documents to '{index_name}'.")
         except Exception as e:
-            logger.error(f"Failed to bulk index documents to '{index_name}': {e}", exc_info=True)
+            logger.error(
+                f"Failed to bulk index documents to '{index_name}': {e}", exc_info=True
+            )
             raise
 
-    async def search(self, index_name: str, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    async def search(
+        self, index_name: str, query: str, top_k: int = 5
+    ) -> List[Dict[str, Any]]:
         """Performs a keyword search against the 'text' field."""
         if not await self.index_exists(index_name):
             logger.warning(f"Cannot search in non-existent index '{index_name}'.")
             return []
-            
-        body = {
-            "query": {
-                "match": {
-                    "text": query
-                }
-            },
-            "size": top_k
-        }
+
+        body = {"query": {"match": {"text": query}}, "size": top_k}
 
         try:
             response = await self.client.search(index=index_name, body=body)
             hits = response["hits"]["hits"]
-            return [{"score": hit["_score"], "text": hit["_source"]["text"]} for hit in hits]
+            return [
+                {"score": hit["_score"], "text": hit["_source"]["text"]} for hit in hits
+            ]
         except Exception as e:
-            logger.error(f"Failed to search in index '{index_name}': {e}", exc_info=True)
+            logger.error(
+                f"Failed to search in index '{index_name}': {e}", exc_info=True
+            )
             return []
+
 
 async def get_elasticsearch_service() -> ElasticsearchService:
     return await ElasticsearchService.get_instance()
 
+
 # This is a module-level instance that will be managed by get_instance
 elasticsearch_service: Optional[ElasticsearchService] = None
+
 
 async def startup_es_service():
     global elasticsearch_service
     elasticsearch_service = await get_elasticsearch_service()
 
+
 async def shutdown_es_service():
     if elasticsearch_service:
-        await elasticsearch_service.close() 
+        await elasticsearch_service.close()

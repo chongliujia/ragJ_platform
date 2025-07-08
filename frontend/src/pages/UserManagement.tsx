@@ -128,7 +128,7 @@ const UserManagement: React.FC = () => {
 
   const loadStats = async () => {
     try {
-      const response = await fetch('/api/v1/admin/stats', {
+      const response = await fetch('/api/v1/users/stats', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
         },
@@ -138,9 +138,9 @@ const UserManagement: React.FC = () => {
         const data = await response.json();
         setStats({
           total_users: data.total_users,
-          active_users: data.total_users - (users.filter(u => !u.is_active).length),
-          admin_users: data.total_users, // This would need to be calculated properly
-          new_users_this_month: 0, // This would need proper calculation
+          active_users: data.active_users,
+          admin_users: data.admin_users,
+          new_users_this_month: data.new_users_this_month,
         });
       }
     } catch (error) {
@@ -214,12 +214,10 @@ const UserManagement: React.FC = () => {
     switch (role) {
       case 'super_admin':
         return 'error';
-      case 'admin':
+      case 'tenant_admin':
         return 'warning';
       case 'user':
         return 'primary';
-      case 'guest':
-        return 'default';
       default:
         return 'default';
     }
@@ -229,12 +227,10 @@ const UserManagement: React.FC = () => {
     switch (role) {
       case 'super_admin':
         return '超级管理员';
-      case 'admin':
-        return '管理员';
+      case 'tenant_admin':
+        return '租户管理员';
       case 'user':
         return '用户';
-      case 'guest':
-        return '访客';
       default:
         return role;
     }
@@ -286,7 +282,7 @@ const UserManagement: React.FC = () => {
                   管理员
                 </Typography>
                 <Typography variant="h5" component="div">
-                  {users.filter(u => u.role === 'admin' || u.role === 'super_admin').length}
+                  {stats.admin_users}
                 </Typography>
               </CardContent>
             </Card>
@@ -298,11 +294,7 @@ const UserManagement: React.FC = () => {
                   本月新增
                 </Typography>
                 <Typography variant="h5" component="div">
-                  {users.filter(u => {
-                    const created = new Date(u.created_at);
-                    const now = new Date();
-                    return created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
-                  }).length}
+                  {stats.new_users_this_month}
                 </Typography>
               </CardContent>
             </Card>
@@ -332,9 +324,8 @@ const UserManagement: React.FC = () => {
               >
                 <MenuItem value="">全部</MenuItem>
                 <MenuItem value="super_admin">超级管理员</MenuItem>
-                <MenuItem value="admin">管理员</MenuItem>
+                <MenuItem value="tenant_admin">租户管理员</MenuItem>
                 <MenuItem value="user">用户</MenuItem>
-                <MenuItem value="guest">访客</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -413,14 +404,21 @@ const UserManagement: React.FC = () => {
                   <IconButton
                     size="small"
                     onClick={() => handleEditUser(user)}
-                    disabled={user.role === 'super_admin' && currentUser?.role !== 'super_admin'}
+                    disabled={
+                      (user.role === 'super_admin' && currentUser?.role !== 'super_admin') ||
+                      (user.role === 'tenant_admin' && currentUser?.role === 'tenant_admin' && user.id !== currentUser?.id)
+                    }
                   >
                     <EditIcon />
                   </IconButton>
                   <IconButton
                     size="small"
                     onClick={() => handleDeleteUser(user)}
-                    disabled={user.id === currentUser?.id || (user.role === 'super_admin' && currentUser?.role !== 'super_admin')}
+                    disabled={
+                      user.id === currentUser?.id ||
+                      (user.role === 'super_admin' && currentUser?.role !== 'super_admin') ||
+                      (user.role === 'tenant_admin' && currentUser?.role === 'tenant_admin' && user.id !== currentUser?.id)
+                    }
                     color="error"
                   >
                     <DeleteIcon />
@@ -474,9 +472,10 @@ const UserManagement: React.FC = () => {
                   label="角色"
                   disabled={selectedUser?.role === 'super_admin' && currentUser?.role !== 'super_admin'}
                 >
-                  <MenuItem value="guest">访客</MenuItem>
                   <MenuItem value="user">用户</MenuItem>
-                  <MenuItem value="admin">管理员</MenuItem>
+                  {(currentUser?.role === 'super_admin' || currentUser?.role === 'tenant_admin') && (
+                    <MenuItem value="tenant_admin">租户管理员</MenuItem>
+                  )}
                   {currentUser?.role === 'super_admin' && (
                     <MenuItem value="super_admin">超级管理员</MenuItem>
                   )}
