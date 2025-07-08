@@ -126,25 +126,32 @@ const ModelConfigManager: React.FC = () => {
       const activeModel = activeModels.find(m => m.model_type === modelType);
       if (!activeModel) return;
 
-      // 获取可用模型列表
-      const modelsResponse = await modelConfigApi.getProviderModels(activeModel.provider, modelType);
+      // 获取模型配置详情（包含已保存的API密钥）
+      const [modelsResponse, detailsResponse] = await Promise.all([
+        modelConfigApi.getProviderModels(activeModel.provider, modelType),
+        modelConfigApi.getModelConfigDetails(modelType)
+      ]);
+      
       setAvailableModels(modelsResponse.data.models);
 
-      // 设置编辑配置
+      // 设置编辑配置，使用已保存的值
       setEditingModel({
         type: modelType,
         config: {
-          provider: activeModel.provider,
-          model_name: activeModel.model_name,
-          api_key: '', // 需要用户重新输入
-          enabled: activeModel.enabled,
+          provider: detailsResponse.data.provider,
+          model_name: detailsResponse.data.model_name,
+          api_key: detailsResponse.data.api_key, // 使用已保存的API密钥（或为空）
+          api_base: detailsResponse.data.api_base,
+          temperature: detailsResponse.data.temperature,
+          max_tokens: detailsResponse.data.max_tokens,
+          enabled: detailsResponse.data.enabled,
         }
       });
       
       setEditDialogOpen(true);
     } catch (error: any) {
       console.error('Failed to open edit dialog:', error);
-      setError(error.response?.data?.detail || '获取模型列表失败');
+      setError(error.response?.data?.detail || '获取模型配置失败');
     }
   };
 
@@ -464,9 +471,18 @@ const ModelConfigManager: React.FC = () => {
                 type="password"
                 value={editingModel.config.api_key}
                 onChange={(e) => updateEditingConfig({ api_key: e.target.value })}
-                required
+                required={!editingModel.config.api_key || !editingModel.config.api_key.includes('*')}
                 fullWidth
-                helperText="请输入有效的API密钥"
+                helperText={
+                  editingModel.config.api_key && editingModel.config.api_key.includes('*') 
+                    ? '已保存API密钥，留空保持不变或输入新的API密钥' 
+                    : '请输入有效的API密钥'
+                }
+                placeholder={
+                  editingModel.config.api_key && editingModel.config.api_key.includes('*') 
+                    ? '留空保持原有API密钥' 
+                    : '请输入API密钥'
+                }
               />
 
               {/* API端点 */}
@@ -476,6 +492,28 @@ const ModelConfigManager: React.FC = () => {
                 onChange={(e) => updateEditingConfig({ api_base: e.target.value })}
                 fullWidth
                 helperText="留空使用默认端点"
+              />
+              
+              {/* 温度参数 */}
+              <TextField
+                label="温度 (可选)"
+                type="number"
+                value={editingModel.config.temperature || ''}
+                onChange={(e) => updateEditingConfig({ temperature: parseFloat(e.target.value) || undefined })}
+                fullWidth
+                inputProps={{ min: 0, max: 2, step: 0.1 }}
+                helperText="控制输出的随机性（0-2）"
+              />
+              
+              {/* 最大令牌数 */}
+              <TextField
+                label="最大令牌数 (可选)"
+                type="number"
+                value={editingModel.config.max_tokens || ''}
+                onChange={(e) => updateEditingConfig({ max_tokens: parseInt(e.target.value) || undefined })}
+                fullWidth
+                inputProps={{ min: 1, max: 100000 }}
+                helperText="限制输出的最大令牌数"
               />
 
               {/* 启用开关 */}
@@ -499,7 +537,10 @@ const ModelConfigManager: React.FC = () => {
             onClick={saveModelConfig}
             variant="contained"
             startIcon={<SaveIcon />}
-            disabled={!editingModel?.config.api_key}
+            disabled={
+              !editingModel?.config.api_key || 
+              (!editingModel.config.api_key.includes('*') && editingModel.config.api_key.trim() === '')
+            }
           >
             保存配置
           </Button>

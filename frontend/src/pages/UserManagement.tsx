@@ -40,6 +40,7 @@ import {
   Visibility as ViewIcon,
   AdminPanelSettings as AdminIcon,
 } from '@mui/icons-material';
+import { useTranslation } from 'react-i18next';
 import { AuthManager } from '../services/authApi';
 import type { UserInfo } from '../types/auth';
 
@@ -66,6 +67,7 @@ interface UserStats {
 }
 
 const UserManagement: React.FC = () => {
+  const { t } = useTranslation();
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -226,11 +228,11 @@ const UserManagement: React.FC = () => {
   const getRoleLabel = (role: string) => {
     switch (role) {
       case 'super_admin':
-        return '超级管理员';
+        return t('nav.roles.superAdmin');
       case 'tenant_admin':
-        return '租户管理员';
+        return t('nav.roles.tenantAdmin');
       case 'user':
-        return '用户';
+        return t('nav.roles.user');
       default:
         return role;
     }
@@ -239,7 +241,7 @@ const UserManagement: React.FC = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        用户管理
+        {t('userManagement.title')}
       </Typography>
 
       {error && (
@@ -255,7 +257,7 @@ const UserManagement: React.FC = () => {
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
-                  总用户数
+                  {t('userManagement.stats.totalUsers')}
                 </Typography>
                 <Typography variant="h5" component="div">
                   {stats.total_users}
@@ -267,7 +269,7 @@ const UserManagement: React.FC = () => {
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
-                  活跃用户
+                  {t('userManagement.stats.activeUsers')}
                 </Typography>
                 <Typography variant="h5" component="div">
                   {stats.active_users}
@@ -279,7 +281,7 @@ const UserManagement: React.FC = () => {
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
-                  管理员
+                  {t('userManagement.stats.adminUsers')}
                 </Typography>
                 <Typography variant="h5" component="div">
                   {stats.admin_users}
@@ -291,7 +293,7 @@ const UserManagement: React.FC = () => {
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
-                  本月新增
+                  {t('userManagement.stats.newThisMonth')}
                 </Typography>
                 <Typography variant="h5" component="div">
                   {stats.new_users_this_month}
@@ -308,38 +310,38 @@ const UserManagement: React.FC = () => {
           <Grid item xs={12} md={4}>
             <TextField
               fullWidth
-              label="搜索用户"
+              label={t('userManagement.search.placeholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="用户名、邮箱或姓名"
+              placeholder={t('userManagement.search.hint')}
             />
           </Grid>
           <Grid item xs={12} md={3}>
             <FormControl fullWidth>
-              <InputLabel>角色</InputLabel>
+              <InputLabel>{t('userManagement.filters.role')}</InputLabel>
               <Select
                 value={roleFilter}
                 onChange={(e) => setRoleFilter(e.target.value)}
-                label="角色"
+                label={t('userManagement.filters.role')}
               >
-                <MenuItem value="">全部</MenuItem>
-                <MenuItem value="super_admin">超级管理员</MenuItem>
-                <MenuItem value="tenant_admin">租户管理员</MenuItem>
-                <MenuItem value="user">用户</MenuItem>
+                <MenuItem value="">{t('userManagement.filters.all')}</MenuItem>
+                <MenuItem value="super_admin">{t('nav.roles.superAdmin')}</MenuItem>
+                <MenuItem value="tenant_admin">{t('nav.roles.tenantAdmin')}</MenuItem>
+                <MenuItem value="user">{t('nav.roles.user')}</MenuItem>
               </Select>
             </FormControl>
           </Grid>
           <Grid item xs={12} md={3}>
             <FormControl fullWidth>
-              <InputLabel>状态</InputLabel>
+              <InputLabel>{t('userManagement.filters.status')}</InputLabel>
               <Select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                label="状态"
+                label={t('userManagement.filters.status')}
               >
-                <MenuItem value="">全部</MenuItem>
-                <MenuItem value="true">活跃</MenuItem>
-                <MenuItem value="false">禁用</MenuItem>
+                <MenuItem value="">{t('userManagement.filters.all')}</MenuItem>
+                <MenuItem value="true">{t('userManagement.filters.active')}</MenuItem>
+                <MenuItem value="false">{t('userManagement.filters.disabled')}</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -350,7 +352,7 @@ const UserManagement: React.FC = () => {
               startIcon={<AddIcon />}
               onClick={() => {/* TODO: 实现添加用户 */}}
             >
-              添加用户
+              {t('userManagement.actions.addUser')}
             </Button>
           </Grid>
         </Grid>
@@ -361,16 +363,16 @@ const UserManagement: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>用户名</TableCell>
-              <TableCell>邮箱</TableCell>
-              <TableCell>姓名</TableCell>
-              <TableCell>角色</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell>租户</TableCell>
-              <TableCell>知识库</TableCell>
-              <TableCell>文档</TableCell>
-              <TableCell>创建时间</TableCell>
-              <TableCell>操作</TableCell>
+              <TableCell>{t('userManagement.table.username')}</TableCell>
+              <TableCell>{t('userManagement.table.email')}</TableCell>
+              <TableCell>{t('userManagement.table.fullName')}</TableCell>
+              <TableCell>{t('userManagement.table.role')}</TableCell>
+              <TableCell>{t('userManagement.table.status')}</TableCell>
+              <TableCell>{t('userManagement.table.tenant')}</TableCell>
+              <TableCell>{t('userManagement.table.knowledgeBases')}</TableCell>
+              <TableCell>{t('userManagement.table.documents')}</TableCell>
+              <TableCell>{t('userManagement.table.createdAt')}</TableCell>
+              <TableCell>{t('userManagement.table.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -389,7 +391,7 @@ const UserManagement: React.FC = () => {
                 </TableCell>
                 <TableCell>
                   <Chip
-                    label={user.is_active ? '活跃' : '禁用'}
+                    label={user.is_active ? t('userManagement.filters.active') : t('userManagement.filters.disabled')}
                     color={user.is_active ? 'success' : 'default'}
                     size="small"
                   />
@@ -444,13 +446,13 @@ const UserManagement: React.FC = () => {
 
       {/* 编辑用户对话框 */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>编辑用户</DialogTitle>
+        <DialogTitle>{t('userManagement.dialog.editUser')}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid item xs={12}>
               <TextField
                 fullWidth
-                label="姓名"
+                label={t('userManagement.dialog.fullName')}
                 value={editForm.full_name}
                 onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
               />
@@ -458,26 +460,26 @@ const UserManagement: React.FC = () => {
             <Grid item xs={12}>
               <TextField
                 fullWidth
-                label="邮箱"
+                label={t('userManagement.dialog.email')}
                 value={editForm.email}
                 onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
               />
             </Grid>
             <Grid item xs={12}>
               <FormControl fullWidth>
-                <InputLabel>角色</InputLabel>
+                <InputLabel>{t('userManagement.dialog.role')}</InputLabel>
                 <Select
                   value={editForm.role}
                   onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                  label="角色"
+                  label={t('userManagement.dialog.role')}
                   disabled={selectedUser?.role === 'super_admin' && currentUser?.role !== 'super_admin'}
                 >
-                  <MenuItem value="user">用户</MenuItem>
+                  <MenuItem value="user">{t('nav.roles.user')}</MenuItem>
                   {(currentUser?.role === 'super_admin' || currentUser?.role === 'tenant_admin') && (
-                    <MenuItem value="tenant_admin">租户管理员</MenuItem>
+                    <MenuItem value="tenant_admin">{t('nav.roles.tenantAdmin')}</MenuItem>
                   )}
                   {currentUser?.role === 'super_admin' && (
-                    <MenuItem value="super_admin">超级管理员</MenuItem>
+                    <MenuItem value="super_admin">{t('nav.roles.superAdmin')}</MenuItem>
                   )}
                 </Select>
               </FormControl>
@@ -490,29 +492,29 @@ const UserManagement: React.FC = () => {
                     onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })}
                   />
                 }
-                label="账户状态"
+                label={t('userManagement.dialog.accountStatus')}
               />
             </Grid>
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>取消</Button>
-          <Button onClick={handleSaveUser} variant="contained">保存</Button>
+          <Button onClick={() => setEditDialogOpen(false)}>{t('userManagement.actions.cancel')}</Button>
+          <Button onClick={handleSaveUser} variant="contained">{t('userManagement.actions.save')}</Button>
         </DialogActions>
       </Dialog>
 
       {/* 删除确认对话框 */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>确认删除</DialogTitle>
+        <DialogTitle>{t('userManagement.dialog.confirmDelete')}</DialogTitle>
         <DialogContent>
           <Typography>
-            确定要删除用户 "{selectedUser?.username}" 吗？此操作无法撤销。
+            {t('userManagement.dialog.deleteMessage', { username: selectedUser?.username })}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>取消</Button>
+          <Button onClick={() => setDeleteDialogOpen(false)}>{t('userManagement.actions.cancel')}</Button>
           <Button onClick={handleConfirmDelete} color="error" variant="contained">
-            删除
+            {t('userManagement.actions.delete')}
           </Button>
         </DialogActions>
       </Dialog>

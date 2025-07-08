@@ -206,6 +206,12 @@ class ModelConfigService:
                 # 加载提供商配置
                 if "providers" in config_data:
                     for provider_data in config_data["providers"]:
+                        # 转换字符串为枚举
+                        provider_data['provider'] = ProviderType(provider_data['provider'])
+                        provider_data['models'] = {
+                            ModelType(model_type): models 
+                            for model_type, models in provider_data['models'].items()
+                        }
                         provider = ProviderConfig(**provider_data)
                         self.providers[provider.provider] = provider
 
@@ -215,6 +221,8 @@ class ModelConfigService:
                         "active_models"
                     ].items():
                         model_type = ModelType(model_type_str)
+                        # 转换字符串为枚举
+                        model_data['provider'] = ProviderType(model_data['provider'])
                         self.active_models[model_type] = ModelConfig(**model_data)
 
                 logger.info("Model configuration loaded successfully")
@@ -254,12 +262,26 @@ class ModelConfigService:
     def save_config(self):
         """保存配置到文件"""
         try:
+            # 转换为可序列化的格式
+            providers_data = []
+            for provider in self.providers.values():
+                provider_dict = provider.dict()
+                provider_dict['provider'] = provider_dict['provider'].value
+                provider_dict['models'] = {
+                    model_type.value: models 
+                    for model_type, models in provider_dict['models'].items()
+                }
+                providers_data.append(provider_dict)
+            
+            active_models_data = {}
+            for model_type, model_config in self.active_models.items():
+                config_dict = model_config.dict()
+                config_dict['provider'] = config_dict['provider'].value
+                active_models_data[model_type.value] = config_dict
+            
             config_data = {
-                "providers": [provider.dict() for provider in self.providers.values()],
-                "active_models": {
-                    model_type.value: model_config.dict()
-                    for model_type, model_config in self.active_models.items()
-                },
+                "providers": providers_data,
+                "active_models": active_models_data,
             }
 
             with open(self.config_file, "w", encoding="utf-8") as f:

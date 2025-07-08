@@ -35,6 +35,7 @@ import {
   Lock as LockIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 import { AuthManager } from '../services/authApi';
 import type { LoginRequest, RegisterRequest } from '../types/auth';
 
@@ -104,12 +105,12 @@ const Login: React.FC = () => {
 
     try {
       await authManager.login(loginForm);
-      setSuccess('登录成功！');
+      setSuccess(t('auth.login.loginSuccess'));
       setTimeout(() => {
         navigate('/');
       }, 1000);
     } catch (error: any) {
-      setError(error.response?.data?.detail || '登录失败，请检查用户名和密码');
+      setError(error.response?.data?.detail || t('auth.login.loginError'));
     } finally {
       setLoading(false);
     }
@@ -121,13 +122,13 @@ const Login: React.FC = () => {
 
     // 验证密码确认
     if (registerForm.password !== confirmPassword) {
-      setError('密码确认不匹配');
+      setError(t('auth.register.passwordMismatch'));
       return;
     }
 
     // 基本验证
     if (!registerForm.username || !registerForm.email || !registerForm.password) {
-      setError('请填写所有必需字段');
+      setError(t('auth.register.fillAllFields'));
       return;
     }
 
@@ -135,12 +136,12 @@ const Login: React.FC = () => {
 
     try {
       await authManager.register(registerForm);
-      setSuccess('注册成功！正在跳转...');
+      setSuccess(t('auth.register.registerSuccess'));
       setTimeout(() => {
         navigate('/');
       }, 1000);
     } catch (error: any) {
-      setError(error.response?.data?.detail || '注册失败，请稍后重试');
+      setError(error.response?.data?.detail || t('auth.register.registerError'));
     } finally {
       setLoading(false);
     }
@@ -151,7 +152,14 @@ const Login: React.FC = () => {
       sx={{
         minHeight: '100vh',
         width: '100vw',
-        background: `linear-gradient(135deg, ${theme.palette.primary.dark} 0%, ${theme.palette.primary.main} 35%, ${theme.palette.secondary.main} 100%)`,
+        background: `linear-gradient(135deg, #0a0e1a 0%, #1a1f2e 25%, #2a3441 50%, #1a1f2e 75%, #0a0e1a 100%)`,
+        backgroundSize: '400% 400%',
+        animation: 'gradientShift 15s ease infinite',
+        '@keyframes gradientShift': {
+          '0%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+          '100%': { backgroundPosition: '0% 50%' },
+        },
         position: 'relative',
         overflow: 'hidden',
         '&::before': {
@@ -161,9 +169,9 @@ const Login: React.FC = () => {
           left: 0,
           right: 0,
           bottom: 0,
-          background: `radial-gradient(circle at 20% 50%, ${alpha(theme.palette.primary.light, 0.3)} 0%, transparent 50%), 
-                      radial-gradient(circle at 80% 20%, ${alpha(theme.palette.secondary.light, 0.3)} 0%, transparent 50%), 
-                      radial-gradient(circle at 40% 80%, ${alpha(theme.palette.primary.light, 0.2)} 0%, transparent 50%)`,
+          background: `radial-gradient(circle at 20% 50%, rgba(0, 212, 255, 0.15) 0%, transparent 50%), 
+                      radial-gradient(circle at 80% 20%, rgba(255, 107, 53, 0.1) 0%, transparent 50%), 
+                      radial-gradient(circle at 40% 80%, rgba(0, 212, 255, 0.08) 0%, transparent 50%)`,
         },
       }}
     >
@@ -175,7 +183,7 @@ const Login: React.FC = () => {
           left: '10%',
           width: 60,
           height: 60,
-          background: alpha(theme.palette.primary.light, 0.1),
+          background: 'rgba(0, 212, 255, 0.1)',
           borderRadius: '50%',
           animation: 'float 6s ease-in-out infinite',
           '@keyframes float': {
@@ -191,7 +199,7 @@ const Login: React.FC = () => {
           right: '15%',
           width: 40,
           height: 40,
-          background: alpha(theme.palette.secondary.light, 0.1),
+          background: 'rgba(255, 107, 53, 0.12)',
           borderRadius: '50%',
           animation: 'float 4s ease-in-out infinite 1s',
         }}
@@ -203,7 +211,7 @@ const Login: React.FC = () => {
           left: '20%',
           width: 80,
           height: 80,
-          background: alpha(theme.palette.primary.light, 0.05),
+          background: 'rgba(0, 212, 255, 0.08)',
           borderRadius: '50%',
           animation: 'float 8s ease-in-out infinite 2s',
         }}
@@ -248,13 +256,14 @@ const Login: React.FC = () => {
               }}>
                 <Box
                   sx={{
-                    background: `linear-gradient(45deg, ${theme.palette.primary.light}, ${theme.palette.secondary.main})`,
+                    background: 'linear-gradient(45deg, #00d4ff, #4dd0ff)',
                     borderRadius: 3,
                     p: { xs: 1.5, sm: 2 },
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: `0 8px 32px ${alpha(theme.palette.primary.main, 0.3)}`,
+                    boxShadow: '0 8px 32px rgba(0, 212, 255, 0.3)',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
                   }}
                 >
                   <BotIcon sx={{ fontSize: { xs: 32, sm: 40 }, color: 'white' }} />
@@ -264,7 +273,8 @@ const Login: React.FC = () => {
                     variant="h3"
                     sx={{
                       fontWeight: 800,
-                      background: `linear-gradient(45deg, ${theme.palette.primary.light}, white)`,
+                      background: 'linear-gradient(45deg, #00d4ff, #ffffff)',
+                      filter: 'drop-shadow(0 0 10px rgba(0, 212, 255, 0.3))',
                       backgroundClip: 'text',
                       textFillColor: 'transparent',
                       WebkitBackgroundClip: 'text',
@@ -278,7 +288,8 @@ const Login: React.FC = () => {
                   <Typography
                     variant="h6"
                     sx={{
-                      color: alpha(theme.palette.common.white, 0.9),
+                      color: 'rgba(255, 255, 255, 0.95)',
+                      textShadow: '0 2px 10px rgba(0, 0, 0, 0.3)',
                       fontWeight: 300,
                       letterSpacing: { xs: 1, sm: 2 },
                       fontSize: { xs: '1rem', sm: '1.25rem' },
@@ -298,7 +309,7 @@ const Login: React.FC = () => {
                   fontSize: { xs: '1.25rem', sm: '1.5rem', md: '1.75rem' },
                 }}
               >
-                下一代智能知识平台
+                {t('auth.platform.title')}
               </Typography>
               
               <Typography
@@ -311,7 +322,7 @@ const Login: React.FC = () => {
                   mb: { xs: 2, sm: 0 },
                 }}
               >
-                基于先进的检索增强生成技术，为您的团队提供智能化的知识管理和问答解决方案
+                {t('auth.platform.description')}
               </Typography>
 
               {/* 特性标签 */}
@@ -322,7 +333,7 @@ const Login: React.FC = () => {
                 mt: { xs: 2, sm: 3 },
                 justifyContent: { xs: 'center', lg: 'flex-start' }
               }}>
-                {['多租户', 'AI驱动', '实时问答', '安全可靠'].map((feature) => (
+                {[t('auth.platform.features.multiTenant'), t('auth.platform.features.aiDriven'), t('auth.platform.features.realTimeChat'), t('auth.platform.features.secure')].map((feature) => (
                   <Box
                     key={feature}
                     sx={{
@@ -403,22 +414,45 @@ const Login: React.FC = () => {
             <Paper
               elevation={0}
               sx={{
-                background: alpha(theme.palette.common.white, 0.95),
+                background: 'rgba(255, 255, 255, 0.98)',
                 backdropFilter: 'blur(20px)',
-                border: `1px solid ${alpha(theme.palette.common.white, 0.2)}`,
+                border: '1px solid rgba(0, 212, 255, 0.1)',
                 borderRadius: { xs: 3, sm: 4 },
                 overflow: 'hidden',
-                boxShadow: `0 16px 32px ${alpha(theme.palette.common.black, 0.1)}`,
+                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)',
                 width: '100%',
                 maxWidth: { xs: '100%', sm: 480, md: 420 },
                 mx: 'auto',
               }}
             >
+              {/* 语言切换器 */}
+              <Box sx={{ 
+                display: 'flex', 
+                justifyContent: 'flex-end', 
+                p: 2,
+                borderBottom: '1px solid rgba(0, 212, 255, 0.1)',
+                '& .MuiIconButton-root': {
+                  color: '#00d4ff',
+                  backgroundColor: 'rgba(0, 212, 255, 0.08)',
+                  border: '1px solid rgba(0, 212, 255, 0.2)',
+                  '&:hover': {
+                    backgroundColor: 'rgba(0, 212, 255, 0.15)',
+                    transform: 'scale(1.05)',
+                    color: '#0099cc'
+                  }
+                },
+                '& .MuiSvgIcon-root': {
+                  fontSize: '1.2rem'
+                }
+              }}>
+                <LanguageSwitcher />
+              </Box>
+              
               {/* 标签栏 */}
               <Box
                 sx={{
-                  background: alpha(theme.palette.primary.main, 0.02),
-                  borderBottom: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+                  background: 'rgba(0, 212, 255, 0.03)',
+                  borderBottom: '1px solid rgba(0, 212, 255, 0.15)',
                 }}
               >
                 <Tabs 
@@ -433,26 +467,27 @@ const Login: React.FC = () => {
                       py: 2,
                     },
                     '& .Mui-selected': {
-                      color: theme.palette.primary.main,
+                      color: '#00d4ff',
+                      fontWeight: 700,
                     },
                     '& .MuiTabs-indicator': {
                       height: 3,
                       borderRadius: 1.5,
-                      background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
+                      background: 'linear-gradient(45deg, #00d4ff, #ff6b35)',
                     },
                   }}
                 >
                   <Tab 
                     icon={<LoginIcon />} 
                     iconPosition="start"
-                    label="登录" 
+                    label={t('auth.login.title')} 
                     id="auth-tab-0" 
                     aria-controls="auth-tabpanel-0" 
                   />
                   <Tab 
                     icon={<RegisterIcon />} 
                     iconPosition="start"
-                    label="注册" 
+                    label={t('auth.register.title')} 
                     id="auth-tab-1" 
                     aria-controls="auth-tabpanel-1" 
                   />
@@ -465,7 +500,8 @@ const Login: React.FC = () => {
               <Box sx={{ textAlign: 'center', mb: { xs: 3, sm: 4 } }}>
                 <SecurityIcon sx={{ 
                   fontSize: { xs: 40, sm: 48 }, 
-                  color: theme.palette.primary.main, 
+                  color: '#00d4ff',
+                  filter: 'drop-shadow(0 0 8px rgba(0, 212, 255, 0.3))', 
                   mb: 2 
                 }} />
                 <Typography 
@@ -473,16 +509,20 @@ const Login: React.FC = () => {
                   variant="h4" 
                   fontWeight={700} 
                   gutterBottom
-                  sx={{ fontSize: { xs: '1.75rem', sm: '2.125rem' } }}
+                  sx={{ 
+                    fontSize: { xs: '1.75rem', sm: '2.125rem' },
+                    color: '#2c3e50',
+                    textShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                  }}
                 >
-                  欢迎回来
+                  {t('auth.login.welcome')}
                 </Typography>
                 <Typography 
                   variant="body2" 
                   color="text.secondary"
                   sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
                 >
-                  登录您的账户以继续使用 RAG 平台
+                  {t('auth.login.subtitle')}
                 </Typography>
               </Box>
               
@@ -526,7 +566,7 @@ const Login: React.FC = () => {
                   autoFocus
                   value={loginForm.username}
                   onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
-                  placeholder="请输入用户名"
+                  placeholder={t('auth.login.usernamePlaceholder')}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -559,7 +599,7 @@ const Login: React.FC = () => {
                   autoComplete="current-password"
                   value={loginForm.password}
                   onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                  placeholder="请输入密码"
+                  placeholder={t('auth.login.passwordPlaceholder')}
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
@@ -610,7 +650,7 @@ const Login: React.FC = () => {
                     }
                     label={
                       <Typography variant="body2" color="text.secondary">
-                        记住我
+                        {t('auth.login.rememberMe')}
                       </Typography>
                     }
                   />
@@ -626,7 +666,7 @@ const Login: React.FC = () => {
                       },
                     }}
                   >
-                    忘记密码？
+                    {t('auth.login.forgotPassword')}
                   </Link>
                 </Box>
 
@@ -640,15 +680,17 @@ const Login: React.FC = () => {
                     mb: 2,
                     py: 1.5,
                     borderRadius: 2,
-                    background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`,
-                    boxShadow: `0 8px 32px ${alpha(theme.palette.primary.main, 0.3)}`,
+                    background: 'linear-gradient(45deg, #00d4ff, #0099cc)',
+                    color: 'white',
+                    fontWeight: 600,
+                    boxShadow: '0 8px 32px rgba(0, 212, 255, 0.4)',
                     fontSize: '1rem',
                     fontWeight: 600,
                     textTransform: 'none',
                     transition: 'all 0.3s ease',
                     '&:hover': {
                       transform: 'translateY(-2px)',
-                      boxShadow: `0 12px 40px ${alpha(theme.palette.primary.main, 0.4)}`,
+                      boxShadow: '0 12px 40px rgba(0, 212, 255, 0.5)',
                     },
                     '&:disabled': {
                       background: theme.palette.action.disabledBackground,
@@ -672,12 +714,12 @@ const Login: React.FC = () => {
                           },
                         }}
                       />
-                      登录中...
+                      {t('auth.login.loginning')}
                     </Box>
                   ) : (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <LoginIcon />
-                      立即登录
+                      {t('auth.login.loginButton')}
                     </Box>
                   )}
                 </Button>
@@ -691,7 +733,8 @@ const Login: React.FC = () => {
                   <Box sx={{ textAlign: 'center', mb: { xs: 3, sm: 4 } }}>
                     <RegisterIcon sx={{ 
                       fontSize: { xs: 40, sm: 48 }, 
-                      color: theme.palette.secondary.main, 
+                      color: '#ff6b35',
+                      filter: 'drop-shadow(0 0 8px rgba(255, 107, 53, 0.3))', 
                       mb: 2 
                     }} />
                     <Typography 
@@ -699,16 +742,20 @@ const Login: React.FC = () => {
                       variant="h4" 
                       fontWeight={700} 
                       gutterBottom
-                      sx={{ fontSize: { xs: '1.75rem', sm: '2.125rem' } }}
+                      sx={{ 
+                        fontSize: { xs: '1.75rem', sm: '2.125rem' },
+                        color: '#2c3e50',
+                        textShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                      }}
                     >
-                      创建账户
+                      {t('auth.register.welcome')}
                     </Typography>
                     <Typography 
                       variant="body2" 
                       color="text.secondary"
                       sx={{ fontSize: { xs: '0.875rem', sm: '1rem' } }}
                     >
-                      加入 RAG 平台，开启智能知识管理之旅
+                      {t('auth.register.subtitle')}
                     </Typography>
                   </Box>
                   
@@ -751,7 +798,7 @@ const Login: React.FC = () => {
                           id="fullName"
                           value={registerForm.full_name}
                           onChange={(e) => setRegisterForm({ ...registerForm, full_name: e.target.value })}
-                          placeholder="请输入姓名"
+                          placeholder={t('auth.register.fullNamePlaceholder')}
                           InputProps={{
                             startAdornment: (
                               <InputAdornment position="start">
@@ -784,7 +831,7 @@ const Login: React.FC = () => {
                           autoComplete="username"
                           value={registerForm.username}
                           onChange={(e) => setRegisterForm({ ...registerForm, username: e.target.value })}
-                          placeholder="请输入用户名"
+                          placeholder={t('auth.register.usernamePlaceholder')}
                           InputProps={{
                             startAdornment: (
                               <InputAdornment position="start">
@@ -818,7 +865,7 @@ const Login: React.FC = () => {
                           type="email"
                           value={registerForm.email}
                           onChange={(e) => setRegisterForm({ ...registerForm, email: e.target.value })}
-                          placeholder="请输入邮箱地址"
+                          placeholder={t('auth.register.emailPlaceholder')}
                           InputProps={{
                             startAdornment: (
                               <InputAdornment position="start">
@@ -852,7 +899,7 @@ const Login: React.FC = () => {
                           autoComplete="new-password"
                           value={registerForm.password}
                           onChange={(e) => setRegisterForm({ ...registerForm, password: e.target.value })}
-                          placeholder="请输入密码"
+                          placeholder={t('auth.register.passwordPlaceholder')}
                           InputProps={{
                             startAdornment: (
                               <InputAdornment position="start">
@@ -896,7 +943,7 @@ const Login: React.FC = () => {
                           id="confirmPassword"
                           value={confirmPassword}
                           onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder="请确认密码"
+                          placeholder={t('auth.register.confirmPasswordPlaceholder')}
                           InputProps={{
                             startAdornment: (
                               <InputAdornment position="start">
@@ -943,15 +990,17 @@ const Login: React.FC = () => {
                         mb: 2,
                         py: 1.5,
                         borderRadius: 2,
-                        background: `linear-gradient(45deg, ${theme.palette.secondary.main}, ${theme.palette.primary.main})`,
-                        boxShadow: `0 8px 32px ${alpha(theme.palette.secondary.main, 0.3)}`,
+                        background: 'linear-gradient(45deg, #ff6b35, #00d4ff)',
+                        color: 'white',
+                        fontWeight: 600,
+                        boxShadow: '0 8px 32px rgba(255, 107, 53, 0.4)',
                         fontSize: '1rem',
                         fontWeight: 600,
                         textTransform: 'none',
                         transition: 'all 0.3s ease',
                         '&:hover': {
                           transform: 'translateY(-2px)',
-                          boxShadow: `0 12px 40px ${alpha(theme.palette.secondary.main, 0.4)}`,
+                          boxShadow: '0 12px 40px rgba(255, 107, 53, 0.5)',
                         },
                         '&:disabled': {
                           background: theme.palette.action.disabledBackground,
@@ -975,12 +1024,12 @@ const Login: React.FC = () => {
                               },
                             }}
                           />
-                          注册中...
+                          {t('auth.register.registering')}
                         </Box>
                       ) : (
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <RegisterIcon />
-                          立即注册
+                          {t('auth.register.registerButton')}
                         </Box>
                       )}
                     </Button>
@@ -1001,7 +1050,7 @@ const Login: React.FC = () => {
             <Typography 
               variant="body2" 
               sx={{ 
-                color: alpha(theme.palette.common.white, 0.7),
+                color: 'rgba(255, 255, 255, 0.8)',
                 fontSize: '0.75rem'
               }}
             >

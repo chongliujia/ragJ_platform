@@ -33,7 +33,19 @@
     "chat": "智能对话",
     "settings": "系统设置",
     "title": "RAG Platform",
-    "subtitle": "智能检索增强平台"
+    "subtitle": "智能检索增强平台",
+    "connectionTest": "连接测试",
+    "adminFeatures": "管理功能",
+    "userManagement": "用户管理",
+    "tenantManagement": "租户管理",
+    "permissionManagement": "权限管理",
+    "userSettings": "个人设置",
+    "logout": "退出登录",
+    "roles": {
+      "superAdmin": "超级管理员",
+      "tenantAdmin": "租户管理员",
+      "user": "用户"
+    }
   },
   "dashboard": {
     "title": "仪表板",
@@ -107,10 +119,11 @@
     "selectKnowledgeBase": "选择知识库",
     "inputPlaceholder": "输入您的问题...",
     "thinking": "正在思考...",
-    "welcome": "您好！我是 RAG Platform 的智能助手。请选择一个知识库，然后开始对话。",
+    "welcome": "您好！我是 RAG Platform 的智能助手。您可以选择知识库进行基于文档的问答，或者直接进行普通对话。",
     "selectKnowledgeBaseFirst": "请先选择一个知识库",
     "errorResponse": "抱歉，我暂时无法回答您的问题。请稍后再试。",
-    "fetchKnowledgeBasesError": "获取知识库列表失败"
+    "fetchKnowledgeBasesError": "获取知识库列表失败",
+    "normalChat": "普通对话（无知识库）"
   },
   "documents": {
     "title": "文档管理",
@@ -140,7 +153,13 @@
     }
   },
   "settings": {
-    "title": "模型配置",
+    "title": "设置",
+    "tabs": {
+      "personal": "个人设置",
+      "system": "系统设置"
+    },
+    "modelConfig": {
+      "title": "模型配置",
     "reload": "重新加载",
     "save": "保存配置",
     "saving": "保存中...",
@@ -201,11 +220,109 @@
       "saveSuccess": "配置保存成功！",
       "saveError": "保存配置失败",
       "presetApplied": "预设配置已应用，请填入相应的 API Key"
+      }
     }
   },
   "language": {
     "switch": "切换语言",
     "chinese": "中文",
     "english": "English"
+  },
+  "auth": {
+    "login": {
+      "title": "登录",
+      "welcome": "欢迎回来",
+      "subtitle": "登录您的账户以继续使用 RAG 平台",
+      "username": "用户名",
+      "password": "密码",
+      "rememberMe": "记住我",
+      "forgotPassword": "忘记密码？",
+      "loginButton": "立即登录",
+      "loginning": "登录中...",
+      "loginSuccess": "登录成功！",
+      "loginError": "登录失败，请检查用户名和密码",
+      "usernamePlaceholder": "请输入用户名",
+      "passwordPlaceholder": "请输入密码"
+    },
+    "register": {
+      "title": "注册",
+      "welcome": "创建账户",
+      "subtitle": "加入 RAG 平台，开启智能知识管理之旅",
+      "fullName": "姓名",
+      "username": "用户名",
+      "email": "邮箱地址",
+      "password": "密码",
+      "confirmPassword": "确认密码",
+      "registerButton": "立即注册",
+      "registering": "注册中...",
+      "registerSuccess": "注册成功！正在跳转...",
+      "registerError": "注册失败，请稍后重试",
+      "passwordMismatch": "密码确认不匹配",
+      "fillAllFields": "请填写所有必需字段",
+      "fullNamePlaceholder": "请输入姓名",
+      "usernamePlaceholder": "请输入用户名",
+      "emailPlaceholder": "请输入邮箱地址",
+      "passwordPlaceholder": "请输入密码",
+      "confirmPasswordPlaceholder": "请确认密码"
+    },
+    "userManagement": {
+      "title": "用户管理",
+      "stats": {
+        "totalUsers": "总用户数",
+        "activeUsers": "活跃用户",
+        "adminUsers": "管理员",
+        "newThisMonth": "本月新增"
+      },
+      "search": {
+        "placeholder": "搜索用户",
+        "hint": "用户名、邮箱或姓名"
+      },
+      "filters": {
+        "role": "角色",
+        "status": "状态",
+        "all": "全部",
+        "active": "活跃",
+        "disabled": "禁用"
+      },
+      "actions": {
+        "addUser": "添加用户",
+        "edit": "编辑",
+        "delete": "删除",
+        "save": "保存",
+        "cancel": "取消"
+      },
+      "table": {
+        "username": "用户名",
+        "email": "邮箱",
+        "fullName": "姓名",
+        "role": "角色",
+        "status": "状态",
+        "tenant": "租户",
+        "knowledgeBases": "知识库",
+        "documents": "文档",
+        "createdAt": "创建时间",
+        "actions": "操作"
+      },
+      "dialog": {
+        "editUser": "编辑用户",
+        "confirmDelete": "确认删除",
+        "deleteMessage": "确定要删除用户 \"{username}\" 吗？此操作无法撤销。",
+        "fullName": "姓名",
+        "email": "邮箱",
+        "role": "角色",
+        "accountStatus": "账户状态"
+      }
+    },
+    "platform": {
+      "title": "下一代智能知识平台",
+      "description": "基于先进的检索增强生成技术，为您的团队提供智能化的知识管理和问答解决方案",
+      "features": {
+        "multiTenant": "多租户",
+        "aiDriven": "AI驱动",
+        "realTimeChat": "实时问答",
+        "secure": "安全可靠"
+      },
+      "copyright": "保留所有权利."
+    }
   }
 } 

@@ -68,7 +68,7 @@ const Settings: React.FC = () => {
           <Tab 
             icon={<PersonIcon />} 
             iconPosition="start"
-            label="个人设置" 
+            label={t('settings.tabs.personal')} 
             id="settings-tab-0" 
             aria-controls="settings-tabpanel-0" 
           />
@@ -77,7 +77,7 @@ const Settings: React.FC = () => {
             <Tab 
               icon={<SystemIcon />} 
               iconPosition="start"
-              label="系统设置" 
+              label={t('settings.tabs.system')} 
               id="settings-tab-1" 
               aria-controls="settings-tabpanel-1" 
             />

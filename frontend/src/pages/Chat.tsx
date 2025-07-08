@@ -74,7 +74,7 @@ const Chat: React.FC = () => {
     setMessages([
       {
         id: '1',
-        content: '您好！我是 RAG Platform 的智能助手。您可以选择知识库进行基于文档的问答，或者直接进行普通对话。',
+        content: t('chat.welcome'),
         sender: 'bot',
         timestamp: new Date(),
       },
@@ -111,7 +111,7 @@ const Chat: React.FC = () => {
 
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: response.data.message || response.data.response || '抱歉，我无法生成回复',
+        content: response.data.message || response.data.response || t('chat.errorResponse'),
         sender: 'bot',
         timestamp: new Date(),
       };
@@ -179,7 +179,7 @@ const Chat: React.FC = () => {
             onChange={(e) => setSelectedKb(e.target.value)}
           >
             <MenuItem value="">
-              <em>普通对话（无知识库）</em>
+              <em>{t('chat.normalChat')}</em>
             </MenuItem>
             {knowledgeBases.map((kb) => (
               <MenuItem key={kb.id} value={kb.id}>

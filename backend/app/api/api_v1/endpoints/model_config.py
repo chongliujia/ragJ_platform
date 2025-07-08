@@ -46,7 +46,7 @@ class UpdateModelConfigRequest(BaseModel):
 
     provider: str
     model_name: str
-    api_key: str
+    api_key: str = ""  # 允许为空，保持现有密钥
     api_base: str = None
     temperature: float = None
     max_tokens: int = None
@@ -138,6 +138,59 @@ async def get_active_models():
         raise HTTPException(status_code=500, detail="Failed to get active models")
 
 
+class ModelConfigDetailsResponse(BaseModel):
+    """模型配置详情响应"""
+    model_type: str
+    provider: str
+    model_name: str
+    has_api_key: bool
+    enabled: bool
+    api_key: str = ""  # 返回星号掩码
+    api_base: str = ""
+    temperature: float = None
+    max_tokens: int = None
+
+
+@router.get("/active-models/{model_type}/details", response_model=ModelConfigDetailsResponse)
+async def get_model_config_details(model_type: str):
+    """获取指定模型的配置详情"""
+    try:
+        model_type_enum = ModelType(model_type)
+        config = model_config_service.get_active_model(model_type_enum)
+        
+        if not config:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Model configuration for {model_type} not found"
+            )
+        
+        # 对API密钥进行掩码处理
+        masked_api_key = ""
+        if config.api_key:
+            if len(config.api_key) > 8:
+                masked_api_key = config.api_key[:4] + "*" * (len(config.api_key) - 8) + config.api_key[-4:]
+            else:
+                masked_api_key = "*" * len(config.api_key)
+        
+        return ModelConfigDetailsResponse(
+            model_type=model_type_enum.value,
+            provider=config.provider.value,
+            model_name=config.model_name,
+            has_api_key=bool(config.api_key),
+            enabled=config.enabled,
+            api_key=masked_api_key,
+            api_base=config.api_base or "",
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+        )
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid model type: {e}")
+    except Exception as e:
+        logger.error(f"Failed to get model config details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get model config details")
+
+
 @router.put("/active-models/{model_type}")
 async def update_active_model(model_type: str, request: UpdateModelConfigRequest):
     """更新指定类型的活跃模型"""
@@ -155,11 +208,25 @@ async def update_active_model(model_type: str, request: UpdateModelConfigRequest
                 detail=f"Model '{request.model_name}' not available for provider '{request.provider}'",
             )
 
+        # 获取现有配置
+        existing_config = model_config_service.get_active_model(model_type_enum)
+        
+        # 如果API密钥为空或者是掩码，则保持原有API密钥
+        api_key = request.api_key
+        if not api_key or "*" in api_key:
+            if existing_config and existing_config.api_key:
+                api_key = existing_config.api_key
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="API key is required for new configuration"
+                )
+
         # 创建新的模型配置
         config = ModelConfig(
             provider=provider_enum,
             model_name=request.model_name,
-            api_key=request.api_key,
+            api_key=api_key,
             api_base=request.api_base,
             temperature=request.temperature,
             max_tokens=request.max_tokens,

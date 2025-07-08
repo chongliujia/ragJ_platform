@@ -75,13 +75,13 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
     { text: t('nav.documents'), icon: <DocumentIcon />, path: '/documents' },
     { text: t('nav.chat'), icon: <ChatIcon />, path: '/chat' },
     { text: t('nav.settings'), icon: <SettingsIcon />, path: '/settings' },
-    { text: '连接测试', icon: <TestIcon />, path: '/test' },
+    { text: t('nav.connectionTest'), icon: <TestIcon />, path: '/test' },
   ];
 
   const adminMenuItems = [
-    { text: '用户管理', icon: <UsersIcon />, path: '/users', role: 'tenant_admin' },
-    { text: '租户管理', icon: <BusinessIcon />, path: '/tenants', role: 'super_admin' },
-    { text: '权限管理', icon: <PermissionsIcon />, path: '/permissions', role: 'super_admin' },
+    { text: t('nav.userManagement'), icon: <UsersIcon />, path: '/users', role: 'tenant_admin' },
+    { text: t('nav.tenantManagement'), icon: <BusinessIcon />, path: '/tenants', role: 'super_admin' },
+    { text: t('nav.permissionManagement'), icon: <PermissionsIcon />, path: '/permissions', role: 'super_admin' },
   ];
 
   const handleUserMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
@@ -113,11 +113,11 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
   const getRoleLabel = (role: string) => {
     switch (role) {
       case 'super_admin':
-        return '超级管理员';
+        return t('nav.roles.superAdmin');
       case 'tenant_admin':
-        return '租户管理员';
+        return t('nav.roles.tenantAdmin');
       case 'user':
-        return '用户';
+        return t('nav.roles.user');
       default:
         return role;
     }
@@ -240,7 +240,7 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
                       <AdminIcon />
                     </ListItemIcon>
                     <ListItemText 
-                      primary="管理功能"
+                      primary={t('nav.adminFeatures')}
                       sx={{ 
                         '& .MuiListItemText-primary': { 
                           fontSize: '0.9rem',
@@ -382,13 +382,13 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
                 <ListItemIcon>
                   <AccountIcon fontSize="small" />
                 </ListItemIcon>
-                个人设置
+                {t('nav.userSettings')}
               </MenuItem>
               <MenuItem onClick={handleLogout}>
                 <ListItemIcon>
                   <LogoutIcon fontSize="small" />
                 </ListItemIcon>
-                退出登录
+                {t('nav.logout')}
               </MenuItem>
             </Menu>
           </Box>

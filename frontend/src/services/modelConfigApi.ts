@@ -50,13 +50,17 @@ export interface ModelConfig {
   model_name: string;
   has_api_key: boolean;
   enabled: boolean;
+  api_key?: string; // 用于编辑时显示已保存的API密钥
+  api_base?: string; // 用于编辑时显示已保存的API端点
+  temperature?: number;
+  max_tokens?: number;
 }
 
 // 更新模型配置请求
 export interface UpdateModelConfigRequest {
   provider: string;
   model_name: string;
-  api_key: string;
+  api_key?: string; // 允许为空，保持现有密钥
   api_base?: string;
   temperature?: number;
   max_tokens?: number;
@@ -91,6 +95,10 @@ export const modelConfigApi = {
   
   // 获取当前活跃模型
   getActiveModels: () => api.get<ModelConfig[]>('/api/v1/model-config/active-models'),
+  
+  // 获取模型配置详情（包含API密钥）
+  getModelConfigDetails: (modelType: string) => 
+    api.get<ModelConfig>(`/api/v1/model-config/active-models/${modelType}/details`),
   
   // 更新活跃模型
   updateActiveModel: (modelType: string, config: UpdateModelConfigRequest) =>

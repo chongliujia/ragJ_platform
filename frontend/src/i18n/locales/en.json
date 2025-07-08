@@ -33,7 +33,19 @@
     "chat": "Chat",
     "settings": "Settings",
     "title": "RAG Platform",
-    "subtitle": "Intelligent Retrieval Augmented Generation Platform"
+    "subtitle": "Intelligent Retrieval Augmented Generation Platform",
+    "connectionTest": "Connection Test",
+    "adminFeatures": "Admin Features",
+    "userManagement": "User Management",
+    "tenantManagement": "Tenant Management",
+    "permissionManagement": "Permission Management",
+    "userSettings": "User Settings",
+    "logout": "Logout",
+    "roles": {
+      "superAdmin": "Super Admin",
+      "tenantAdmin": "Tenant Admin",
+      "user": "User"
+    }
   },
   "dashboard": {
     "title": "Dashboard",
@@ -107,10 +119,11 @@
     "selectKnowledgeBase": "Select Knowledge Base",
     "inputPlaceholder": "Enter your question...",
     "thinking": "Thinking...",
-    "welcome": "Hello! I'm the intelligent assistant of RAG Platform. Please select a knowledge base and start chatting.",
+    "welcome": "Hello! I'm the intelligent assistant of RAG Platform. You can choose knowledge bases for document-based Q&A, or chat directly without knowledge bases.",
     "selectKnowledgeBaseFirst": "Please select a knowledge base first",
     "errorResponse": "Sorry, I cannot answer your question at the moment. Please try again later.",
-    "fetchKnowledgeBasesError": "Failed to fetch knowledge bases"
+    "fetchKnowledgeBasesError": "Failed to fetch knowledge bases",
+    "normalChat": "Normal Chat (No Knowledge Base)"
   },
   "documents": {
     "title": "Document Management",
@@ -140,7 +153,13 @@
     }
   },
   "settings": {
-    "title": "Model Configuration",
+    "title": "Settings",
+    "tabs": {
+      "personal": "Personal Settings",
+      "system": "System Settings"
+    },
+    "modelConfig": {
+      "title": "Model Configuration",
     "reload": "Reload",
     "save": "Save Configuration",
     "saving": "Saving...",
@@ -201,11 +220,109 @@
       "saveSuccess": "Configuration saved successfully!",
       "saveError": "Failed to save configuration",
       "presetApplied": "Preset configuration applied, please fill in the corresponding API Keys"
+      }
     }
   },
   "language": {
     "switch": "Switch Language",
     "chinese": "中文",
     "english": "English"
+  },
+  "auth": {
+    "login": {
+      "title": "Login",
+      "welcome": "Welcome Back",
+      "subtitle": "Sign in to your account to continue using RAG Platform",
+      "username": "Username",
+      "password": "Password",
+      "rememberMe": "Remember me",
+      "forgotPassword": "Forgot password?",
+      "loginButton": "Sign In",
+      "loginning": "Signing in...",
+      "loginSuccess": "Login successful!",
+      "loginError": "Login failed, please check your username and password",
+      "usernamePlaceholder": "Enter your username",
+      "passwordPlaceholder": "Enter your password"
+    },
+    "register": {
+      "title": "Register",
+      "welcome": "Create Account",
+      "subtitle": "Join RAG Platform and start your intelligent knowledge management journey",
+      "fullName": "Full Name",
+      "username": "Username",
+      "email": "Email Address",
+      "password": "Password",
+      "confirmPassword": "Confirm Password",
+      "registerButton": "Sign Up",
+      "registering": "Registering...",
+      "registerSuccess": "Registration successful! Redirecting...",
+      "registerError": "Registration failed, please try again later",
+      "passwordMismatch": "Password confirmation does not match",
+      "fillAllFields": "Please fill in all required fields",
+      "fullNamePlaceholder": "Enter your full name",
+      "usernamePlaceholder": "Enter your username",
+      "emailPlaceholder": "Enter your email address",
+      "passwordPlaceholder": "Enter your password",
+      "confirmPasswordPlaceholder": "Confirm your password"
+    },
+    "userManagement": {
+      "title": "User Management",
+      "stats": {
+        "totalUsers": "Total Users",
+        "activeUsers": "Active Users",
+        "adminUsers": "Administrators",
+        "newThisMonth": "New This Month"
+      },
+      "search": {
+        "placeholder": "Search users",
+        "hint": "Username, email or name"
+      },
+      "filters": {
+        "role": "Role",
+        "status": "Status",
+        "all": "All",
+        "active": "Active",
+        "disabled": "Disabled"
+      },
+      "actions": {
+        "addUser": "Add User",
+        "edit": "Edit",
+        "delete": "Delete",
+        "save": "Save",
+        "cancel": "Cancel"
+      },
+      "table": {
+        "username": "Username",
+        "email": "Email",
+        "fullName": "Full Name",
+        "role": "Role",
+        "status": "Status",
+        "tenant": "Tenant",
+        "knowledgeBases": "Knowledge Bases",
+        "documents": "Documents",
+        "createdAt": "Created At",
+        "actions": "Actions"
+      },
+      "dialog": {
+        "editUser": "Edit User",
+        "confirmDelete": "Confirm Delete",
+        "deleteMessage": "Are you sure you want to delete user \"{username}\"? This action cannot be undone.",
+        "fullName": "Full Name",
+        "email": "Email",
+        "role": "Role",
+        "accountStatus": "Account Status"
+      }
+    },
+    "platform": {
+      "title": "Next-Generation Intelligent Knowledge Platform",
+      "description": "Based on advanced Retrieval Augmented Generation technology, providing intelligent knowledge management and Q&A solutions for your team",
+      "features": {
+        "multiTenant": "Multi-tenant",
+        "aiDriven": "AI-driven",
+        "realTimeChat": "Real-time Chat",
+        "secure": "Secure & Reliable"
+      },
+      "copyright": "All rights reserved."
+    }
   }
 } 
