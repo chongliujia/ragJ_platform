@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
 import {
   Typography,
   Box,
@@ -119,9 +120,18 @@ const Chat: React.FC = () => {
       setMessages(prev => [...prev, botMessage]);
     } catch (error: any) {
       console.error('Failed to send message:', error);
+      
+      // 根据错误类型提供更友好的错误消息
+      let errorContent = t('chat.errorResponse');
+      if (error.code === 'ECONNABORTED') {
+        errorContent = selectedKb 
+          ? '处理知识库查询时超时，请稍后重试。如果问题持续存在，请尝试简化您的问题。'
+          : '请求超时，请稍后重试。';
+      }
+      
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: t('chat.errorResponse'),
+        content: errorContent,
         sender: 'bot',
         timestamp: new Date(),
       };
@@ -263,16 +273,54 @@ const Chat: React.FC = () => {
                         : 'transparent #2a2a2a transparent transparent'
                     }
                   }}>
-                    <Typography variant="body1" sx={{ 
-                      whiteSpace: 'pre-wrap',
-                      fontFamily: 'Inter, sans-serif',
-                      fontSize: '0.95rem',
-                      lineHeight: 1.6,
-                      color: message.sender === 'user' ? 'white' : 'text.primary',
-                      fontWeight: 400
-                    }}>
-                      {message.content}
-                    </Typography>
+                    {message.sender === 'bot' ? (
+                      <Box sx={{ 
+                        fontFamily: 'Inter, sans-serif',
+                        fontSize: '0.95rem',
+                        lineHeight: 1.6,
+                        color: 'text.primary',
+                        fontWeight: 400,
+                        '& p': { margin: '0.5em 0' },
+                        '& h1, & h2, & h3': { 
+                          margin: '1em 0 0.5em 0',
+                          fontWeight: 600 
+                        },
+                        '& ul, & ol': { 
+                          margin: '0.5em 0',
+                          paddingLeft: '1.5em'
+                        },
+                        '& li': { margin: '0.25em 0' },
+                        '& strong': { fontWeight: 600 },
+                        '& code': { 
+                          backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                          padding: '0.2em 0.4em',
+                          borderRadius: '3px',
+                          fontFamily: 'monospace',
+                          fontSize: '0.9em'
+                        },
+                        '& pre': {
+                          backgroundColor: 'rgba(0, 0, 0, 0.05)',
+                          padding: '1em',
+                          borderRadius: '5px',
+                          overflow: 'auto',
+                          fontFamily: 'monospace',
+                          fontSize: '0.9em'
+                        }
+                      }}>
+                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                      </Box>
+                    ) : (
+                      <Typography variant="body1" sx={{ 
+                        whiteSpace: 'pre-wrap',
+                        fontFamily: 'Inter, sans-serif',
+                        fontSize: '0.95rem',
+                        lineHeight: 1.6,
+                        color: 'white',
+                        fontWeight: 400
+                      }}>
+                        {message.content}
+                      </Typography>
+                    )}
                     <Typography variant="caption" sx={{ 
                       color: message.sender === 'user' ? 'rgba(255, 255, 255, 0.7)' : 'text.secondary',
                       fontFamily: 'Inter, sans-serif',

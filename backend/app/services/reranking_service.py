@@ -98,6 +98,8 @@ class BGEReranker(BaseReranker):
         try:
             # 动态获取配置
             api_url, api_key = self._get_config()
+            
+            logger.info(f"BGE reranking configuration - API URL: {api_url}, has API key: {bool(api_key)}")
 
             if not api_key:
                 logger.warning(
@@ -108,12 +110,11 @@ class BGEReranker(BaseReranker):
             # 准备请求数据
             doc_texts = [doc.get("text", "") for doc in documents]
 
-            # 构造重排请求
+            # 构造重排请求（按SiliconFlow API格式）
             payload = {
                 "model": self.model_name,
                 "query": query,
                 "documents": doc_texts,
-                "top_k": min(top_k, len(documents)),
             }
 
             headers = {
@@ -121,28 +122,61 @@ class BGEReranker(BaseReranker):
                 "Content-Type": "application/json",
             }
 
-            # 发送请求
+            # 发送请求 - 使用正确的SiliconFlow端点
+            # 确保正确的URL格式
+            if api_url.endswith('/v1'):
+                rerank_url = f"{api_url}/rerank"
+            elif api_url.endswith('/'):
+                rerank_url = f"{api_url}v1/rerank"
+            else:
+                rerank_url = f"{api_url}/v1/rerank"
+                
+            logger.info(f"Sending rerank request to: {rerank_url}")
+            logger.info(f"Request payload: {payload}")
+            
             response = requests.post(
-                f"{api_url}/v1/rerank", headers=headers, json=payload, timeout=30
+                rerank_url, headers=headers, json=payload, timeout=30
             )
+
+            logger.info(f"Response status code: {response.status_code}")
+            logger.info(f"Response text: {response.text}")
 
             if response.status_code == 200:
                 result = response.json()
+                logger.info(f"Parsed response: {result}")
                 reranked_docs = []
 
-                # 解析重排结果
-                for item in result.get("results", []):
-                    index = item.get("index", 0)
-                    relevance_score = item.get("relevance_score", 0)
+                # 解析SiliconFlow重排结果 - 尝试不同的响应格式
+                if "results" in result:
+                    # 标准格式
+                    for item in result["results"]:
+                        index = item.get("index", 0)
+                        # 尝试不同的分数字段名称
+                        relevance_score = item.get("relevance_score", 0) or item.get("score", 0)
 
-                    if index < len(documents):
-                        doc = documents[index].copy()
-                        doc["rerank_score"] = relevance_score
-                        doc["original_score"] = doc.get("score", 0)
-                        doc["score"] = relevance_score
-                        reranked_docs.append(doc)
+                        if index < len(documents):
+                            doc = documents[index].copy()
+                            doc["rerank_score"] = relevance_score
+                            doc["original_score"] = doc.get("score", 0)
+                            doc["score"] = relevance_score
+                            reranked_docs.append(doc)
+                elif "data" in result:
+                    # 备用格式
+                    for i, item in enumerate(result["data"]):
+                        if i < len(documents):
+                            relevance_score = item.get("relevance_score", 0) or item.get("score", 0)
+                            doc = documents[i].copy()
+                            doc["rerank_score"] = relevance_score
+                            doc["original_score"] = doc.get("score", 0)
+                            doc["score"] = relevance_score
+                            reranked_docs.append(doc)
+                else:
+                    logger.warning(f"Unexpected response format: {result}")
+                    return await NoReranker().rerank(query, documents, top_k)
 
-                return reranked_docs
+                # 按重排分数排序并返回top_k结果
+                reranked_docs.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
+                return reranked_docs[:top_k]
             else:
                 logger.error(
                     f"BGE reranking failed: {response.status_code} - {response.text}"

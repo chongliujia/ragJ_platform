@@ -198,14 +198,16 @@ async def update_active_model(model_type: str, request: UpdateModelConfigRequest
         model_type_enum = ModelType(model_type)
         provider_enum = ProviderType(request.provider)
 
-        # 验证模型是否在提供商的可用模型列表中
+        # 验证模型是否在提供商的可用模型列表中（允许自定义模型名称）
         available_models = model_config_service.get_available_models(
             provider_enum, model_type_enum
         )
+        
+        # 如果模型名称不在预设列表中，记录警告但仍允许使用（支持自定义模型）
         if request.model_name not in available_models:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Model '{request.model_name}' not available for provider '{request.provider}'",
+            logger.warning(
+                f"Using custom model '{request.model_name}' for provider '{request.provider}' "
+                f"(not in predefined list: {available_models})"
             )
 
         # 获取现有配置
@@ -314,6 +316,64 @@ async def test_provider_connection(provider: str):
     except Exception as e:
         logger.error(f"Failed to test provider connection: {e}")
         raise HTTPException(status_code=500, detail="Connection test failed")
+
+
+@router.post("/providers/{provider}/models/{model_type}")
+async def add_custom_model(
+    provider: str, 
+    model_type: str, 
+    model_name: str
+):
+    """为提供商添加自定义模型"""
+    try:
+        provider_enum = ProviderType(provider)
+        model_type_enum = ModelType(model_type)
+        
+        provider_config = model_config_service.get_provider(provider_enum)
+        if not provider_config:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Provider '{provider}' not found"
+            )
+        
+        # 获取现有模型列表
+        existing_models = provider_config.models.get(model_type_enum, [])
+        
+        # 如果模型不存在，添加到列表
+        if model_name not in existing_models:
+            existing_models.append(model_name)
+            provider_config.models[model_type_enum] = existing_models
+            
+            # 更新提供商配置
+            model_config_service.update_provider(provider_enum, provider_config)
+            
+            logger.info(f"Added custom model '{model_name}' to provider '{provider}' for type '{model_type}'")
+            
+            return {
+                "message": f"Custom model '{model_name}' added successfully",
+                "provider": provider,
+                "model_type": model_type,
+                "model_name": model_name
+            }
+        else:
+            return {
+                "message": f"Model '{model_name}' already exists",
+                "provider": provider,
+                "model_type": model_type,
+                "model_name": model_name
+            }
+            
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid provider or model type: {e}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to add custom model: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to add custom model"
+        )
 
 
 @router.get("/presets")

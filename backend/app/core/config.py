@@ -63,14 +63,18 @@ class Settings(BaseSettings):
     QWEN_RERANK_MODEL: str = "gte-rerank"
     QWEN_CHAT_MODEL: str = "qwen-turbo"
 
+    # 硅基流动配置
+    SILICONFLOW_API_KEY: Optional[str] = None
+    SILICONFLOW_BASE_URL: str = "https://api.siliconflow.cn/v1"
+
     # 模型服务配置 - 分别指定不同功能使用的服务
-    # 聊天模型配置
+    # 聊天模型配置（将使用模型配置文件中的设置）
     CHAT_MODEL_PROVIDER: str = "deepseek"  # deepseek, qwen, openai
     CHAT_MODEL_NAME: str = "deepseek-chat"
 
-    # Embedding模型配置
-    EMBEDDING_MODEL_PROVIDER: str = "openai"  # openai, qwen, deepseek
-    EMBEDDING_MODEL_NAME: str = "text-embedding-3-small"
+    # Embedding模型配置（将使用模型配置文件中的设置）
+    EMBEDDING_MODEL_PROVIDER: str = "siliconflow"  # openai, qwen, deepseek, siliconflow
+    EMBEDDING_MODEL_NAME: str = "BAAI/bge-m3"
 
     # Rerank模型配置
     RERANK_MODEL_PROVIDER: str = "qwen"  # qwen, cohere, jina
@@ -95,8 +99,8 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 200
 
     # 嵌入模型配置
-    DEFAULT_EMBEDDING_MODEL: str = "text-embedding-v2"  # 通义千问嵌入模型
-    EMBEDDING_DIMENSION: int = 1536
+    DEFAULT_EMBEDDING_MODEL: str = "BAAI/bge-m3"  # BGE-M3嵌入模型
+    EMBEDDING_DIMENSION: int = 1024  # BGE-M3的维度
     DEFAULT_RERANK_MODEL: str = "gte-rerank"  # 通义千问重排序模型
 
     # LangGraph配置

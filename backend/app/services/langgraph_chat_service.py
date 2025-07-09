@@ -175,17 +175,38 @@ class LangGraphChatService:
         tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
         
         try:
-            # Perform hybrid search
-            top_k = 5
+            # Perform hybrid search - 减少检索数量以提升速度
+            top_k = 3
             
-            # Vector search
-            vector_task = asyncio.create_task(
-                milvus_service.search(
-                    collection_name=tenant_collection_name,
-                    query_vector=query_vector,
-                    top_k=top_k,
-                )
-            )
+            # Vector search with dimension mismatch handling
+            async def safe_vector_search():
+                try:
+                    return await milvus_service.search(
+                        collection_name=tenant_collection_name,
+                        query_vector=query_vector,
+                        top_k=top_k,
+                    )
+                except Exception as e:
+                    if "vector dimension mismatch" in str(e):
+                        logger.warning(f"Vector dimension mismatch detected, recreating collection with new dimension")
+                        try:
+                            # 重新创建集合
+                            milvus_service.recreate_collection_with_new_dimension(
+                                tenant_collection_name, len(query_vector)
+                            )
+                            logger.info(f"Collection recreated, retrying search...")
+                            return await milvus_service.search(
+                                collection_name=tenant_collection_name,
+                                query_vector=query_vector,
+                                top_k=top_k,
+                            )
+                        except Exception as recreate_error:
+                            logger.error(f"Failed to recreate collection: {recreate_error}")
+                            return []
+                    else:
+                        raise e
+            
+            vector_task = asyncio.create_task(safe_vector_search())
             
             # Keyword search - check if elasticsearch service is available
             keyword_task = None
@@ -277,7 +298,7 @@ class LangGraphChatService:
                 query=state["query"],
                 documents=state["retrieved_docs"],
                 provider=RerankingProvider.BGE,
-                top_k=3,
+                top_k=2,  # 进一步减少重排文档数量
             )
             
             state["reranked_docs"] = reranked_docs
@@ -309,11 +330,18 @@ class LangGraphChatService:
             
             llm_response = await llm_service.chat(
                 message=prompt,
-                model="deepseek-chat"  # Use default model
+                model="deepseek-chat",  # Use default model
+                max_tokens=1500,  # 限制回答长度以提升速度
+                temperature=0.3   # 降低temperature以提升生成速度
             )
             
+            logger.info(f"LLM response received: success={llm_response.get('success')}, message_length={len(llm_response.get('message', ''))}")
+            
             if llm_response.get("success"):
-                state["final_response"] = llm_response["message"]
+                response_message = llm_response["message"]
+                logger.info(f"LLM response message: {response_message[:200]}...")  # 只记录前200字符
+                
+                state["final_response"] = response_message
                 state["step_info"]["usage"] = llm_response.get("usage", {})
                 
                 # Add context information to the response
@@ -330,6 +358,7 @@ class LangGraphChatService:
                 
                 logger.info("Response generated successfully")
             else:
+                logger.error(f"LLM response failed: {llm_response}")
                 raise Exception("LLM response failed")
                 
         except Exception as e:
@@ -376,23 +405,15 @@ class LangGraphChatService:
             return "fallback"
     
     def _construct_rag_prompt(self, query: str, context: str) -> str:
-        """Construct RAG prompt for LLM"""
-        prompt_template = """你是一个专业的AI助手。请基于提供的上下文信息回答用户的问题。
+        """Construct RAG prompt for LLM - 优化版本，更简洁以提升响应速度"""
+        prompt_template = """基于以下信息回答问题。请使用Markdown格式，包括标题、列表、粗体等来组织回答。
 
-重要指示：
-1. 如果上下文信息中包含答案，请基于上下文内容进行回答
-2. 如果上下文信息不足以回答问题，请明确说明在提供的文档中找不到相关信息
-3. 不要使用上下文之外的知识
-4. 回答要准确、简洁、有条理
-
-## 上下文信息
+信息：
 {context}
 
-## 用户问题
-{query}
+问题：{query}
 
-## 回答
-"""
+请提供结构化的Markdown回答："""
         return prompt_template.format(context=context, query=query)
 
 

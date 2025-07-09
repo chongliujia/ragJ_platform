@@ -117,6 +117,12 @@ export const modelConfigApi = {
   
   // 获取预设配置
   getPresets: () => api.get<{ presets: Record<string, PresetConfig> }>('/api/v1/model-config/presets'),
+  
+  // 添加自定义模型到提供商
+  addCustomModel: (provider: string, modelType: string, modelName: string) =>
+    api.post(`/api/v1/model-config/providers/${provider}/models/${modelType}`, null, {
+      params: { model_name: modelName }
+    }),
 };
 
 export default api;

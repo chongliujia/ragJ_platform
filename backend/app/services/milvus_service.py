@@ -235,10 +235,12 @@ class MilvusService:
             return []
 
         if not self.has_collection(collection_name):
+            # 创建集合时使用向量的实际维度
+            vector_dim = len(entities[0]["vector"]) if entities else settings.EMBEDDING_DIMENSION
             logger.info(
-                f"Collection '{collection_name}' does not exist. Creating it now..."
+                f"Collection '{collection_name}' does not exist. Creating it now with dimension {vector_dim}..."
             )
-            self.create_collection(collection_name)
+            self.create_collection(collection_name, dim=vector_dim)
             logger.info(f"Collection '{collection_name}' created successfully.")
 
         try:
@@ -261,10 +263,44 @@ class MilvusService:
             )
             return result.primary_keys
         except Exception as e:
-            logger.error(
-                f"Failed to insert data into '{collection_name}': {e}", exc_info=True
-            )
-            raise
+            # 检查是否是维度不匹配错误
+            if ("dimension mismatch" in str(e).lower() or 
+                "vector dimension" in str(e).lower() or 
+                "should divide the dim" in str(e).lower() or
+                ("length(" in str(e).lower() and "dim(" in str(e).lower())):
+                logger.warning(f"Vector dimension mismatch detected: {e}")
+                try:
+                    # 获取当前向量的实际维度
+                    current_vector_dim = len(entities[0]["vector"]) if entities else 1024
+                    logger.info(f"Attempting to recreate collection with dimension {current_vector_dim}")
+                    
+                    # 重新创建集合
+                    self.recreate_collection_with_new_dimension(collection_name, current_vector_dim)
+                    
+                    # 重新尝试插入
+                    collection = Collection(name=collection_name, using=self.alias)
+                    texts = [entity["text"] for entity in entities]
+                    vectors = [entity["vector"] for entity in entities]
+                    tenant_ids = [entity["tenant_id"] for entity in entities]
+                    user_ids = [entity["user_id"] for entity in entities]
+                    document_names = [entity["document_name"] for entity in entities]
+                    knowledge_bases = [entity["knowledge_base"] for entity in entities]
+                    data_to_insert = [texts, vectors, tenant_ids, user_ids, document_names, knowledge_bases]
+                    
+                    result = collection.insert(data_to_insert)
+                    collection.flush()
+                    logger.info(
+                        f"Successfully inserted {len(entities)} entities into recreated collection '{collection_name}'."
+                    )
+                    return result.primary_keys
+                except Exception as recreate_error:
+                    logger.error(f"Failed to recreate collection and insert data: {recreate_error}")
+                    raise recreate_error
+            else:
+                logger.error(
+                    f"Failed to insert data into '{collection_name}': {e}", exc_info=True
+                )
+                raise
 
     async def search(
         self, collection_name: str, query_vector: list[float], top_k: int = 5
@@ -333,11 +369,32 @@ class MilvusService:
             return search_results
 
         except Exception as e:
-            logger.error(
-                f"Failed to search in collection '{collection_name}': {e}",
-                exc_info=True,
-            )
-            raise
+            # 检查是否是维度不匹配错误
+            if ("dimension mismatch" in str(e).lower() or 
+                "vector dimension" in str(e).lower() or 
+                "should divide the dim" in str(e).lower() or
+                ("length(" in str(e).lower() and "dim(" in str(e).lower())):
+                logger.warning(f"Vector dimension mismatch during search: {e}")
+                try:
+                    # 获取查询向量的实际维度
+                    query_vector_dim = len(query_vector)
+                    logger.info(f"Attempting to recreate collection with dimension {query_vector_dim}")
+                    
+                    # 重新创建集合
+                    self.recreate_collection_with_new_dimension(collection_name, query_vector_dim)
+                    
+                    # 重新尝试搜索（但由于集合为空，返回空结果）
+                    logger.warning(f"Collection '{collection_name}' was recreated but is now empty. Please re-upload documents.")
+                    return []
+                except Exception as recreate_error:
+                    logger.error(f"Failed to recreate collection for search: {recreate_error}")
+                    raise recreate_error
+            else:
+                logger.error(
+                    f"Failed to search in collection '{collection_name}': {e}",
+                    exc_info=True,
+                )
+                raise
 
     def get_collection_count(self, collection_name: str) -> int:
         """
@@ -368,6 +425,27 @@ class MilvusService:
                 exc_info=True,
             )
             return 0
+            
+    def recreate_collection_with_new_dimension(self, collection_name: str, new_dimension: int) -> bool:
+        """
+        重新创建集合以适应新的向量维度
+        """
+        try:
+            # 删除现有集合
+            if utility.has_collection(collection_name, using=self.alias):
+                logger.info(f"Dropping existing collection '{collection_name}' to recreate with new dimension")
+                self.drop_collection(collection_name)
+            
+            # 创建新集合
+            logger.info(f"Creating new collection '{collection_name}' with dimension {new_dimension}")
+            self.create_collection(collection_name, dim=new_dimension)
+            
+            logger.info(f"Collection '{collection_name}' recreated successfully with dimension {new_dimension}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to recreate collection '{collection_name}': {e}")
+            raise
 
 
 # Singleton instance of the service

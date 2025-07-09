@@ -15,6 +15,7 @@ from app.db.models.knowledge_base import KnowledgeBase
 from app.db.models.document import Document
 from app.db.models.permission import Permission, RolePermission
 from app.core.dependencies import require_super_admin
+from app.services.milvus_service import milvus_service
 
 router = APIRouter()
 
@@ -721,3 +722,30 @@ async def get_tenant_stats(
         "total_users": total_users,
         "total_storage_mb": total_storage_mb,
     }
+
+
+@router.post("/milvus/recreate-collection/{collection_name}")
+async def recreate_milvus_collection(
+    collection_name: str,
+    new_dimension: int = 1024,
+    current_user: User = Depends(require_super_admin()),
+):
+    """重新创建Milvus集合以适应新的向量维度"""
+    try:
+        success = milvus_service.recreate_collection_with_new_dimension(
+            collection_name, new_dimension
+        )
+        if success:
+            return {
+                "message": f"Collection '{collection_name}' recreated successfully with dimension {new_dimension}",
+                "collection_name": collection_name,
+                "new_dimension": new_dimension,
+            }
+        else:
+            raise HTTPException(
+                status_code=500, detail="Failed to recreate collection"
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error recreating collection: {str(e)}"
+        )

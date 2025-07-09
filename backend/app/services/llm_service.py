@@ -658,6 +658,109 @@ class QwenAPIService:
             return {"success": False, "error": str(e)}
 
 
+class SiliconFlowAPIService:
+    """Service for SiliconFlow API integration (OpenAI-compatible)"""
+
+    def __init__(self):
+        """Initialize SiliconFlow API service"""
+        self.api_key = settings.SILICONFLOW_API_KEY
+        self.base_url = settings.SILICONFLOW_BASE_URL or "https://api.siliconflow.cn/v1"
+
+    async def get_embeddings(
+        self, texts: list[str], model: str = "BAAI/bge-large-zh-v1.5"
+    ) -> dict[str, Any]:
+        """Generate text embeddings using SiliconFlow API"""
+        if not self.api_key:
+            return {"success": False, "error": "SILICONFLOW_API_KEY not configured"}
+
+        if not texts:
+            return {"success": True, "embeddings": []}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"model": model, "input": texts},
+                    timeout=60.0,
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    embeddings = [item["embedding"] for item in result["data"]]
+                    return {
+                        "success": True,
+                        "embeddings": embeddings,
+                        "usage": result.get("usage", {}),
+                    }
+                else:
+                    error_detail = response.text
+                    logger.error(
+                        "SiliconFlow Embedding API error",
+                        status=response.status_code,
+                        detail=error_detail,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"API error {response.status_code}",
+                        "details": error_detail,
+                    }
+        except Exception as e:
+            logger.error(
+                "SiliconFlow embedding generation failed", error=str(e), exc_info=True
+            )
+            return {"success": False, "error": str(e)}
+
+    async def test_connection(self) -> Dict[str, Any]:
+        """Test connection to SiliconFlow API"""
+        if not self.api_key:
+            return {
+                "success": False,
+                "error": "SILICONFLOW_API_KEY not configured",
+                "message": "Please set SILICONFLOW_API_KEY in environment variables",
+            }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "deepseek-ai/DeepSeek-V2.5",
+                        "messages": [{"role": "user", "content": "Hello"}],
+                        "max_tokens": 10,
+                    },
+                    timeout=30.0,
+                )
+
+                if response.status_code == 200:
+                    return {
+                        "success": True,
+                        "message": "SiliconFlow API connection successful",
+                        "model": "deepseek-ai/DeepSeek-V2.5",
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": f"API error {response.status_code}",
+                        "details": response.text,
+                    }
+
+        except Exception as e:
+            logger.error("SiliconFlow API connection test failed", error=str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Failed to connect to SiliconFlow API",
+            }
+
+
 class LLMService:
     """
     Main LLM service that orchestrates different AI models
@@ -668,6 +771,7 @@ class LLMService:
         self.qwen = QwenAPIService()
         self.deepseek = DeepSeekAPIService()
         self.openai = OpenAIAPIService()
+        self.siliconflow = SiliconFlowAPIService()
 
     async def test_all_connections(self) -> Dict[str, Any]:
         """
@@ -692,6 +796,11 @@ class LLMService:
         logger.info("Testing OpenAI API connection...")
         openai_result = await self.openai.test_connection()
         results["openai"] = openai_result
+
+        # Test SiliconFlow API
+        logger.info("Testing SiliconFlow API connection...")
+        siliconflow_result = await self.siliconflow.test_connection()
+        results["siliconflow"] = siliconflow_result
 
         # Current configuration
         results["current_config"] = {
@@ -744,8 +853,27 @@ class LLMService:
         """
         # Use configured provider and model if not specified
         if model is None:
-            provider = settings.CHAT_MODEL_PROVIDER
-            model = settings.CHAT_MODEL_NAME
+            # 优先使用模型配置文件中的设置
+            try:
+                from app.services.model_config_service import (
+                    model_config_service,
+                    ModelType,
+                )
+                
+                chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                if chat_config:
+                    provider = chat_config.provider.value
+                    model = chat_config.model_name
+                    logger.info(f"Using configured chat model: {provider}/{model}")
+                else:
+                    # 回退到环境变量
+                    provider = settings.CHAT_MODEL_PROVIDER
+                    model = settings.CHAT_MODEL_NAME
+                    logger.info(f"Using default chat model: {provider}/{model}")
+            except Exception as e:
+                logger.warning(f"Failed to get model config, using default: {e}")
+                provider = settings.CHAT_MODEL_PROVIDER
+                model = settings.CHAT_MODEL_NAME
         else:
             # Determine provider from model name
             if model.startswith("deepseek"):
@@ -790,8 +918,44 @@ class LLMService:
         """
         # Use configured provider and model if not specified
         if model is None:
-            provider = settings.EMBEDDING_MODEL_PROVIDER
-            model = settings.EMBEDDING_MODEL_NAME
+            # 优先使用模型配置文件中的设置
+            try:
+                from app.services.model_config_service import (
+                    model_config_service,
+                    ModelType,
+                )
+                
+                embedding_config = model_config_service.get_active_model(ModelType.EMBEDDING)
+                if embedding_config:
+                    provider = embedding_config.provider.value
+                    model = embedding_config.model_name
+                    
+                    # 如果配置中有API密钥和基础URL，临时更新服务实例
+                    if provider == "siliconflow" and embedding_config.api_key:
+                        self.siliconflow.api_key = embedding_config.api_key
+                        if embedding_config.api_base:
+                            self.siliconflow.base_url = embedding_config.api_base
+                    elif provider == "openai" and embedding_config.api_key:
+                        self.openai.api_key = embedding_config.api_key
+                        if embedding_config.api_base:
+                            self.openai.base_url = embedding_config.api_base
+                    elif provider == "qwen" and embedding_config.api_key:
+                        self.qwen.api_key = embedding_config.api_key
+                    elif provider == "deepseek" and embedding_config.api_key:
+                        self.deepseek.api_key = embedding_config.api_key
+                        if embedding_config.api_base:
+                            self.deepseek.base_url = embedding_config.api_base
+                    
+                    logger.info(f"Using configured embedding model: {provider}/{model}")
+                else:
+                    # 回退到环境变量
+                    provider = settings.EMBEDDING_MODEL_PROVIDER
+                    model = settings.EMBEDDING_MODEL_NAME
+                    logger.info(f"Using default embedding model: {provider}/{model}")
+            except Exception as e:
+                logger.warning(f"Failed to get embedding model config, using default: {e}")
+                provider = settings.EMBEDDING_MODEL_PROVIDER
+                model = settings.EMBEDDING_MODEL_NAME
         else:
             # Determine provider from model name
             if "deepseek" in model:
@@ -800,6 +964,8 @@ class LLMService:
                 provider = "qwen"
             elif "text-embedding-3" in model or "text-embedding-ada" in model:
                 provider = "openai"
+            elif "BAAI/bge" in model or "sentence-transformers" in model:
+                provider = "siliconflow"
             else:
                 provider = settings.EMBEDDING_MODEL_PROVIDER
 
@@ -812,6 +978,8 @@ class LLMService:
                 return await self.qwen.get_embeddings(texts)
             elif provider == "deepseek":
                 return await self.deepseek.get_embeddings(texts)
+            elif provider == "siliconflow":
+                return await self.siliconflow.get_embeddings(texts, model)
             else:
                 logger.warning(
                     f"Unsupported embedding provider: {provider}. Falling back to OpenAI."

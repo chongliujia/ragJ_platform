@@ -5,7 +5,7 @@ const API_BASE_URL = 'http://localhost:8000';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 10000,
+  timeout: 60000, // 增加到60秒，适应RAG处理的复杂性
   headers: {
     'Content-Type': 'application/json',
   },
@@ -52,9 +52,9 @@ export const knowledgeBaseApi = {
 
 // 聊天相关 API
 export const chatApi = {
-  // 发送消息
+  // 发送消息 - 使用更长的超时时间以适应RAG处理
   sendMessage: (data: { message: string; knowledge_base_id?: string; model?: string }) =>
-    api.post('/api/v1/chat', data),
+    api.post('/api/v1/chat', data, { timeout: 90000 }), // 90秒超时
   
   // 获取重排提供商
   getRerankingProviders: () => 

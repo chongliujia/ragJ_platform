@@ -212,7 +212,7 @@
     },
     "embedding": {
       "provider": "siliconflow",
-      "model_name": "BAAI/bge-large-zh-v1.5",
+      "model_name": "BAAI/bge-m3",
       "api_key": "sk-ldtisaqnxejxzkhuqvyjxnjcthnwjyjtwijhwbvbvhzquytb",
       "api_base": "https://api.siliconflow.cn/v1",
       "max_tokens": null,
@@ -225,7 +225,7 @@
       "provider": "siliconflow",
       "model_name": "BAAI/bge-reranker-v2-m3",
       "api_key": "sk-ldtisaqnxejxzkhuqvyjxnjcthnwjyjtwijhwbvbvhzquytb",
-      "api_base": "https://api.siliconflow.cn/v1/rerank",
+      "api_base": "https://api.siliconflow.cn/v1",
       "max_tokens": null,
       "temperature": null,
       "top_p": null,

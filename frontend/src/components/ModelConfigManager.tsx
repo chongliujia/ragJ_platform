@@ -66,6 +66,8 @@ const ModelConfigManager: React.FC = () => {
     config: UpdateModelConfigRequest;
   } | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [customModelName, setCustomModelName] = useState<string>('');
+  const [showCustomInput, setShowCustomInput] = useState<boolean>(false);
   
   // 测试状态
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
@@ -148,6 +150,10 @@ const ModelConfigManager: React.FC = () => {
         }
       });
       
+      // 重置自定义模型名称状态
+      setCustomModelName('');
+      setShowCustomInput(false);
+      
       setEditDialogOpen(true);
     } catch (error: any) {
       console.error('Failed to open edit dialog:', error);
@@ -160,6 +166,21 @@ const ModelConfigManager: React.FC = () => {
     if (!editingModel) return;
 
     try {
+      // 如果使用了自定义模型名称，先将其添加到提供商的模型列表中
+      if (!availableModels.includes(editingModel.config.model_name)) {
+        try {
+          await modelConfigApi.addCustomModel(
+            editingModel.config.provider,
+            editingModel.type,
+            editingModel.config.model_name
+          );
+          console.log('Custom model added to provider list');
+        } catch (addError) {
+          console.warn('Failed to add custom model to provider list:', addError);
+          // 继续保存配置，即使添加到提供商列表失败
+        }
+      }
+
       await modelConfigApi.updateActiveModel(editingModel.type, editingModel.config);
       setSuccess('模型配置更新成功');
       setEditDialogOpen(false);
@@ -449,21 +470,75 @@ const ModelConfigManager: React.FC = () => {
                 </Select>
               </FormControl>
 
-              {/* 模型选择 */}
-              <FormControl fullWidth>
-                <InputLabel>模型</InputLabel>
-                <Select
-                  value={editingModel.config.model_name}
-                  onChange={(e) => updateEditingConfig({ model_name: e.target.value })}
-                  label="模型"
-                >
-                  {availableModels.map((model) => (
-                    <MenuItem key={model} value={model}>
-                      {model}
+              {/* 模型选择 - 支持自定义模型名称 */}
+              <Box>
+                <FormControl fullWidth>
+                  <InputLabel>模型</InputLabel>
+                  <Select
+                    value={
+                      availableModels.includes(editingModel.config.model_name) 
+                        ? editingModel.config.model_name 
+                        : (editingModel.config.model_name ? editingModel.config.model_name : '__custom__')
+                    }
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value === '__custom__') {
+                        setCustomModelName('');
+                        updateEditingConfig({ model_name: '__custom__' });
+                      } else {
+                        updateEditingConfig({ model_name: value });
+                      }
+                    }}
+                    label="模型"
+                  >
+                    {availableModels.map((model) => (
+                      <MenuItem key={model} value={model}>
+                        {model}
+                      </MenuItem>
+                    ))}
+                    {/* 如果当前模型不在预定义列表中，显示它 */}
+                    {editingModel.config.model_name && 
+                     !availableModels.includes(editingModel.config.model_name) && 
+                     editingModel.config.model_name !== '__custom__' && (
+                      <MenuItem value={editingModel.config.model_name}>
+                        {editingModel.config.model_name} <em>（自定义）</em>
+                      </MenuItem>
+                    )}
+                    <MenuItem value="__custom__">
+                      <em>自定义模型名称...</em>
                     </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+                  </Select>
+                </FormControl>
+                
+                {/* 自定义模型名称输入框 */}
+                {(editingModel.config.model_name === '__custom__' || 
+                  (editingModel.config.model_name && !availableModels.includes(editingModel.config.model_name))) && (
+                  <TextField
+                    label="自定义模型名称"
+                    value={editingModel.config.model_name === '__custom__' ? customModelName : editingModel.config.model_name}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (editingModel.config.model_name === '__custom__') {
+                        setCustomModelName(value);
+                        if (value.trim()) {
+                          updateEditingConfig({ model_name: value });
+                        }
+                      } else {
+                        updateEditingConfig({ model_name: value });
+                      }
+                    }}
+                    fullWidth
+                    sx={{ mt: 2 }}
+                    placeholder="请输入模型名称，例如: gpt-4-turbo, claude-3-5-sonnet"
+                    helperText={
+                      editingModel.config.model_name === '__custom__' 
+                        ? "输入您想要使用的模型名称" 
+                        : "自定义模型名称（不在预定义列表中）"
+                    }
+                    autoFocus={editingModel.config.model_name === '__custom__'}
+                  />
+                )}
+              </Box>
 
               {/* API密钥 */}
               <TextField
@@ -539,7 +614,10 @@ const ModelConfigManager: React.FC = () => {
             startIcon={<SaveIcon />}
             disabled={
               !editingModel?.config.api_key || 
-              (!editingModel.config.api_key.includes('*') && editingModel.config.api_key.trim() === '')
+              (!editingModel.config.api_key.includes('*') && editingModel.config.api_key.trim() === '') ||
+              !editingModel.config.model_name ||
+              editingModel.config.model_name === '__custom__' ||
+              editingModel.config.model_name.trim() === ''
             }
           >
             保存配置
