@@ -150,9 +150,25 @@ class MilvusService:
             vector_field = FieldSchema(
                 name="vector", dtype=DataType.FLOAT_VECTOR, dim=dim
             )
+            # Tenant ID for multi-tenancy
+            tenant_id_field = FieldSchema(
+                name="tenant_id", dtype=DataType.INT64
+            )
+            # User ID
+            user_id_field = FieldSchema(
+                name="user_id", dtype=DataType.INT64
+            )
+            # Document name
+            document_name_field = FieldSchema(
+                name="document_name", dtype=DataType.VARCHAR, max_length=512
+            )
+            # Knowledge base name
+            knowledge_base_field = FieldSchema(
+                name="knowledge_base", dtype=DataType.VARCHAR, max_length=256
+            )
 
             schema = CollectionSchema(
-                fields=[pk_field, text_field, vector_field],
+                fields=[pk_field, text_field, vector_field, tenant_id_field, user_id_field, document_name_field, knowledge_base_field],
                 description=f"{collection_name} collection",
             )
 
@@ -219,19 +235,24 @@ class MilvusService:
             return []
 
         if not self.has_collection(collection_name):
-            logger.error(
-                f"Collection '{collection_name}' does not exist. Cannot insert data."
+            logger.info(
+                f"Collection '{collection_name}' does not exist. Creating it now..."
             )
-            return []
+            self.create_collection(collection_name)
+            logger.info(f"Collection '{collection_name}' created successfully.")
 
         try:
             collection = Collection(name=collection_name, using=self.alias)
             # The 'entities' should be a list of lists, matching the field order.
-            # Example: data = [ ["text1", "text2"], [ [vec1], [vec2] ] ]
+            # Example: data = [ ["text1", "text2"], [ [vec1], [vec2] ], ... ]
             # Let's prepare the data in the correct format.
             texts = [entity["text"] for entity in entities]
             vectors = [entity["vector"] for entity in entities]
-            data_to_insert = [texts, vectors]
+            tenant_ids = [entity["tenant_id"] for entity in entities]
+            user_ids = [entity["user_id"] for entity in entities]
+            document_names = [entity["document_name"] for entity in entities]
+            knowledge_bases = [entity["knowledge_base"] for entity in entities]
+            data_to_insert = [texts, vectors, tenant_ids, user_ids, document_names, knowledge_bases]
 
             result = collection.insert(data_to_insert)
             collection.flush()  # Ensure data is indexed
@@ -284,7 +305,7 @@ class MilvusService:
                 anns_field="vector",
                 param=search_params,
                 limit=top_k,
-                output_fields=["text"],  # Retrieve the original text field
+                output_fields=["text", "tenant_id", "user_id", "document_name", "knowledge_base"],  # Retrieve metadata fields
             )
 
             # Unload collection after search to free up memory
@@ -299,6 +320,10 @@ class MilvusService:
                         "id": hit.id,
                         "distance": hit.distance,
                         "text": hit.entity.get("text"),
+                        "tenant_id": hit.entity.get("tenant_id"),
+                        "user_id": hit.entity.get("user_id"),
+                        "document_name": hit.entity.get("document_name"),
+                        "knowledge_base": hit.entity.get("knowledge_base"),
                     }
                 )
 

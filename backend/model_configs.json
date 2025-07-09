@@ -213,7 +213,7 @@
     "embedding": {
       "provider": "siliconflow",
       "model_name": "BAAI/bge-large-zh-v1.5",
-      "api_key": null,
+      "api_key": "sk-ldtisaqnxejxzkhuqvyjxnjcthnwjyjtwijhwbvbvhzquytb",
       "api_base": "https://api.siliconflow.cn/v1",
       "max_tokens": null,
       "temperature": null,
@@ -222,10 +222,10 @@
       "custom_params": {}
     },
     "reranking": {
-      "provider": "qwen",
-      "model_name": "gte-rerank",
-      "api_key": null,
-      "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "provider": "siliconflow",
+      "model_name": "BAAI/bge-reranker-v2-m3",
+      "api_key": "sk-ldtisaqnxejxzkhuqvyjxnjcthnwjyjtwijhwbvbvhzquytb",
+      "api_base": "https://api.siliconflow.cn/v1/rerank",
       "max_tokens": null,
       "temperature": null,
       "top_p": null,

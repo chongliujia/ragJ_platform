@@ -74,11 +74,17 @@ async def upload_document(
     # For example, check file.content_type or filename extension
 
     # Add the processing task to the background
+    # TODO: Get actual tenant_id and user_id from authentication context
+    tenant_id = 1  # Default tenant ID for now
+    user_id = 1    # Default user ID for now
+    
     background_tasks.add_task(
         document_service.process_document,
         content,
         file.filename,
         kb_name,
+        tenant_id,
+        user_id,
         strategy,
         params,
     )

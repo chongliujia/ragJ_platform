@@ -3,7 +3,7 @@
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
@@ -48,8 +48,8 @@ class UpdateModelConfigRequest(BaseModel):
     model_name: str
     api_key: str = ""  # 允许为空，保持现有密钥
     api_base: str = None
-    temperature: float = None
-    max_tokens: int = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
     enabled: bool = True
 
 
@@ -147,8 +147,8 @@ class ModelConfigDetailsResponse(BaseModel):
     enabled: bool
     api_key: str = ""  # 返回星号掩码
     api_base: str = ""
-    temperature: float = None
-    max_tokens: int = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
 
 
 @router.get("/active-models/{model_type}/details", response_model=ModelConfigDetailsResponse)

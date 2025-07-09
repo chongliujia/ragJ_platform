@@ -14,7 +14,7 @@ from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
 from app.core.config import settings
 from app.services.llm_service import llm_service
 from app.services.milvus_service import milvus_service
-from app.services.elasticsearch_service import elasticsearch_service
+from app.services.elasticsearch_service import get_elasticsearch_service
 from app.services.reranking_service import reranking_service, RerankingProvider
 
 logger = structlog.get_logger(__name__)
@@ -145,14 +145,22 @@ class ChatService:
                     filter_expr=f"tenant_id == {tenant_id}",
                 )
             )
-            keyword_search_task = asyncio.create_task(
-                elasticsearch_service.search(
-                    index_name=tenant_index_name,
-                    query=query_text,
-                    top_k=top_k,
-                    filter_query={"term": {"tenant_id": tenant_id}},
+            # Get elasticsearch service
+            es_service = await get_elasticsearch_service()
+            if es_service:
+                keyword_search_task = asyncio.create_task(
+                    es_service.search(
+                        index_name=tenant_index_name,
+                        query=query_text,
+                        top_k=top_k,
+                        filter_query={"term": {"tenant_id": tenant_id}},
+                    )
                 )
-            )
+            else:
+                # Create a dummy task that returns empty results
+                async def dummy_search():
+                    return []
+                keyword_search_task = asyncio.create_task(dummy_search())
 
             vector_results, keyword_results = await asyncio.gather(
                 vector_search_task, keyword_search_task

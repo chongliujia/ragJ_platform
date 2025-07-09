@@ -9,6 +9,7 @@ import structlog
 
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
+from app.services.langgraph_chat_service import langgraph_chat_service
 from app.services.reranking_service import reranking_service
 
 # Use a single instance of the service
@@ -29,7 +30,19 @@ async def handle_chat(request: ChatRequest):
             "Handling non-streaming chat request",
             knowledge_base_id=request.knowledge_base_id,
         )
-        response = await chat_service.chat(request)
+        
+        # Use LangGraph service for RAG chat if knowledge base is specified
+        if request.knowledge_base_id:
+            # TODO: Get actual tenant_id and user_id from authentication context
+            tenant_id = 1  # Default tenant ID for now
+            user_id = 1    # Default user ID for now
+            
+            logger.info("Using LangGraph RAG workflow for knowledge base chat")
+            response = await langgraph_chat_service.chat(request, tenant_id, user_id)
+        else:
+            # Use original chat service for standard chat
+            response = await chat_service.chat(request)
+            
         return response
     except Exception as e:
         logger.error("Chat completion failed", error=str(e), exc_info=True)
@@ -92,6 +105,40 @@ async def execute_workflow(workflow_id: str, request: dict):
     except Exception as e:
         logger.error("工作流执行失败", error=str(e))
         raise HTTPException(status_code=500, detail=f"工作流执行失败: {str(e)}")
+
+
+@router.post("/rag", response_model=ChatResponse)
+async def handle_rag_chat(request: ChatRequest):
+    """
+    专门用于RAG对话的LangGraph端点
+    """
+    try:
+        if not request.knowledge_base_id:
+            raise HTTPException(
+                status_code=400, 
+                detail="knowledge_base_id is required for RAG chat"
+            )
+        
+        logger.info(
+            "Handling RAG chat with LangGraph workflow",
+            knowledge_base_id=request.knowledge_base_id,
+        )
+        
+        # TODO: Get actual tenant_id and user_id from authentication context
+        tenant_id = 1  # Default tenant ID for now
+        user_id = 1    # Default user ID for now
+        
+        response = await langgraph_chat_service.chat(request, tenant_id, user_id)
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("RAG chat failed", error=str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500, 
+            detail=f"RAG chat processing failed: {e}"
+        )
 
 
 @router.get("/reranking-providers")
