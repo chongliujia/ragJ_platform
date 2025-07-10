@@ -27,6 +27,13 @@ class ChatService:
         """Initializes the chat service"""
         self.chat_history: Dict[str, List[ChatMessage]] = {}
         self.workflows: Dict[str, Any] = {}
+        self.elasticsearch_service = None
+        self.vector_service = milvus_service
+        
+    async def _ensure_services(self):
+        """Ensure services are initialized"""
+        if self.elasticsearch_service is None:
+            self.elasticsearch_service = await get_elasticsearch_service()
 
     async def chat(
         self, request: ChatRequest, tenant_id: int = None, user_id: int = None
@@ -35,6 +42,9 @@ class ChatService:
         Handles a chat request, dispatching it to the appropriate handler
         (e.g., RAG or a standard LLM call).
         """
+        # Ensure services are initialized
+        await self._ensure_services()
+        
         # If a knowledge_base_id is provided, use the RAG pipeline
         if request.knowledge_base_id:
             if tenant_id is None or user_id is None:
@@ -256,29 +266,109 @@ class ChatService:
 
     def _construct_rag_prompt(self, query: str, context: str) -> str:
         """Constructs a prompt for the LLM using the retrieved context."""
-        prompt_template = """
-You are a professional AI assistant. Your task is to answer the user's question based on the provided context.
-If the context does not contain the answer, state that you could not find the information in the provided documents.
-Do not use any external knowledge.
+        prompt_template = """基于以下信息回答问题。请使用Markdown格式，包括标题、列表、粗体等来组织回答。
+如果上下文中没有相关信息，请说明在提供的文档中找不到相关信息。
 
-## Context
+信息：
 {context}
 
-## User Question
-{query}
+问题：{query}
 
-## Your Answer
-"""
+请提供结构化的Markdown回答："""
         return prompt_template.format(context=context, query=query)
 
     async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[str, None]:
-        """Streaming chat response"""
+        """Streaming chat response with RAG support"""
         logger.info("Initiating stream chat.")
-        # This is a simplified stream that directly calls the LLM service
-        async for chunk in llm_service.stream_chat(
-            message=request.message, model=request.model
-        ):
-            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        
+        try:
+            # Ensure services are initialized
+            await self._ensure_services()
+            
+            # Check if this is a RAG request
+            if request.knowledge_base_id:
+                logger.info(f"Streaming RAG chat with knowledge base: {request.knowledge_base_id}")
+                
+                # Perform RAG retrieval first
+                query_text = request.message
+                
+                # 1. Retrieve documents from multiple sources
+                logger.info("Retrieving documents from multiple sources...")
+                
+                # Get documents from Elasticsearch
+                # Add tenant prefix to knowledge base ID for proper indexing
+                es_index_name = f"tenant_1_{request.knowledge_base_id}"
+                es_results = await self.elasticsearch_service.search(
+                    index_name=es_index_name,
+                    query=query_text,
+                    top_k=5
+                )
+                
+                # Get documents from vector database (first need to get query embedding)
+                # For now, skip vector search if we can't get embeddings easily
+                vector_results = []
+                
+                # 2. Fuse results from multiple sources
+                unified_docs = []
+                
+                # Process Elasticsearch results
+                if es_results:
+                    unified_docs.extend([
+                        {"text": doc["text"], "source": "elasticsearch", "score": doc.get("score", 0)}
+                        for doc in es_results
+                    ])
+                
+                # Process vector database results (currently empty)
+                if vector_results:
+                    unified_docs.extend([
+                        {"text": doc["text"], "source": "vector", "score": doc.get("score", 0)}
+                        for doc in vector_results
+                    ])
+                
+                if unified_docs:
+                    # 3. Rerank the fused results
+                    logger.info(f"Reranking {len(unified_docs)} fused documents...")
+                    reranked_docs = await reranking_service.rerank_documents(
+                        query=query_text,
+                        documents=unified_docs,
+                        provider=RerankingProvider.QWEN,
+                        top_k=3,
+                    )
+                    
+                    final_docs = [doc["text"] for doc in reranked_docs]
+                    context = "\n\n---\n\n".join(final_docs)
+                    
+                    # Use RAG prompt with context
+                    rag_prompt = self._construct_rag_prompt(query_text, context)
+                    
+                    # Stream the RAG response
+                    async for chunk in llm_service.stream_chat(
+                        message=rag_prompt, model=request.model
+                    ):
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    
+                    # Add source references
+                    sources = [f"📄 {doc['source']}" for doc in reranked_docs[:3]]
+                    source_info = {"success": True, "sources": sources, "type": "sources"}
+                    yield f"data: {json.dumps(source_info, ensure_ascii=False)}\n\n"
+                else:
+                    logger.warning("No documents found. Falling back to standard chat.")
+                    async for chunk in llm_service.stream_chat(
+                        message=request.message, model=request.model
+                    ):
+                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            else:
+                # Standard non-RAG streaming chat
+                async for chunk in llm_service.stream_chat(
+                    message=request.message, model=request.model
+                ):
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                    
+        except Exception as e:
+            logger.error("Stream chat failed", error=str(e), exc_info=True)
+            error_chunk = {"success": False, "error": str(e)}
+            yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+        
         yield "data: [DONE]\n\n"
 
     # The following methods are for managing chat history, kept for potential future use.

@@ -115,7 +115,7 @@ class Settings(BaseSettings):
         return [ext.strip() for ext in self.SUPPORTED_FILE_TYPES.split(",")]
 
     class Config:
-        env_file = ".env"
+        env_file = "../../../.env"  # 指向项目根目录的.env文件
         case_sensitive = True
 
 

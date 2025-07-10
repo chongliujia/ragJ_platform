@@ -853,7 +853,7 @@ class LLMService:
         """
         # Use configured provider and model if not specified
         if model is None:
-            # 优先使用模型配置文件中的设置
+            # 优先使用前端配置的模型设置
             try:
                 from app.services.model_config_service import (
                     model_config_service,
@@ -861,19 +861,21 @@ class LLMService:
                 )
                 
                 chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                logger.info(f"DEBUG: Got chat config from service: {chat_config}")
                 if chat_config:
                     provider = chat_config.provider.value
                     model = chat_config.model_name
-                    logger.info(f"Using configured chat model: {provider}/{model}")
+                    logger.info(f"Using model config service chat model: {provider}/{model}")
                 else:
-                    # 回退到环境变量
+                    # 回退到环境变量配置
                     provider = settings.CHAT_MODEL_PROVIDER
                     model = settings.CHAT_MODEL_NAME
-                    logger.info(f"Using default chat model: {provider}/{model}")
+                    logger.info(f"No config service data, using settings chat model: {provider}/{model}")
             except Exception as e:
-                logger.warning(f"Failed to get model config, using default: {e}")
+                logger.warning(f"Failed to get model config, using settings: {e}")
                 provider = settings.CHAT_MODEL_PROVIDER
                 model = settings.CHAT_MODEL_NAME
+                logger.info(f"Exception fallback chat model: {provider}/{model}")
         else:
             # Determine provider from model name
             if model.startswith("deepseek"):
@@ -909,6 +911,99 @@ class LLMService:
                 f"Chat completion failed with provider {provider}", error=str(e)
             )
             return {"success": False, "error": str(e)}
+
+    async def stream_chat(
+        self,
+        message: str,
+        model: str = None,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Generate streaming chat response using configured provider
+        
+        Args:
+            message: User input message
+            model: Model to use (if None, uses configured default)
+            temperature: Response randomness
+            max_tokens: Maximum response length
+            
+        Yields:
+            Dict with streaming response chunks
+        """
+        # Use configured provider and model if not specified
+        logger.info(f"STREAM_DEBUG: Starting model selection for streaming, model={model}")
+        if model is None:
+            # 优先使用前端配置的模型设置
+            try:
+                from app.services.model_config_service import (
+                    model_config_service,
+                    ModelType,
+                )
+                
+                chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                logger.info(f"DEBUG: Got chat config from service: {chat_config}")
+                if chat_config:
+                    provider = chat_config.provider.value
+                    model = chat_config.model_name
+                    logger.info(f"Using model config service chat model for streaming: {provider}/{model}")
+                else:
+                    # 回退到环境变量配置
+                    provider = settings.CHAT_MODEL_PROVIDER
+                    model = settings.CHAT_MODEL_NAME
+                    logger.info(f"No config service data, using settings chat model for streaming: {provider}/{model}")
+            except Exception as e:
+                logger.warning(f"Failed to get model config, using settings: {e}")
+                provider = settings.CHAT_MODEL_PROVIDER
+                model = settings.CHAT_MODEL_NAME
+                logger.info(f"Exception fallback chat model for streaming: {provider}/{model}")
+        else:
+            # Determine provider from model name
+            if model.startswith("deepseek"):
+                provider = "deepseek"
+            elif model.startswith("qwen"):
+                provider = "qwen"
+            elif model.startswith("gpt"):
+                provider = "openai"
+            else:
+                provider = settings.CHAT_MODEL_PROVIDER
+
+        logger.info(f"Using streaming chat provider: {provider}, model: {model}")
+
+        try:
+            if provider == "qwen":
+                async for chunk in self.qwen.stream_chat_completion(message, temperature, max_tokens):
+                    yield chunk
+            elif provider == "deepseek":
+                # For deepseek, fallback to regular chat but simulate streaming
+                logger.info(f"Using deepseek provider with simulated streaming")
+                result = await self.chat(message, model, temperature, max_tokens)
+                logger.info(f"DEEPSEEK_DEBUG: Got result: {result}")
+                if result.get("success"):
+                    # Split content into chunks for better streaming effect  
+                    content = result.get("message", "") or result.get("content", "")
+                    logger.info(f"DEEPSEEK_DEBUG: Content length: {len(content)}, content: {content[:100]}...")
+                    chunk_size = 20  # characters per chunk
+                    for i in range(0, len(content), chunk_size):
+                        chunk_content = content[i:i+chunk_size]
+                        logger.info(f"DEEPSEEK_DEBUG: Yielding chunk: {chunk_content}")
+                        yield {"success": True, "content": chunk_content}
+                        # Small delay to simulate streaming
+                        await asyncio.sleep(0.1)
+                else:
+                    logger.error(f"DEEPSEEK_DEBUG: Chat failed: {result}")
+                    yield {"success": False, "error": result.get("error", "Unknown error")}
+            else:
+                # For other non-streaming providers, fallback to regular chat
+                logger.warning(f"Streaming not supported for provider {provider}, falling back to regular chat")
+                result = await self.chat(message, model, temperature, max_tokens)
+                if result.get("success"):
+                    yield {"success": True, "content": result.get("content", "")}
+                else:
+                    yield {"success": False, "error": result.get("error", "Unknown error")}
+        except Exception as e:
+            logger.error(f"Streaming chat failed with provider {provider}", error=str(e))
+            yield {"success": False, "error": str(e)}
 
     async def get_embeddings(
         self, texts: list[str], model: str = None

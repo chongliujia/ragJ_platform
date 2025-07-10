@@ -94,13 +94,25 @@ const Chat: React.FC = () => {
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentMessage = inputMessage;
     setInputMessage('');
     setLoading(true);
     setError(null);
 
+    // 创建一个空的机器人消息用于流式更新
+    const botMessageId = (Date.now() + 1).toString();
+    const botMessage: Message = {
+      id: botMessageId,
+      content: '',
+      sender: 'bot',
+      timestamp: new Date(),
+    };
+
+    setMessages(prev => [...prev, botMessage]);
+
     try {
       const requestData: any = {
-        message: inputMessage,
+        message: currentMessage,
       };
       
       // 只有选择了知识库才传递knowledge_base_id
@@ -108,16 +120,65 @@ const Chat: React.FC = () => {
         requestData.knowledge_base_id = selectedKb;
       }
 
-      const response = await chatApi.sendMessage(requestData);
-
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: response.data.message || response.data.response || t('chat.errorResponse'),
-        sender: 'bot',
-        timestamp: new Date(),
-      };
-
-      setMessages(prev => [...prev, botMessage]);
+      // 使用流式API
+      await chatApi.streamMessage(
+        requestData,
+        (chunk) => {
+          // 处理流式数据块
+          if (chunk.success && chunk.content) {
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === botMessageId 
+                  ? { ...msg, content: msg.content + chunk.content }
+                  : msg
+              )
+            );
+          } else if (chunk.type === 'sources' && chunk.sources) {
+            // 处理来源信息
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === botMessageId 
+                  ? { ...msg, content: msg.content + '\n\n📚 参考文档：\n' + chunk.sources.join('\n') }
+                  : msg
+              )
+            );
+          } else if (chunk.success === false) {
+            // 处理错误
+            const errorContent = chunk.error || t('chat.errorResponse');
+            setMessages(prev => 
+              prev.map(msg => 
+                msg.id === botMessageId 
+                  ? { ...msg, content: errorContent }
+                  : msg
+              )
+            );
+          }
+        },
+        (error) => {
+          console.error('Stream error:', error);
+          
+          // 根据错误类型提供更友好的错误消息
+          let errorContent = t('chat.errorResponse');
+          if (error.message?.includes('timeout')) {
+            errorContent = selectedKb 
+              ? '处理知识库查询时超时，请稍后重试。如果问题持续存在，请尝试简化您的问题。'
+              : '请求超时，请稍后重试。';
+          }
+          
+          setMessages(prev => 
+            prev.map(msg => 
+              msg.id === botMessageId 
+                ? { ...msg, content: errorContent }
+                : msg
+            )
+          );
+          setLoading(false);
+        },
+        () => {
+          // 流式完成
+          setLoading(false);
+        }
+      );
     } catch (error: any) {
       console.error('Failed to send message:', error);
       
@@ -129,14 +190,13 @@ const Chat: React.FC = () => {
           : '请求超时，请稍后重试。';
       }
       
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: errorContent,
-        sender: 'bot',
-        timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.id === botMessageId 
+            ? { ...msg, content: errorContent }
+            : msg
+        )
+      );
       setLoading(false);
     }
   };
@@ -276,14 +336,25 @@ const Chat: React.FC = () => {
                     {message.sender === 'bot' ? (
                       <Box sx={{ 
                         fontFamily: 'Inter, sans-serif',
-                        fontSize: '0.95rem',
+                        fontSize: '0.875rem',
                         lineHeight: 1.6,
                         color: 'text.primary',
                         fontWeight: 400,
                         '& p': { margin: '0.5em 0' },
-                        '& h1, & h2, & h3': { 
+                        '& h1': { 
                           margin: '1em 0 0.5em 0',
-                          fontWeight: 600 
+                          fontWeight: 600,
+                          fontSize: '1.1rem'
+                        },
+                        '& h2': { 
+                          margin: '0.8em 0 0.4em 0',
+                          fontWeight: 600,
+                          fontSize: '1.05rem'
+                        },
+                        '& h3': { 
+                          margin: '0.6em 0 0.3em 0',
+                          fontWeight: 600,
+                          fontSize: '1rem'
                         },
                         '& ul, & ol': { 
                           margin: '0.5em 0',
@@ -313,7 +384,7 @@ const Chat: React.FC = () => {
                       <Typography variant="body1" sx={{ 
                         whiteSpace: 'pre-wrap',
                         fontFamily: 'Inter, sans-serif',
-                        fontSize: '0.95rem',
+                        fontSize: '0.875rem',
                         lineHeight: 1.6,
                         color: 'white',
                         fontWeight: 400

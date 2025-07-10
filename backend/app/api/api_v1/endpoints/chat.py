@@ -6,6 +6,7 @@ Handles regular and RAG-based chat completions, both streaming and non-streaming
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 import structlog
+import json
 
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
@@ -62,11 +63,32 @@ async def handle_stream_chat(request: ChatRequest):
             knowledge_base_id=request.knowledge_base_id,
         )
         return StreamingResponse(
-            chat_service.stream_chat(request), media_type="text/event-stream"
+            chat_service.stream_chat(request), 
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            }
         )
     except Exception as e:
         logger.error("Streaming chat failed", error=str(e), exc_info=True)
-        return StreamingResponse(None, status_code=500)
+        
+        # Return error as an event stream
+        async def error_stream():
+            error_data = {
+                "success": False,
+                "error": str(e),
+                "type": "error"
+            }
+            yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        
+        return StreamingResponse(
+            error_stream(), 
+            media_type="text/event-stream",
+            status_code=500
+        )
 
 
 @router.get("/history/{chat_id}")

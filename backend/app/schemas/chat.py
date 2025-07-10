@@ -24,7 +24,7 @@ class ChatRequest(BaseModel):
     chat_id: Optional[str] = Field(default=None, description="聊天会话ID")
     knowledge_base_id: Optional[str] = Field(default=None, description="知识库ID")
     workflow_id: Optional[str] = Field(default=None, description="工作流ID")
-    model: str = Field(default="gpt-3.5-turbo", description="使用的模型")
+    model: Optional[str] = Field(default=None, description="使用的模型")
     temperature: float = Field(default=0.7, description="模型温度参数")
     max_tokens: Optional[int] = Field(default=None, description="最大生成token数")
     stream: bool = Field(default=False, description="是否流式响应")

@@ -56,6 +56,67 @@ export const chatApi = {
   sendMessage: (data: { message: string; knowledge_base_id?: string; model?: string }) =>
     api.post('/api/v1/chat', data, { timeout: 90000 }), // 90秒超时
   
+  // 流式聊天
+  streamMessage: async (
+    data: { message: string; knowledge_base_id?: string; model?: string },
+    onChunk: (chunk: any) => void,
+    onError: (error: any) => void,
+    onComplete: () => void
+  ) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') {
+                onComplete();
+                return;
+              }
+              
+              try {
+                const parsed = JSON.parse(data);
+                onChunk(parsed);
+              } catch (e) {
+                console.warn('Failed to parse SSE data:', data);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (error) {
+      console.error('Stream error:', error);
+      onError(error);
+    }
+  },
+  
   // 获取重排提供商
   getRerankingProviders: () => 
     api.get('/api/v1/chat/reranking-providers'),
