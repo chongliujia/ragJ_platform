@@ -185,21 +185,27 @@ async def logout():
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_info(db: Session = Depends(get_db)):
+async def get_current_user_info(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     """
-    获取当前用户信息 - 临时移除身份验证以便测试
+    获取当前用户信息
     """
-    # 返回一个默认用户用于测试
+    # 获取租户信息
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    tenant_name = tenant.name if tenant else "Unknown Tenant"
+    
     return UserResponse(
-        id=1,
-        username="test_user",
-        email="test@example.com",
-        full_name="Test User",
-        role="user",
-        is_active=True,
-        tenant_id=1,
-        tenant_name="Default Tenant",
-        created_at="2025-01-01T00:00:00",
+        id=current_user.id,
+        username=current_user.username,
+        email=current_user.email,
+        full_name=current_user.full_name or "",
+        role=current_user.role,
+        is_active=current_user.is_active,
+        tenant_id=current_user.tenant_id,
+        tenant_name=tenant_name,
+        created_at=current_user.created_at.isoformat() if current_user.created_at else "",
     )
 
 

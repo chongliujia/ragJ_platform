@@ -169,6 +169,63 @@ async def update_user_config(
     )
 
 
+@router.get("/stats", response_model=UserStatsResponse)
+async def get_user_stats(
+    current_user: User = Depends(require_tenant_admin()), db: Session = Depends(get_db)
+):
+    """获取用户统计信息（管理员功能）"""
+    # 根据用户角色限制访问范围
+    if current_user.role == "super_admin":
+        # 超级管理员可以查看所有用户统计
+        total_users = db.query(User).count()
+        active_users = db.query(User).filter(User.is_active == True).count()
+        admin_users = (
+            db.query(User)
+            .filter(User.role.in_(["super_admin", "tenant_admin"]))
+            .count()
+        )
+        # 本月新用户
+        from datetime import datetime, timedelta
+        this_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        new_users_this_month = (
+            db.query(User)
+            .filter(User.created_at >= this_month)
+            .count()
+        )
+    else:
+        # 租户管理员只能查看本租户统计
+        tenant_id = current_user.tenant_id
+        total_users = db.query(User).filter(User.tenant_id == tenant_id).count()
+        active_users = (
+            db.query(User)
+            .filter(User.tenant_id == tenant_id, User.is_active == True)
+            .count()
+        )
+        admin_users = (
+            db.query(User)
+            .filter(
+                User.tenant_id == tenant_id,
+                User.role.in_(["super_admin", "tenant_admin"])
+            )
+            .count()
+        )
+        # 本月新用户
+        from datetime import datetime, timedelta
+        this_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        new_users_this_month = (
+            db.query(User)
+            .filter(User.tenant_id == tenant_id, User.created_at >= this_month)
+            .count()
+        )
+
+    return UserStatsResponse(
+        total_users=total_users,
+        active_users=active_users,
+        admin_users=admin_users,
+        new_users_this_month=new_users_this_month,
+    )
+
+
 @router.get("/", response_model=List[UserListResponse])
 async def list_users(
     skip: int = Query(0, ge=0),

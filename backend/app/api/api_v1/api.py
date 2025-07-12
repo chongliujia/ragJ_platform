@@ -15,6 +15,7 @@ from app.api.api_v1.endpoints import (
     model_config,
     users,
     admin,
+    teams,
 )
 
 api_router = APIRouter()
@@ -44,4 +45,9 @@ api_router.include_router(
 # Add model configuration endpoints
 api_router.include_router(
     model_config.router, prefix="/model-config", tags=["Model Configuration"]
+)
+
+# Add team management endpoints
+api_router.include_router(
+    teams.router, prefix="/teams", tags=["Team Management"]
 )

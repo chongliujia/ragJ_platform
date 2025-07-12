@@ -52,9 +52,10 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True))
 
     # 关联关系
-    tenant = relationship("Tenant", back_populates="users")
+    tenant = relationship("Tenant", foreign_keys=[tenant_id], back_populates="users")  # 明确指定外键
     user_config = relationship("UserConfig", back_populates="user", uselist=False)
     knowledge_bases = relationship("KnowledgeBase", back_populates="owner")
+    user_tenants = relationship("UserTenant", foreign_keys="UserTenant.user_id")  # 新的多对多关系
 
 
 class UserConfig(Base):

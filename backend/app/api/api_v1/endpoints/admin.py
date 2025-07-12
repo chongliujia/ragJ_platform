@@ -171,8 +171,8 @@ async def list_all_tenants(
                 current_knowledge_bases=current_knowledge_bases,
                 current_documents=current_documents,
                 current_storage_mb=0,  # TODO: 实现存储计算
-                created_at=tenant.created_at.isoformat(),
-                updated_at=tenant.updated_at.isoformat(),
+                created_at=tenant.created_at.isoformat() if tenant.created_at else "",
+                updated_at=tenant.updated_at.isoformat() if tenant.updated_at else "",
             )
         )
 
