@@ -37,12 +37,11 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Add as AddIcon,
-  Visibility as ViewIcon,
   AdminPanelSettings as AdminIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
+import i18n from '../i18n';
 import { AuthManager } from '../services/authApi';
-import type { UserInfo } from '../types/auth';
 
 interface UserListItem {
   id: number;
@@ -70,7 +69,6 @@ const UserManagement: React.FC = () => {
   const { t } = useTranslation();
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
@@ -93,13 +91,16 @@ const UserManagement: React.FC = () => {
   const currentUser = authManager.getCurrentUser();
 
   useEffect(() => {
+    // Debug: Check current user and token
+    console.log('Current user:', currentUser);
+    console.log('Auth token:', localStorage.getItem('auth_token'));
+    
     loadUsers();
     loadStats();
   }, [page, rowsPerPage, searchTerm, roleFilter, statusFilter]);
 
   const loadUsers = async () => {
     try {
-      setLoading(true);
       const params = new URLSearchParams({
         skip: (page * rowsPerPage).toString(),
         limit: rowsPerPage.toString(),
@@ -109,44 +110,117 @@ const UserManagement: React.FC = () => {
       if (roleFilter) params.append('role', roleFilter);
       if (statusFilter) params.append('is_active', statusFilter);
 
-      const response = await fetch(`/api/v1/users?${params}`, {
+      // Debug log
+      console.log('Fetching users from:', `/api/v1/admin/users?${params}`);
+      console.log('Using token:', localStorage.getItem('auth_token')?.substring(0, 20) + '...');
+
+      const response = await fetch(`/api/v1/admin/users?${params}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'Content-Type': 'application/json',
         },
       });
 
+      console.log('Response status:', response.status);
+      console.log('Response headers:', response.headers.get('content-type'));
+
       if (!response.ok) {
-        throw new Error('Failed to load users');
+        const errorText = await response.text();
+        console.error('Error response:', errorText);
+        
+        if (response.status === 403) {
+          setError('Access denied: Super admin privileges required');
+        } else if (response.status === 401) {
+          setError('Authentication failed: Please login again');
+        } else {
+          setError(`Failed to load users: ${response.status} - ${errorText.substring(0, 100)}...`);
+        }
+        setUsers([]);
+        return;
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const responseText = await response.text();
+        console.error('Non-JSON response:', responseText.substring(0, 200));
+        setError('Server returned invalid response format (HTML instead of JSON)');
+        setUsers([]);
+        return;
       }
 
       const data = await response.json();
       setUsers(data);
-    } catch (error: any) {
-      setError(error.message);
-    } finally {
-      setLoading(false);
+      setError(null);
+    } catch (error) {
+      console.error('Load users error:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load users');
+      setUsers([]);
     }
   };
 
   const loadStats = async () => {
     try {
-      const response = await fetch('/api/v1/users/stats', {
+      // First try to load users to calculate stats manually
+      const usersResponse = await fetch('/api/v1/admin/users?limit=1000', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'Content-Type': 'application/json',
         },
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (usersResponse.ok) {
+        const contentType = usersResponse.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          console.error('Stats API returned non-JSON response');
+          setStats({
+            total_users: 0,
+            active_users: 0,
+            admin_users: 0,
+            new_users_this_month: 0,
+          });
+          return;
+        }
+
+        const userData: UserListItem[] = await usersResponse.json();
+        const totalUsers = userData.length;
+        const activeUsers = userData.filter((user) => user.is_active).length;
+        const adminUsers = userData.filter((user) => 
+          user.role === 'super_admin' || user.role === 'tenant_admin'
+        ).length;
+        
+        // Calculate new users this month (simple approximation)
+        const thisMonth = new Date();
+        thisMonth.setDate(1);
+        const newUsersThisMonth = userData.filter((user) => {
+          const createdDate = new Date(user.created_at);
+          return createdDate >= thisMonth;
+        }).length;
+
         setStats({
-          total_users: data.total_users,
-          active_users: data.active_users,
-          admin_users: data.admin_users,
-          new_users_this_month: data.new_users_this_month,
+          total_users: totalUsers,
+          active_users: activeUsers,
+          admin_users: adminUsers,
+          new_users_this_month: newUsersThisMonth,
+        });
+      } else {
+        console.error('Failed to load users for stats, status:', usersResponse.status);
+        // Set fallback stats
+        setStats({
+          total_users: 0,
+          active_users: 0,
+          admin_users: 0,
+          new_users_this_month: 0,
         });
       }
     } catch (error) {
       console.error('Failed to load stats:', error);
+      // Set fallback stats
+      setStats({
+        total_users: 0,
+        active_users: 0,
+        admin_users: 0,
+        new_users_this_month: 0,
+      });
     }
   };
 
@@ -185,8 +259,8 @@ const UserManagement: React.FC = () => {
 
       setEditDialogOpen(false);
       loadUsers();
-    } catch (error: any) {
-      setError(error.message);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to update user');
     }
   };
 
@@ -207,8 +281,8 @@ const UserManagement: React.FC = () => {
 
       setDeleteDialogOpen(false);
       loadUsers();
-    } catch (error: any) {
-      setError(error.message);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to delete user');
     }
   };
 
@@ -358,51 +432,143 @@ const UserManagement: React.FC = () => {
         </Grid>
       </Paper>
 
-      {/* 用户表格 */}
-      <TableContainer component={Paper}>
-        <Table>
+      {/* 移动端卡片视图 */}
+      <Box sx={{ display: { xs: 'block', md: 'none' }, mb: 2 }}>
+        {users.map((user) => (
+          <Card key={user.id} sx={{ mb: 2 }}>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                <Box>
+                  <Typography variant="h6" component="div" sx={{ fontWeight: 'bold' }}>
+                    {user.username}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                    {user.email}
+                  </Typography>
+                  <Typography variant="body2">
+                    {user.full_name}
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleEditUser(user)}
+                    disabled={
+                      (user.role === 'super_admin' && currentUser?.role !== 'super_admin') ||
+                      (user.role === 'tenant_admin' && currentUser?.role === 'tenant_admin' && user.id !== currentUser?.id)
+                    }
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleDeleteUser(user)}
+                    disabled={
+                      user.id === currentUser?.id ||
+                      (user.role === 'super_admin' && currentUser?.role !== 'super_admin') ||
+                      (user.role === 'tenant_admin' && currentUser?.role === 'tenant_admin' && user.id !== currentUser?.id)
+                    }
+                    color="error"
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Box>
+              </Box>
+              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Chip
+                  label={getRoleLabel(user.role)}
+                  color={getRoleColor(user.role) as 'error' | 'warning' | 'primary' | 'default'}
+                  size="small"
+                  icon={user.role.includes('admin') ? <AdminIcon /> : undefined}
+                />
+                <Chip
+                  label={user.is_active ? t('userManagement.status.active') : t('userManagement.status.inactive')}
+                  color={user.is_active ? 'success' : 'default'}
+                  size="small"
+                />
+              </Box>
+              <Box component="div" sx={{ mt: 1, display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', color: 'text.secondary' }}>
+                <Typography variant="body2" component="span">{user.tenant_name}</Typography>
+                <Typography variant="body2" component="span">{new Date(user.created_at).toLocaleDateString(i18n.language === 'zh' ? 'zh-CN' : 'en-US')}</Typography>
+              </Box>
+            </CardContent>
+          </Card>
+        ))}
+      </Box>
+
+      {/* 桌面端表格视图 */}
+      <TableContainer component={Paper} sx={{ display: { xs: 'none', md: 'block' }, overflowX: 'auto' }}>
+        <Table stickyHeader>
           <TableHead>
             <TableRow>
-              <TableCell>{t('userManagement.table.username')}</TableCell>
-              <TableCell>{t('userManagement.table.email')}</TableCell>
-              <TableCell>{t('userManagement.table.fullName')}</TableCell>
-              <TableCell>{t('userManagement.table.role')}</TableCell>
-              <TableCell>{t('userManagement.table.status')}</TableCell>
-              <TableCell>{t('userManagement.table.tenant')}</TableCell>
-              <TableCell>{t('userManagement.table.knowledgeBases')}</TableCell>
-              <TableCell>{t('userManagement.table.documents')}</TableCell>
-              <TableCell>{t('userManagement.table.createdAt')}</TableCell>
-              <TableCell>{t('userManagement.table.actions')}</TableCell>
+              <TableCell sx={{ minWidth: 120 }}>{t('userManagement.table.username')}</TableCell>
+              <TableCell sx={{ minWidth: 180 }}>{t('userManagement.table.email')}</TableCell>
+              <TableCell sx={{ minWidth: 120 }}>{t('userManagement.table.fullName')}</TableCell>
+              <TableCell sx={{ minWidth: 100 }}>{t('userManagement.table.role')}</TableCell>
+              <TableCell sx={{ minWidth: 80 }}>{t('userManagement.table.status')}</TableCell>
+              <TableCell sx={{ minWidth: 120, display: { xs: 'none', md: 'table-cell' } }}>{t('userManagement.table.tenant')}</TableCell>
+              <TableCell sx={{ minWidth: 80, display: { xs: 'none', lg: 'table-cell' } }}>{t('userManagement.table.kbCount')}</TableCell>
+              <TableCell sx={{ minWidth: 80, display: { xs: 'none', lg: 'table-cell' } }}>{t('userManagement.table.docCount')}</TableCell>
+              <TableCell sx={{ minWidth: 100, display: { xs: 'none', md: 'table-cell' } }}>{t('userManagement.table.created')}</TableCell>
+              <TableCell sx={{ minWidth: 120, position: 'sticky', right: 0, backgroundColor: 'background.paper', zIndex: 1 }}>{t('userManagement.table.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {users.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell>{user.username}</TableCell>
-                <TableCell>{user.email}</TableCell>
-                <TableCell>{user.full_name}</TableCell>
+              <TableRow key={user.id} hover>
+                <TableCell sx={{ fontWeight: 'medium' }}>{user.username}</TableCell>
+                <TableCell 
+                  sx={{ 
+                    maxWidth: 180, 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                  title={user.email}
+                >
+                  {user.email}
+                </TableCell>
+                <TableCell 
+                  sx={{ 
+                    maxWidth: 120, 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                  title={user.full_name}
+                >
+                  {user.full_name}
+                </TableCell>
                 <TableCell>
                   <Chip
                     label={getRoleLabel(user.role)}
-                    color={getRoleColor(user.role) as any}
+                    color={getRoleColor(user.role) as 'error' | 'warning' | 'primary' | 'default'}
                     size="small"
                     icon={user.role.includes('admin') ? <AdminIcon /> : undefined}
+                    sx={{ fontSize: '0.75rem' }}
                   />
                 </TableCell>
                 <TableCell>
                   <Chip
-                    label={user.is_active ? t('userManagement.filters.active') : t('userManagement.filters.disabled')}
+                    label={user.is_active ? t('userManagement.status.active') : t('userManagement.status.inactive')}
                     color={user.is_active ? 'success' : 'default'}
                     size="small"
+                    sx={{ fontSize: '0.75rem' }}
                   />
                 </TableCell>
-                <TableCell>{user.tenant_name}</TableCell>
-                <TableCell>{user.knowledge_bases_count}</TableCell>
-                <TableCell>{user.documents_count}</TableCell>
-                <TableCell>
-                  {new Date(user.created_at).toLocaleDateString()}
+                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                  <Box sx={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user.tenant_name}>
+                    {user.tenant_name}
+                  </Box>
                 </TableCell>
-                <TableCell>
+                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' }, textAlign: 'center' }}>{user.knowledge_bases_count}</TableCell>
+                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' }, textAlign: 'center' }}>{user.documents_count}</TableCell>
+                <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
+                  <Box sx={{ fontSize: '0.875rem' }}>
+                    {new Date(user.created_at).toLocaleDateString(i18n.language === 'zh' ? 'zh-CN' : 'en-US')}
+                  </Box>
+                </TableCell>
+                <TableCell sx={{ position: 'sticky', right: 0, backgroundColor: 'background.paper', zIndex: 1 }}>
                   <IconButton
                     size="small"
                     onClick={() => handleEditUser(user)}
@@ -431,15 +597,24 @@ const UserManagement: React.FC = () => {
           </TableBody>
         </Table>
         <TablePagination
-          rowsPerPageOptions={[10, 25, 50]}
+          rowsPerPageOptions={[5, 10, 25]}
           component="div"
-          count={-1} // 未知总数
+          count={-1}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={(e, newPage) => setPage(newPage)}
           onRowsPerPageChange={(e) => {
             setRowsPerPage(parseInt(e.target.value, 10));
             setPage(0);
+          }}
+          labelRowsPerPage={t('common.rowsPerPage')}
+          labelDisplayedRows={({ from, to, count }) =>
+            `${from}-${to} ${t('common.of')} ${count !== -1 ? count : t('common.moreThan')} ${to}`
+          }
+          sx={{
+            '& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows': {
+              fontSize: { xs: '0.75rem', sm: '0.875rem' },
+            },
           }}
         />
       </TableContainer>

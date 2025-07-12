@@ -11,7 +11,9 @@ import Dashboard from './pages/Dashboard';
 import KnowledgeBases from './pages/KnowledgeBases';
 import Documents from './pages/Documents';
 import Chat from './pages/Chat';
+import Teams from './pages/Teams';
 import Settings from './pages/Settings';
+import WorkflowEditor from './pages/WorkflowEditor';
 import Test from './pages/Test';
 import UserManagement from './pages/UserManagement';
 import TenantManagement from './pages/TenantManagement';
@@ -507,6 +509,8 @@ function App() {
                       <Route path="/knowledge-bases" element={<KnowledgeBases />} />
                       <Route path="/documents" element={<Documents />} />
                       <Route path="/chat" element={<Chat />} />
+                      <Route path="/teams" element={<Teams />} />
+                      <Route path="/workflows" element={<WorkflowEditor />} />
                       <Route path="/settings" element={<Settings />} />
                       <Route path="/test" element={<Test />} />
                       

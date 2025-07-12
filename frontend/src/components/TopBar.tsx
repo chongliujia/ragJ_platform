@@ -12,6 +12,7 @@ import {
   SmartToy as BotIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
+import { TeamSelector } from './TeamSelector';
 
 interface TopBarProps {
   open: boolean;
@@ -119,6 +120,11 @@ const TopBar: React.FC<TopBarProps> = ({ open, onToggle }) => {
           }}>
             {t('nav.title')}
           </Typography>
+          
+          {/* 团队选择器 - 仅在移动设备上显示紧凑版本 */}
+          <Box sx={{ ml: 'auto', mr: 1 }}>
+            <TeamSelector compact />
+          </Box>
         </Box>
       </Toolbar>
     </AppBar>

@@ -95,6 +95,12 @@ const TenantManagement: React.FC = () => {
   const authManager = AuthManager.getInstance();
 
   useEffect(() => {
+    // Check if user has super admin permissions
+    const currentUser = authManager.getCurrentUser();
+    if (currentUser?.role !== 'super_admin') {
+      console.error('Access denied: Super admin privileges required');
+      return;
+    }
     loadTenants();
     loadStats();
   }, [page, rowsPerPage, searchTerm, statusFilter]);
@@ -134,15 +140,44 @@ const TenantManagement: React.FC = () => {
       const response = await fetch('/api/v1/admin/tenant-stats', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'Content-Type': 'application/json',
         },
       });
 
       if (response.ok) {
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          console.error('Tenant stats API returned non-JSON response');
+          setStats({
+            total_tenants: 0,
+            active_tenants: 0,
+            total_users: 0,
+            total_storage_mb: 0,
+          });
+          return;
+        }
+
         const data = await response.json();
         setStats(data);
+      } else {
+        console.error('Failed to load tenant stats, status:', response.status);
+        // Set fallback stats
+        setStats({
+          total_tenants: 0,
+          active_tenants: 0,
+          total_users: 0,
+          total_storage_mb: 0,
+        });
       }
     } catch (error) {
       console.error('Failed to load tenant stats:', error);
+      // Set fallback stats
+      setStats({
+        total_tenants: 0,
+        active_tenants: 0,
+        total_users: 0,
+        total_storage_mb: 0,
+      });
     }
   };
 

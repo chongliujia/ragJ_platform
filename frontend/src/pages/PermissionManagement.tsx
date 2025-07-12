@@ -189,15 +189,26 @@ const PermissionManagement: React.FC = () => {
       const response = await fetch('/api/v1/admin/tenants', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'Content-Type': 'application/json',
         },
       });
 
       if (response.ok) {
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          console.error('Tenants API returned non-JSON response');
+          setTenants([]);
+          return;
+        }
         const data = await response.json();
         setTenants(data);
+      } else {
+        console.error('Failed to load tenants, status:', response.status);
+        setTenants([]);
       }
     } catch (error) {
       console.error('Failed to load tenants:', error);
+      setTenants([]);
     }
   };
 

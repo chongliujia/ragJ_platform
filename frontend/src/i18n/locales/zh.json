@@ -24,16 +24,23 @@
     "export": "导出",
     "import": "导入",
     "upload": "上传",
-    "download": "下载"
+    "download": "下载",
+    "rowsPerPage": "每页行数:",
+    "of": "共",
+    "moreThan": "超过"
   },
   "nav": {
     "dashboard": "仪表板",
     "knowledgeBases": "知识库",
     "documents": "文档管理",
     "chat": "智能对话",
+    "teams": "团队管理",
+    "workflows": "智能工作流",
     "settings": "系统设置",
     "title": "RAG Platform",
     "subtitle": "智能检索增强平台",
+    "platformName": "RAG Platform",
+    "brandName": "RAG",
     "connectionTest": "连接测试",
     "adminFeatures": "管理功能",
     "userManagement": "用户管理",
@@ -135,12 +142,25 @@
       "title": "上传文档",
       "upload": "上传",
       "uploading": "上传中...",
+      "uploadFiles": "上传 {{count}} 个文件",
       "error": "上传失败",
       "file": {
         "select": "点击选择文件",
+        "addMore": "添加更多文件",
+        "browse": "浏览文件",
         "selected": "已选择",
+        "selectedFiles": "已选择的文件",
         "required": "请选择要上传的文件",
-        "supportedFormats": "支持 PDF、DOCX、TXT、MD 格式"
+        "supportedFormats": "支持 PDF、DOCX、TXT、MD、HTML、CSV、JSON、XML、RTF、EPUB、ODT、Excel、PowerPoint 等格式"
+      },
+      "status": {
+        "pending": "待上传",
+        "uploading": "上传中",
+        "success": "上传成功",
+        "error": "上传失败"
+      },
+      "progress": {
+        "overall": "总进度"
       },
       "chunking": {
         "title": "分片策略配置",
@@ -149,6 +169,40 @@
       },
       "strategies": {
         "fetchError": "获取分片策略失败"
+      }
+    },
+    "manager": {
+      "title": "文档管理",
+      "documentsCount": "个文档",
+      "fetchError": "获取文档列表失败",
+      "deleteError": "删除文档失败",
+      "search": {
+        "placeholder": "搜索文档名称..."
+      },
+      "actions": {
+        "selectAll": "全选",
+        "deselectAll": "取消全选",
+        "refresh": "刷新",
+        "actions": "操作",
+        "deleteSelected": "删除选中项"
+      },
+      "table": {
+        "filename": "文件名",
+        "size": "大小",
+        "uploadTime": "上传时间",
+        "status": "状态",
+        "chunks": "分块数",
+        "actions": "操作"
+      },
+      "status": {
+        "pending": "待处理",
+        "processing": "处理中",
+        "completed": "已完成",
+        "failed": "失败"
+      },
+      "empty": {
+        "noDocuments": "暂无文档",
+        "noMatches": "没有匹配的文档"
       }
     }
   },
@@ -265,54 +319,6 @@
       "passwordPlaceholder": "请输入密码",
       "confirmPasswordPlaceholder": "请确认密码"
     },
-    "userManagement": {
-      "title": "用户管理",
-      "stats": {
-        "totalUsers": "总用户数",
-        "activeUsers": "活跃用户",
-        "adminUsers": "管理员",
-        "newThisMonth": "本月新增"
-      },
-      "search": {
-        "placeholder": "搜索用户",
-        "hint": "用户名、邮箱或姓名"
-      },
-      "filters": {
-        "role": "角色",
-        "status": "状态",
-        "all": "全部",
-        "active": "活跃",
-        "disabled": "禁用"
-      },
-      "actions": {
-        "addUser": "添加用户",
-        "edit": "编辑",
-        "delete": "删除",
-        "save": "保存",
-        "cancel": "取消"
-      },
-      "table": {
-        "username": "用户名",
-        "email": "邮箱",
-        "fullName": "姓名",
-        "role": "角色",
-        "status": "状态",
-        "tenant": "租户",
-        "knowledgeBases": "知识库",
-        "documents": "文档",
-        "createdAt": "创建时间",
-        "actions": "操作"
-      },
-      "dialog": {
-        "editUser": "编辑用户",
-        "confirmDelete": "确认删除",
-        "deleteMessage": "确定要删除用户 \"{username}\" 吗？此操作无法撤销。",
-        "fullName": "姓名",
-        "email": "邮箱",
-        "role": "角色",
-        "accountStatus": "账户状态"
-      }
-    },
     "platform": {
       "title": "下一代智能知识平台",
       "description": "基于先进的检索增强生成技术，为您的团队提供智能化的知识管理和问答解决方案",
@@ -323,6 +329,59 @@
         "secure": "安全可靠"
       },
       "copyright": "保留所有权利."
+    }
+  },
+  "userManagement": {
+    "title": "用户管理",
+    "stats": {
+      "totalUsers": "总用户数",
+      "activeUsers": "活跃用户",
+      "adminUsers": "管理员",
+      "newThisMonth": "本月新增"
+    },
+    "search": {
+      "placeholder": "搜索用户",
+      "hint": "用户名、邮箱或姓名"
+    },
+    "filters": {
+      "role": "角色",
+      "status": "状态",
+      "all": "全部",
+      "active": "活跃",
+      "disabled": "禁用"
+    },
+    "actions": {
+      "addUser": "添加用户",
+      "edit": "编辑",
+      "delete": "删除",
+      "save": "保存",
+      "cancel": "取消"
+    },
+    "table": {
+      "username": "用户名",
+      "email": "邮箱",
+      "fullName": "姓名", 
+      "role": "角色",
+      "status": "状态",
+      "tenant": "租户",
+      "kbCount": "知识库",
+      "docCount": "文档",
+      "created": "创建时间",
+      "actions": "操作"
+    },
+    "status": {
+      "active": "活跃",
+      "inactive": "禁用"
+    },
+    "dialog": {
+      "editUser": "编辑用户",
+      "deleteUser": "删除用户", 
+      "confirmDelete": "确定要删除这个用户吗？",
+      "deleteMessage": "确定要删除用户 '{username}' 吗？",
+      "fullName": "姓名",
+      "email": "邮箱",
+      "role": "角色",
+      "accountStatus": "账户状态"
     }
   }
 } 

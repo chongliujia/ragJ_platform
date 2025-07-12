@@ -24,16 +24,23 @@
     "export": "Export",
     "import": "Import",
     "upload": "Upload",
-    "download": "Download"
+    "download": "Download",
+    "rowsPerPage": "Rows per page:",
+    "of": "of",
+    "moreThan": "more than"
   },
   "nav": {
     "dashboard": "Dashboard",
     "knowledgeBases": "Knowledge Bases",
     "documents": "Documents",
     "chat": "Chat",
+    "teams": "Teams",
+    "workflows": "Workflows",
     "settings": "Settings",
     "title": "RAG Platform",
     "subtitle": "Intelligent Retrieval Augmented Generation Platform",
+    "platformName": "RAG Platform",
+    "brandName": "RAG",
     "connectionTest": "Connection Test",
     "adminFeatures": "Admin Features",
     "userManagement": "User Management",
@@ -132,15 +139,28 @@
   },
   "document": {
     "upload": {
-      "title": "Upload Document",
+      "title": "Upload Documents",
       "upload": "Upload",
       "uploading": "Uploading...",
+      "uploadFiles": "Upload {{count}} files",
       "error": "Upload failed",
       "file": {
-        "select": "Click to select file",
+        "select": "Click to select files",
+        "addMore": "Add more files",
+        "browse": "Browse Files",
         "selected": "Selected",
-        "required": "Please select a file to upload",
-        "supportedFormats": "Supports PDF, DOCX, TXT, MD formats"
+        "selectedFiles": "Selected Files",
+        "required": "Please select files to upload",
+        "supportedFormats": "Supports PDF, DOCX, TXT, MD, HTML, CSV, JSON, XML, RTF, EPUB, ODT, Excel, PowerPoint and more"
+      },
+      "status": {
+        "pending": "Pending",
+        "uploading": "Uploading",
+        "success": "Success",
+        "error": "Failed"
+      },
+      "progress": {
+        "overall": "Overall Progress"
       },
       "chunking": {
         "title": "Chunking Strategy Configuration",
@@ -149,6 +169,40 @@
       },
       "strategies": {
         "fetchError": "Failed to fetch chunking strategies"
+      }
+    },
+    "manager": {
+      "title": "Document Management",
+      "documentsCount": "documents",
+      "fetchError": "Failed to fetch documents",
+      "deleteError": "Failed to delete documents",
+      "search": {
+        "placeholder": "Search document names..."
+      },
+      "actions": {
+        "selectAll": "Select All",
+        "deselectAll": "Deselect All",
+        "refresh": "Refresh",
+        "actions": "Actions",
+        "deleteSelected": "Delete Selected"
+      },
+      "table": {
+        "filename": "Filename",
+        "size": "Size",
+        "uploadTime": "Upload Time",
+        "status": "Status",
+        "chunks": "Chunks",
+        "actions": "Actions"
+      },
+      "status": {
+        "pending": "Pending",
+        "processing": "Processing",
+        "completed": "Completed",
+        "failed": "Failed"
+      },
+      "empty": {
+        "noDocuments": "No documents",
+        "noMatches": "No matching documents"
       }
     }
   },
@@ -265,54 +319,6 @@
       "passwordPlaceholder": "Enter your password",
       "confirmPasswordPlaceholder": "Confirm your password"
     },
-    "userManagement": {
-      "title": "User Management",
-      "stats": {
-        "totalUsers": "Total Users",
-        "activeUsers": "Active Users",
-        "adminUsers": "Administrators",
-        "newThisMonth": "New This Month"
-      },
-      "search": {
-        "placeholder": "Search users",
-        "hint": "Username, email or name"
-      },
-      "filters": {
-        "role": "Role",
-        "status": "Status",
-        "all": "All",
-        "active": "Active",
-        "disabled": "Disabled"
-      },
-      "actions": {
-        "addUser": "Add User",
-        "edit": "Edit",
-        "delete": "Delete",
-        "save": "Save",
-        "cancel": "Cancel"
-      },
-      "table": {
-        "username": "Username",
-        "email": "Email",
-        "fullName": "Full Name",
-        "role": "Role",
-        "status": "Status",
-        "tenant": "Tenant",
-        "knowledgeBases": "Knowledge Bases",
-        "documents": "Documents",
-        "createdAt": "Created At",
-        "actions": "Actions"
-      },
-      "dialog": {
-        "editUser": "Edit User",
-        "confirmDelete": "Confirm Delete",
-        "deleteMessage": "Are you sure you want to delete user \"{username}\"? This action cannot be undone.",
-        "fullName": "Full Name",
-        "email": "Email",
-        "role": "Role",
-        "accountStatus": "Account Status"
-      }
-    },
     "platform": {
       "title": "Next-Generation Intelligent Knowledge Platform",
       "description": "Based on advanced Retrieval Augmented Generation technology, providing intelligent knowledge management and Q&A solutions for your team",
@@ -323,6 +329,59 @@
         "secure": "Secure & Reliable"
       },
       "copyright": "All rights reserved."
+    }
+  },
+  "userManagement": {
+    "title": "User Management",
+    "stats": {
+      "totalUsers": "Total Users",
+      "activeUsers": "Active Users",
+      "adminUsers": "Administrators",
+      "newThisMonth": "New This Month"
+    },
+    "search": {
+      "placeholder": "Search users",
+      "hint": "Username, email or name"
+    },
+    "filters": {
+      "role": "Role",
+      "status": "Status",
+      "all": "All",
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "actions": {
+      "addUser": "Add User",
+      "edit": "Edit",
+      "delete": "Delete",
+      "save": "Save",
+      "cancel": "Cancel"
+    },
+    "table": {
+      "username": "Username",
+      "email": "Email", 
+      "fullName": "Name",
+      "role": "Role",
+      "status": "Status",
+      "tenant": "Tenant",
+      "kbCount": "KBs",
+      "docCount": "Docs", 
+      "created": "Created",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
+    },
+    "dialog": {
+      "editUser": "Edit User",
+      "deleteUser": "Delete User",
+      "confirmDelete": "Are you sure you want to delete this user?",
+      "deleteMessage": "Are you sure you want to delete user '{username}'?",
+      "fullName": "Full Name",
+      "email": "Email",
+      "role": "Role",
+      "accountStatus": "Account Status"
     }
   }
 } 

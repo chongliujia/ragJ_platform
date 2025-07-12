@@ -38,8 +38,11 @@ import {
   AdminPanelSettings as AdminIcon,
   Menu as MenuIcon,
   ChevronLeft as ChevronLeftIcon,
+  Group as GroupIcon,
+  AccountTree as WorkflowIcon,
 } from '@mui/icons-material';
 import LanguageSwitcher from './LanguageSwitcher';
+import { TeamSelector } from './TeamSelector';
 import { AuthManager } from '../services/authApi';
 import { usePermissions } from '../hooks/usePermissions';
 import type { UserInfo } from '../types/auth';
@@ -74,6 +77,8 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
     { text: t('nav.knowledgeBases'), icon: <StorageIcon />, path: '/knowledge-bases' },
     { text: t('nav.documents'), icon: <DocumentIcon />, path: '/documents' },
     { text: t('nav.chat'), icon: <ChatIcon />, path: '/chat' },
+    { text: t('nav.teams'), icon: <GroupIcon />, path: '/teams' },
+    { text: t('nav.workflows'), icon: <WorkflowIcon />, path: '/workflows' },
     { text: t('nav.settings'), icon: <SettingsIcon />, path: '/settings' },
     { text: t('nav.connectionTest'), icon: <TestIcon />, path: '/test' },
   ];
@@ -181,7 +186,18 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
       
       <Divider sx={{ borderColor: '#334155' }} />
       
-      <List sx={{ pt: 2, flex: 1 }}>
+      {/* 团队选择器 */}
+      {open && (
+        <Box sx={{ p: 2, pb: 1 }}>
+          <TeamSelector 
+            onTeamSettingsClick={() => navigate('/teams')}
+            onCreateTeamClick={() => navigate('/teams')}
+            onJoinTeamClick={() => navigate('/teams')}
+          />
+        </Box>
+      )}
+      
+      <List sx={{ pt: open ? 1 : 2, flex: 1 }}>
         {/* 主菜单项 */}
         {menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>

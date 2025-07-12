@@ -128,13 +128,16 @@ export const documentApi = {
   getList: (knowledgeBaseId: string) => 
     api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`),
   
-  // 上传文档
-  upload: (knowledgeBaseId: string, formData: FormData) => 
-    api.post(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`, formData, {
+  // 上传文档 - 修复API路径，后端使用 /api/v1/documents/ 而不是 knowledge-bases 子路径
+  upload: (knowledgeBaseId: string, formData: FormData) => {
+    // 后端API需要 kb_name 参数，将其添加到FormData中
+    formData.append('kb_name', knowledgeBaseId);
+    return api.post('/api/v1/documents/', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
-    }),
+    });
+  },
   
   // 删除文档
   delete: (knowledgeBaseId: string, documentId: string) => 
@@ -152,6 +155,57 @@ export const systemApi = {
   
   // 系统信息
   getInfo: () => api.get('/'),
+};
+
+// 团队管理相关 API
+export const teamApi = {
+  // 获取当前用户所属的团队
+  getCurrentTeam: () => api.get('/api/v1/teams/current'),
+  
+  // 创建团队
+  createTeam: (data: {
+    name: string;
+    description?: string;
+    team_type?: string;
+    max_members?: number;
+    is_private?: boolean;
+  }) => api.post('/api/v1/teams', data),
+  
+  // 获取团队详情
+  getTeam: (teamId: number) => api.get(`/api/v1/teams/${teamId}`),
+  
+  // 更新团队信息
+  updateTeam: (teamId: number, data: {
+    name?: string;
+    description?: string;
+    team_type?: string;
+    max_members?: number;
+    is_private?: boolean;
+  }) => api.put(`/api/v1/teams/${teamId}`, data),
+  
+  // 删除团队
+  deleteTeam: (teamId: number) => api.delete(`/api/v1/teams/${teamId}`),
+  
+  // 获取团队成员列表
+  getTeamMembers: (teamId: number) => api.get(`/api/v1/teams/${teamId}/members`),
+  
+  // 邀请用户加入团队
+  inviteUser: (teamId: number, data: {
+    email: string;
+    target_role?: string;
+    target_member_type?: string;
+    message?: string;
+  }) => api.post(`/api/v1/teams/${teamId}/invite`, data),
+  
+  // 通过邀请码加入团队
+  joinTeam: (inviteCode: string) => api.post('/api/v1/teams/join', { invite_code: inviteCode }),
+  
+  // 移除团队成员
+  removeMember: (teamId: number, userId: number) => 
+    api.delete(`/api/v1/teams/${teamId}/members/${userId}`),
+  
+  // 离开团队
+  leaveTeam: (teamId: number) => api.post(`/api/v1/teams/${teamId}/leave`),
 };
 
 // 导出 api 实例

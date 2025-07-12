@@ -21,12 +21,21 @@ import {
   AccordionSummary,
   AccordionDetails,
   Chip,
+  IconButton,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  ListItemSecondaryAction,
+  LinearProgress,
 } from '@mui/material';
 import {
   CloudUpload as UploadIcon,
   ExpandMore as ExpandMoreIcon,
   Settings as SettingsIcon,
   Description as FileIcon,
+  Delete as DeleteIcon,
+  Add as AddIcon,
 } from '@mui/icons-material';
 import { documentApi } from '../services/api';
 import type { ChunkingStrategyConfig, ChunkingStrategy } from '../types/models';
@@ -38,6 +47,13 @@ interface DocumentUploadProps {
   onUploadSuccess: () => void;
 }
 
+interface FileUploadStatus {
+  file: File;
+  status: 'pending' | 'uploading' | 'success' | 'error';
+  progress: number;
+  error?: string;
+}
+
 const DocumentUpload: React.FC<DocumentUploadProps> = ({
   open,
   onClose,
@@ -45,9 +61,10 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   onUploadSuccess,
 }) => {
   const { t } = useTranslation();
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<FileUploadStatus[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
   
   // 分片策略相关状态
   const [strategies, setStrategies] = useState<ChunkingStrategyConfig[]>([]);
@@ -112,18 +129,28 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     }));
   };
 
-  // 处理文件选择
+  // 处理文件选择（支持多文件）
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = event.target.files?.[0];
-    if (selectedFile) {
-      setFile(selectedFile);
+    const selectedFiles = Array.from(event.target.files || []);
+    if (selectedFiles.length > 0) {
+      const newFiles: FileUploadStatus[] = selectedFiles.map(file => ({
+        file,
+        status: 'pending',
+        progress: 0,
+      }));
+      setFiles(prev => [...prev, ...newFiles]);
       setError(null);
     }
   };
 
-  // 处理文件上传
+  // 删除文件
+  const handleRemoveFile = (index: number) => {
+    setFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // 处理文件上传（支持多文件）
   const handleUpload = async () => {
-    if (!file) {
+    if (files.length === 0) {
       setError(t('document.upload.file.required'));
       return;
     }
@@ -131,20 +158,66 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     try {
       setUploading(true);
       setError(null);
+      setUploadProgress(0);
 
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('chunking_strategy', selectedStrategy);
-      formData.append('chunking_params', JSON.stringify(strategyParams));
+      const totalFiles = files.length;
+      let completedFiles = 0;
 
-      await documentApi.upload(knowledgeBaseId, formData);
+      // 逐个上传文件
+      for (let i = 0; i < files.length; i++) {
+        const fileStatus = files[i];
+        
+        // 更新文件状态为上传中
+        setFiles(prev => prev.map((f, idx) => 
+          idx === i ? { ...f, status: 'uploading', progress: 0 } : f
+        ));
+
+        try {
+          const formData = new FormData();
+          formData.append('file', fileStatus.file);
+          formData.append('chunking_strategy', selectedStrategy);
+          formData.append('chunking_params', JSON.stringify(strategyParams));
+
+          await documentApi.upload(knowledgeBaseId, formData);
+          
+          // 上传成功
+          setFiles(prev => prev.map((f, idx) => 
+            idx === i ? { ...f, status: 'success', progress: 100 } : f
+          ));
+          
+          completedFiles++;
+          setUploadProgress((completedFiles / totalFiles) * 100);
+          
+        } catch (error: any) {
+          console.error(`Upload failed for file ${fileStatus.file.name}:`, error);
+          
+          // 上传失败
+          setFiles(prev => prev.map((f, idx) => 
+            idx === i ? { 
+              ...f, 
+              status: 'error', 
+              progress: 0,
+              error: error.response?.data?.detail || t('document.upload.error')
+            } : f
+          ));
+        }
+      }
+
+      // 检查是否有成功的上传
+      const successfulUploads = files.filter(f => f.status === 'success').length;
+      if (successfulUploads > 0) {
+        onUploadSuccess();
+      }
       
-      // 上传成功
-      onUploadSuccess();
-      handleClose();
+      // 如果全部成功，关闭对话框
+      const failedUploads = files.filter(f => f.status === 'error').length;
+      if (failedUploads === 0) {
+        handleClose();
+      }
+      
     } catch (error: any) {
-      console.error('Upload failed:', error);
-      setError(error.response?.data?.detail || t('document.upload.error'));
+      console.error('Upload process failed:', error);
+      setError(error.message || t('document.upload.error'));
     } finally {
       setUploading(false);
     }
@@ -152,9 +225,10 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
 
   // 重置表单
   const handleClose = () => {
-    setFile(null);
+    setFiles([]);
     setError(null);
     setUploading(false);
+    setUploadProgress(0);
     onClose();
   };
 
@@ -228,8 +302,8 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
             mb: 3,
             textAlign: 'center',
             border: '2px dashed',
-            borderColor: file ? 'primary.main' : 'grey.300',
-            bgcolor: file ? 'primary.50' : 'grey.50',
+            borderColor: files.length > 0 ? 'primary.main' : 'grey.300',
+            bgcolor: files.length > 0 ? 'primary.50' : 'grey.50',
             cursor: 'pointer',
             transition: 'all 0.2s',
             '&:hover': {
@@ -241,39 +315,114 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
         >
           <input
             type="file"
-            accept=".pdf,.docx,.txt,.md"
+            accept=".pdf,.docx,.txt,.md,.html,.csv,.json,.xml,.rtf,.epub,.odt,.ods,.odp,.xlsx,.xls,.pptx,.ppt"
             onChange={handleFileChange}
+            multiple
             style={{ display: 'none' }}
           />
           
-          {file ? (
-            <Box>
-              <FileIcon sx={{ fontSize: 48, color: 'primary.main', mb: 1 }} />
-              <Typography variant="h6" color="primary">
-                {file.name}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {(file.size / 1024 / 1024).toFixed(2)} MB
-              </Typography>
-              <Chip
-                label={t('document.upload.file.selected')}
-                color="primary"
-                size="small"
-                sx={{ mt: 1 }}
-              />
-            </Box>
-          ) : (
-            <Box>
-              <UploadIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 1 }} />
-              <Typography variant="h6" color="text.secondary">
-                {t('document.upload.file.select')}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {t('document.upload.file.supportedFormats')}
-              </Typography>
-            </Box>
-          )}
+          <Box>
+            <UploadIcon sx={{ fontSize: 48, color: 'primary.main', mb: 1 }} />
+            <Typography variant="h6" color="primary">
+              {files.length > 0 
+                ? t('document.upload.file.addMore') 
+                : t('document.upload.file.select')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {t('document.upload.file.supportedFormats')}
+            </Typography>
+            <Button
+              variant="outlined"
+              startIcon={<AddIcon />}
+              sx={{ mt: 2 }}
+              size="small"
+            >
+              {t('document.upload.file.browse')}
+            </Button>
+          </Box>
         </Paper>
+
+        {/* 文件列表 */}
+        {files.length > 0 && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              {t('document.upload.file.selectedFiles')} ({files.length})
+            </Typography>
+            <List>
+              {files.map((fileStatus, index) => (
+                <ListItem key={index} divider>
+                  <ListItemIcon>
+                    <FileIcon color={
+                      fileStatus.status === 'success' ? 'success' :
+                      fileStatus.status === 'error' ? 'error' :
+                      fileStatus.status === 'uploading' ? 'primary' : 'inherit'
+                    } />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={fileStatus.file.name}
+                    secondary={
+                      <Box>
+                        <Typography variant="caption" color="text.secondary">
+                          {(fileStatus.file.size / 1024 / 1024).toFixed(2)} MB
+                        </Typography>
+                        {fileStatus.status === 'uploading' && (
+                          <LinearProgress 
+                            variant="indeterminate" 
+                            sx={{ mt: 1, height: 4, borderRadius: 2 }}
+                          />
+                        )}
+                        {fileStatus.status === 'error' && fileStatus.error && (
+                          <Typography variant="caption" color="error" sx={{ display: 'block', mt: 1 }}>
+                            {fileStatus.error}
+                          </Typography>
+                        )}
+                      </Box>
+                    }
+                  />
+                  <ListItemSecondaryAction>
+                    <Chip
+                      label={
+                        fileStatus.status === 'success' ? t('document.upload.status.success') :
+                        fileStatus.status === 'error' ? t('document.upload.status.error') :
+                        fileStatus.status === 'uploading' ? t('document.upload.status.uploading') :
+                        t('document.upload.status.pending')
+                      }
+                      color={
+                        fileStatus.status === 'success' ? 'success' :
+                        fileStatus.status === 'error' ? 'error' :
+                        fileStatus.status === 'uploading' ? 'primary' : 'default'
+                      }
+                      size="small"
+                      sx={{ mr: 1 }}
+                    />
+                    <IconButton
+                      edge="end"
+                      onClick={() => handleRemoveFile(index)}
+                      disabled={fileStatus.status === 'uploading'}
+                      size="small"
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  </ListItemSecondaryAction>
+                </ListItem>
+              ))}
+            </List>
+          </Box>
+        )}
+
+        {/* 总体上传进度 */}
+        {uploading && (
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {t('document.upload.progress.overall')}: {uploadProgress.toFixed(0)}%
+            </Typography>
+            <LinearProgress 
+              variant="determinate" 
+              value={uploadProgress} 
+              sx={{ height: 8, borderRadius: 4 }}
+            />
+          </Box>
+        )}
 
         {/* 分片策略配置 */}
         {loadingStrategies ? (
@@ -339,10 +488,12 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
         <Button
           onClick={handleUpload}
           variant="contained"
-          disabled={!file || uploading || loadingStrategies}
+          disabled={files.length === 0 || uploading || loadingStrategies}
           startIcon={uploading ? <CircularProgress size={20} /> : <UploadIcon />}
         >
-          {uploading ? t('document.upload.uploading') : t('document.upload.upload')}
+          {uploading 
+            ? t('document.upload.uploading') 
+            : t('document.upload.uploadFiles', { count: files.length })}
         </Button>
       </DialogActions>
     </Dialog>

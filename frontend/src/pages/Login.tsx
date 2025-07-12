@@ -227,6 +227,7 @@ const Login: React.FC = () => {
           {/* 左侧品牌区域 - 桌面端显示 */}
           <Grid 
             item 
+            xs={false}
             md={6}
             sx={{ 
               display: { xs: 'none', md: 'flex' },
@@ -283,7 +284,7 @@ const Login: React.FC = () => {
                       fontSize: { xs: '2rem', sm: '2.5rem', md: '3rem' },
                     }}
                   >
-                    RAG
+{t('nav.brandName')}
                   </Typography>
                   <Typography
                     variant="h6"
@@ -394,7 +395,7 @@ const Login: React.FC = () => {
                   color: 'white',
                 }}
               >
-                RAG Platform
+{t('nav.platformName')}
               </Typography>
             </Box>
           </Grid>
@@ -1054,7 +1055,7 @@ const Login: React.FC = () => {
                 fontSize: '0.75rem'
               }}
             >
-              © {new Date().getFullYear()} RAG Platform. 保留所有权利.
+              © {new Date().getFullYear()} {t('nav.platformName')}. {t('auth.platform.copyright')}
             </Typography>
           </Grid>
         </Grid>

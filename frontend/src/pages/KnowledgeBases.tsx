@@ -27,6 +27,7 @@ import {
 import { knowledgeBaseApi } from '../services/api';
 import type { KnowledgeBase } from '../types/models';
 import DocumentUpload from '../components/DocumentUpload';
+import DocumentManager from '../components/DocumentManager';
 
 
 const KnowledgeBases: React.FC = () => {
@@ -42,6 +43,9 @@ const KnowledgeBases: React.FC = () => {
   // 文档上传相关状态
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedKbId, setSelectedKbId] = useState<string>('');
+  
+  // 文档管理相关状态
+  const [manageDialogOpen, setManageDialogOpen] = useState(false);
 
   // 获取知识库列表
   const fetchKnowledgeBases = async () => {
@@ -111,8 +115,19 @@ const KnowledgeBases: React.FC = () => {
     setUploadDialogOpen(true);
   };
 
+  // 处理文档管理
+  const handleManageDocuments = (kbId: string) => {
+    setSelectedKbId(kbId);
+    setManageDialogOpen(true);
+  };
+
   // 上传成功后刷新知识库列表
   const handleUploadSuccess = () => {
+    fetchKnowledgeBases();
+  };
+
+  // 文档变更后刷新知识库列表
+  const handleDocumentsChanged = () => {
     fetchKnowledgeBases();
   };
 
@@ -225,7 +240,11 @@ const KnowledgeBases: React.FC = () => {
                   >
                     {t('knowledgeBase.card.uploadDocuments')}
                   </Button>
-                  <Button size="small" color="primary">
+                  <Button 
+                    size="small" 
+                    color="primary"
+                    onClick={() => handleManageDocuments(kb.id)}
+                  >
                     {t('knowledgeBase.card.manageDocuments')}
                   </Button>
                   <IconButton
@@ -287,6 +306,14 @@ const KnowledgeBases: React.FC = () => {
         onClose={() => setUploadDialogOpen(false)}
         knowledgeBaseId={selectedKbId}
         onUploadSuccess={handleUploadSuccess}
+      />
+
+      {/* 文档管理对话框 */}
+      <DocumentManager
+        open={manageDialogOpen}
+        onClose={() => setManageDialogOpen(false)}
+        knowledgeBaseId={selectedKbId}
+        onDocumentsChanged={handleDocumentsChanged}
       />
     </Box>
   );
