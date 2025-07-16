@@ -51,8 +51,10 @@ import {
   Transform as ProcessIcon,
   Visibility as ViewIcon,
   Edit as EditIcon,
+  BugReport as BugReportIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
+import { useParams, useNavigate } from 'react-router-dom';
 import ReactFlow, {
   Background,
   Controls,
@@ -67,11 +69,63 @@ import ReactFlow, {
 import type { Node, Edge, Connection } from 'reactflow';
 import 'reactflow/dist/style.css';
 
+// 全局样式覆盖 - 移除React Flow的默认节点样式
+const globalStyles = `
+  .custom-workflow-editor .react-flow__node {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+  }
+  
+  .custom-workflow-editor .react-flow__node-input,
+  .custom-workflow-editor .react-flow__node-output,
+  .custom-workflow-editor .react-flow__node-llm,
+  .custom-workflow-editor .react-flow__node-data,
+  .custom-workflow-editor .react-flow__node-process,
+  .custom-workflow-editor .react-flow__node-condition {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  
+  .custom-workflow-editor .react-flow__node.selected {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+`;
+
+// 注入全局样式
+if (typeof document !== 'undefined') {
+  const existingStyle = document.getElementById('workflow-node-styles');
+  if (!existingStyle) {
+    const style = document.createElement('style');
+    style.id = 'workflow-node-styles';
+    style.textContent = globalStyles;
+    document.head.appendChild(style);
+  }
+}
+
 // 自定义节点类型
 import LLMNode from '../components/workflow/LLMNode';
 import DataNode from '../components/workflow/DataNode';
 import ProcessNode from '../components/workflow/ProcessNode';
 import ConditionNode from '../components/workflow/ConditionNode';
+import InputOutputNode from '../components/workflow/InputOutputNode';
+import ToolNode from '../components/workflow/ToolNode';
+import CodeEditor from '../components/workflow/CodeEditor';
+import WorkflowDebugger from '../components/workflow/WorkflowDebugger';
+import WorkflowExecution from '../components/workflow/WorkflowExecution';
+import UltraCompactNodeItem from '../components/workflow/UltraCompactNodeItem';
+import QuickAccessPanel from '../components/workflow/QuickAccessPanel';
+import EnhancedLLMNode from '../components/workflow/EnhancedLLMNode';
+import EnhancedConnectionLine from '../components/workflow/EnhancedConnectionLine';
+import EnhancedEdge from '../components/workflow/EnhancedEdge';
+import CustomLLMNode from '../components/workflow/CustomLLMNode';
+import CustomFunctionCreator from '../components/workflow/CustomFunctionCreator';
 
 // 工作流节点类型定义
 export interface WorkflowNodeData {
@@ -84,15 +138,54 @@ export interface WorkflowNodeData {
   outputs?: string[];
 }
 
-// 节点类型配置
+// 节点类型配置 - 移到组件外部以避免重新创建
 const nodeTypes = {
-  llm: LLMNode,
+  llm: CustomLLMNode, // 使用可编程LLM节点
   data: DataNode,
   process: ProcessNode,
   condition: ConditionNode,
+  // 数据节点类型
+  rag_retriever: DataNode,
+  parser: DataNode,
+  database: DataNode,
+  embeddings: DataNode,
+  web_scraper: DataNode,
+  data_transformer: DataNode,
+  vector_store: DataNode,
+  // 流程控制节点类型
+  loop: ProcessNode,
+  parallel: ProcessNode,
+  start: ProcessNode,
+  end: ProcessNode,
+  delay: ProcessNode,
+  retry: ProcessNode,
+  // 输入输出节点类型
+  input: InputOutputNode,
+  output: InputOutputNode,
+  api_call: InputOutputNode,
+  webhook: InputOutputNode,
+  email: InputOutputNode,
+  file_upload: InputOutputNode,
+  // 工具节点类型
+  code_executor: ToolNode,
+  template_engine: ToolNode,
+  log_writer: ToolNode,
+  cache: ToolNode,
+  scheduler: ToolNode,
+  // AI模型节点类型
+  summarizer: LLMNode,
+  translator: LLMNode,
+  rewriter: LLMNode,
+  classifier: LLMNode,
 };
 
-// 预定义的节点模板
+// 边类型配置 - 移到组件外部以避免重新创建
+const edgeTypes = {
+  enhanced: EnhancedEdge,
+  default: EnhancedEdge, // 使用增强边作为默认边类型
+};
+
+// 预定义的节点模板（超精简版）- 移到组件外部
 const nodeTemplates = [
   {
     category: 'AI模型',
@@ -110,16 +203,6 @@ const nodeTemplates = [
         },
       },
       {
-        type: 'embeddings',
-        name: '向量嵌入',
-        description: '将文本转换为向量表示',
-        defaultConfig: {
-          model: 'text-embedding-ada-002',
-          dimensions: 1536,
-          batch_size: 100,
-        },
-      },
-      {
         type: 'classifier',
         name: '文本分类',
         description: '对文本进行分类或意图识别',
@@ -127,36 +210,6 @@ const nodeTemplates = [
           model: 'qwen-turbo',
           classes: ['正面', '负面', '中性'],
           confidence_threshold: 0.8,
-        },
-      },
-      {
-        type: 'summarizer',
-        name: '文本摘要',
-        description: '生成文本内容的摘要',
-        defaultConfig: {
-          model: 'qwen-plus',
-          max_length: 500,
-          style: 'concise',
-        },
-      },
-      {
-        type: 'translator',
-        name: '文本翻译',
-        description: '将文本翻译为目标语言',
-        defaultConfig: {
-          model: 'qwen-turbo',
-          source_lang: 'auto',
-          target_lang: 'zh',
-        },
-      },
-      {
-        type: 'rewriter',
-        name: '文本改写',
-        description: '重写和优化文本内容',
-        defaultConfig: {
-          model: 'qwen-plus',
-          style: 'professional',
-          tone: 'neutral',
         },
       },
     ],
@@ -187,47 +240,6 @@ const nodeTemplates = [
           chunk_overlap: 200,
         },
       },
-      {
-        type: 'database',
-        name: '数据库查询',
-        description: '执行数据库查询操作',
-        defaultConfig: {
-          connection: '',
-          query_type: 'SELECT',
-          timeout: 30,
-        },
-      },
-      {
-        type: 'web_scraper',
-        name: '网页抓取',
-        description: '抓取和解析网页内容',
-        defaultConfig: {
-          url: '',
-          headers: {},
-          timeout: 30,
-          extract_text: true,
-        },
-      },
-      {
-        type: 'data_transformer',
-        name: '数据转换',
-        description: '转换和清理数据格式',
-        defaultConfig: {
-          input_format: 'json',
-          output_format: 'json',
-          transformations: [],
-        },
-      },
-      {
-        type: 'vector_store',
-        name: '向量存储',
-        description: '存储和管理向量数据',
-        defaultConfig: {
-          collection_name: '',
-          batch_size: 100,
-          create_index: true,
-        },
-      },
     ],
   },
   {
@@ -242,63 +254,6 @@ const nodeTemplates = [
           condition_type: 'contains',
           condition_value: '',
           field_path: 'result.status',
-        },
-      },
-      {
-        type: 'loop',
-        name: '循环处理',
-        description: '重复执行某个流程',
-        defaultConfig: {
-          max_iterations: 10,
-          break_condition: '',
-          timeout: 300,
-        },
-      },
-      {
-        type: 'parallel',
-        name: '并行执行',
-        description: '同时执行多个分支',
-        defaultConfig: {
-          wait_for_all: true,
-          parallel_branches: 3,
-          timeout: 300,
-        },
-      },
-      {
-        type: 'start',
-        name: '开始节点',
-        description: '工作流的入口点',
-        defaultConfig: {
-          trigger_type: 'manual',
-          input_schema: {},
-        },
-      },
-      {
-        type: 'end',
-        name: '结束节点',
-        description: '工作流的结束点',
-        defaultConfig: {
-          output_format: 'json',
-          cleanup: true,
-        },
-      },
-      {
-        type: 'delay',
-        name: '延迟等待',
-        description: '暂停执行指定时间',
-        defaultConfig: {
-          delay_seconds: 1,
-          unit: 'seconds',
-        },
-      },
-      {
-        type: 'retry',
-        name: '重试机制',
-        description: '失败时自动重试',
-        defaultConfig: {
-          max_retries: 3,
-          retry_delay: 5,
-          retry_on: ['timeout', 'error'],
         },
       },
     ],
@@ -327,48 +282,6 @@ const nodeTemplates = [
           template: '',
         },
       },
-      {
-        type: 'api_call',
-        name: 'API调用',
-        description: '调用外部API接口',
-        defaultConfig: {
-          url: '',
-          method: 'POST',
-          headers: {},
-          timeout: 30,
-        },
-      },
-      {
-        type: 'webhook',
-        name: 'Webhook通知',
-        description: '发送Webhook通知',
-        defaultConfig: {
-          url: '',
-          method: 'POST',
-          payload_template: '',
-        },
-      },
-      {
-        type: 'email',
-        name: '邮件发送',
-        description: '发送电子邮件',
-        defaultConfig: {
-          to: '',
-          subject: '',
-          template: '',
-          attachments: [],
-        },
-      },
-      {
-        type: 'file_upload',
-        name: '文件上传',
-        description: '上传文件到存储',
-        defaultConfig: {
-          storage_type: 'local',
-          path: '',
-          overwrite: false,
-        },
-      },
     ],
   },
   {
@@ -386,46 +299,6 @@ const nodeTemplates = [
           environment: 'sandbox',
         },
       },
-      {
-        type: 'template_engine',
-        name: '模板渲染',
-        description: '使用模板引擎渲染内容',
-        defaultConfig: {
-          template: '',
-          engine: 'jinja2',
-          variables: {},
-        },
-      },
-      {
-        type: 'log_writer',
-        name: '日志记录',
-        description: '记录工作流执行日志',
-        defaultConfig: {
-          level: 'info',
-          format: 'json',
-          destination: 'console',
-        },
-      },
-      {
-        type: 'cache',
-        name: '缓存管理',
-        description: '缓存中间结果',
-        defaultConfig: {
-          key_template: '',
-          ttl: 3600,
-          cache_type: 'memory',
-        },
-      },
-      {
-        type: 'scheduler',
-        name: '任务调度',
-        description: '定时执行任务',
-        defaultConfig: {
-          schedule: '0 0 * * *',
-          timezone: 'UTC',
-          enabled: true,
-        },
-      },
     ],
   },
 ];
@@ -437,13 +310,29 @@ interface WorkflowEditorProps {
 }
 
 const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
-  workflowId,
+  workflowId: propWorkflowId,
   onSave,
   onExecute,
 }) => {
   const { t } = useTranslation();
+  const { id: routeWorkflowId } = useParams();
+  const navigate = useNavigate();
+  
+  // 使用路由参数或props传入的workflowId
+  const workflowId = routeWorkflowId || propWorkflowId;
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
+
+  // 如果从WorkflowManagement页面跳转过来，初始化工作流名称
+  useEffect(() => {
+    if (workflowId && workflowId !== 'new') {
+      // 这里可以根据workflowId加载现有工作流数据
+      // 目前先使用默认名称
+      setWorkflowName(`工作流 ${workflowId}`);
+    } else if (workflowId === 'new' || !workflowId) {
+      setWorkflowName('新建工作流');
+    }
+  }, [workflowId]);
 
   // 工作流状态
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -456,8 +345,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
+  const [debuggerOpen, setDebuggerOpen] = useState(false);
+  const [executionOpen, setExecutionOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
+  const [customFunctionCreatorOpen, setCustomFunctionCreatorOpen] = useState(false);
+  const [customFunctions, setCustomFunctions] = useState<any[]>([]);
 
   // 连接处理
   const onConnect = useCallback(
@@ -486,9 +379,9 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
       if (!reactFlowBounds || !reactFlowInstance) return;
 
-      const position = reactFlowInstance.project({
-        x: event.clientX - reactFlowBounds.left,
-        y: event.clientY - reactFlowBounds.top,
+      const position = reactFlowInstance.screenToFlowPosition({
+        x: event.clientX,
+        y: event.clientY,
       });
 
       const newNode: Node = {
@@ -532,7 +425,30 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     };
 
     try {
-      const response = await fetch('/api/v1/agents/workflows', {
+      // 如果有workflowId且不是'new'，尝试更新现有工作流
+      if (workflowId && workflowId !== 'new') {
+        try {
+          const response = await fetch(`/api/v1/workflows/${workflowId}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+            },
+            body: JSON.stringify(workflow),
+          });
+
+          if (response.ok) {
+            alert('工作流更新成功！');
+            onSave?.(workflow);
+            return;
+          }
+        } catch (updateError) {
+          console.error('Update error:', updateError);
+        }
+      }
+
+      // 尝试创建新工作流
+      const response = await fetch('/api/v1/workflows', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -545,31 +461,32 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         alert('工作流保存成功！');
         onSave?.(workflow);
       } else {
-        alert('保存失败，请重试');
+        throw new Error('保存失败');
       }
     } catch (error) {
       console.error('Save error:', error);
-      alert('保存失败，请检查网络连接');
+      // 提供降级体验：本地保存到localStorage
+      try {
+        const savedWorkflows = JSON.parse(localStorage.getItem('saved_workflows') || '[]');
+        const workflowWithId = {
+          ...workflow,
+          id: workflowId || `local_${Date.now()}`,
+          saved_at: new Date().toISOString()
+        };
+        savedWorkflows.push(workflowWithId);
+        localStorage.setItem('saved_workflows', JSON.stringify(savedWorkflows));
+        alert('后端服务不可用，工作流已保存到本地');
+        onSave?.(workflowWithId);
+      } catch (localError) {
+        alert('保存失败，请检查网络连接和本地存储空间');
+      }
     }
   }, [workflowName, workflowDescription, nodes, edges, onSave]);
 
   // 执行工作流
   const handleExecute = useCallback(async () => {
-    const workflow = {
-      name: workflowName,
-      nodes,
-      edges,
-    };
-
-    try {
-      // 这里可以添加执行逻辑
-      alert('工作流执行中...');
-      onExecute?.(workflow);
-    } catch (error) {
-      console.error('Execute error:', error);
-      alert('执行失败，请检查工作流配置');
-    }
-  }, [workflowName, nodes, edges, onExecute]);
+    setExecutionOpen(true);
+  }, []);
 
   // 拖拽开始处理
   const onDragStart = (event: React.DragEvent, nodeData: any) => {
@@ -577,12 +494,170 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     event.dataTransfer.effectAllowed = 'move';
   };
 
+  // 加载预定义模板
+  const loadTemplate = useCallback((templateType: string) => {
+    const templates = {
+      customer_service: {
+        nodes: [
+          {
+            id: 'start_1',
+            type: 'start',
+            position: { x: 50, y: 100 },
+            data: { name: '开始', type: 'start', config: {} }
+          },
+          {
+            id: 'intent_1',
+            type: 'classifier',
+            position: { x: 300, y: 100 },
+            data: { name: '意图识别', type: 'classifier', config: { model: 'qwen-turbo', classes: ['问题咨询', '投诉建议', '产品介绍'] } }
+          },
+          {
+            id: 'rag_1',
+            type: 'rag_retriever',
+            position: { x: 600, y: 100 },
+            data: { name: '知识检索', type: 'rag_retriever', config: { knowledge_base: 'customer_service', top_k: 5 } }
+          },
+          {
+            id: 'llm_1',
+            type: 'llm',
+            position: { x: 900, y: 100 },
+            data: { name: '回复生成', type: 'llm', config: { model: 'qwen-turbo', temperature: 0.7, system_prompt: '你是一个专业的客服助手' } }
+          },
+          {
+            id: 'output_1',
+            type: 'output',
+            position: { x: 1200, y: 100 },
+            data: { name: '输出结果', type: 'output', config: { format: 'json' } }
+          }
+        ],
+        edges: [
+          { id: 'e1-2', source: 'start_1', target: 'intent_1' },
+          { id: 'e2-3', source: 'intent_1', target: 'rag_1' },
+          { id: 'e3-4', source: 'rag_1', target: 'llm_1' },
+          { id: 'e4-5', source: 'llm_1', target: 'output_1' }
+        ]
+      },
+      document_analysis: {
+        nodes: [
+          {
+            id: 'input_1',
+            type: 'input',
+            position: { x: 50, y: 100 },
+            data: { name: '文档输入', type: 'input', config: { input_type: 'file' } }
+          },
+          {
+            id: 'parser_1',
+            type: 'parser',
+            position: { x: 350, y: 100 },
+            data: { name: '文档解析', type: 'parser', config: { file_types: ['pdf', 'docx', 'txt'] } }
+          },
+          {
+            id: 'classifier_1',
+            type: 'classifier',
+            position: { x: 650, y: 50 },
+            data: { name: '内容分类', type: 'classifier', config: { classes: ['合同', '报告', '通知'] } }
+          },
+          {
+            id: 'summarizer_1',
+            type: 'summarizer',
+            position: { x: 650, y: 200 },
+            data: { name: '摘要生成', type: 'summarizer', config: { max_length: 500 } }
+          },
+          {
+            id: 'output_1',
+            type: 'output',
+            position: { x: 950, y: 100 },
+            data: { name: '分析结果', type: 'output', config: { format: 'json' } }
+          }
+        ],
+        edges: [
+          { id: 'e1-2', source: 'input_1', target: 'parser_1' },
+          { id: 'e2-3', source: 'parser_1', target: 'classifier_1' },
+          { id: 'e2-4', source: 'parser_1', target: 'summarizer_1' },
+          { id: 'e3-5', source: 'classifier_1', target: 'output_1' },
+          { id: 'e4-5', source: 'summarizer_1', target: 'output_1' }
+        ]
+      },
+      translation: {
+        nodes: [
+          {
+            id: 'input_1',
+            type: 'input',
+            position: { x: 50, y: 100 },
+            data: { name: '文本输入', type: 'input', config: { input_type: 'text' } }
+          },
+          {
+            id: 'detector_1',
+            type: 'classifier',
+            position: { x: 350, y: 100 },
+            data: { name: '语言检测', type: 'classifier', config: { classes: ['中文', '英文', '日文', '韩文'] } }
+          },
+          {
+            id: 'translator_1',
+            type: 'translator',
+            position: { x: 650, y: 100 },
+            data: { name: '翻译处理', type: 'translator', config: { target_lang: 'zh' } }
+          },
+          {
+            id: 'output_1',
+            type: 'output',
+            position: { x: 950, y: 100 },
+            data: { name: '翻译结果', type: 'output', config: { format: 'text' } }
+          }
+        ],
+        edges: [
+          { id: 'e1-2', source: 'input_1', target: 'detector_1' },
+          { id: 'e2-3', source: 'detector_1', target: 'translator_1' },
+          { id: 'e3-4', source: 'translator_1', target: 'output_1' }
+        ]
+      }
+    };
+
+    const template = templates[templateType as keyof typeof templates];
+    if (template) {
+      setNodes(template.nodes);
+      setEdges(template.edges);
+      setWorkflowName(
+        templateType === 'customer_service' ? '智能客服助手' :
+        templateType === 'document_analysis' ? '智能文档分析' :
+        templateType === 'translation' ? '多语言翻译助手' : '新建工作流'
+      );
+    }
+  }, [setNodes, setEdges]);
+
+  // 创建自定义智能体
+  const handleCreateCustomAgent = useCallback(() => {
+    // 打开自定义智能体创建对话框
+    setCustomFunctionCreatorOpen(true);
+  }, []);
+
+  // 保存自定义函数
+  const handleSaveCustomFunction = useCallback((customFunction: any) => {
+    setCustomFunctions(prev => [...prev, customFunction]);
+    // 这里可以保存到后端
+    console.log('保存自定义函数:', customFunction);
+  }, []);
+
+  // 显示节点信息
+  const handleShowNodeInfo = useCallback((nodeTemplate: any) => {
+    // 显示节点详细信息
+    console.log('显示节点信息:', nodeTemplate);
+  }, []);
+
   return (
     <ReactFlowProvider>
       <Box sx={{ 
-        height: '100vh', 
         display: 'flex',
+        height: '100vh',
         overflow: 'hidden',
+        maxWidth: '1400px',
+        margin: '0 auto',
+        '@media (max-width: 1600px)': {
+          maxWidth: '1200px',
+        },
+        '@media (max-width: 1200px)': {
+          maxWidth: '100%',
+        },
       }}>
         {/* 侧边栏 */}
         <Drawer
@@ -590,11 +665,11 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           anchor="left"
           open={drawerOpen}
           sx={{
-            width: drawerOpen ? 360 : 0,
+            width: drawerOpen ? 220 : 0,
             flexShrink: 0,
             transition: 'width 0.3s ease-in-out',
             '& .MuiDrawer-paper': {
-              width: 360,
+              width: 220,
               boxSizing: 'border-box',
               background: 'linear-gradient(180deg, #1a1f2e 0%, #0f1419 100%)',
               borderRight: '1px solid rgba(0, 212, 255, 0.2)',
@@ -614,13 +689,14 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               borderBottom: '1px solid rgba(0, 212, 255, 0.2)',
             }}
           >
-            <Toolbar>
+            <Toolbar sx={{ minHeight: '40px !important', px: 2 }}>
               <WorkflowIcon sx={{ mr: 1, color: '#00d4ff' }} />
-              <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 600 }}>
-                节点库
+              <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 600, fontSize: '0.9rem' }}>
+                智能体组件库
               </Typography>
               <IconButton 
                 onClick={() => setDrawerOpen(false)}
+                size="small"
                 sx={{ 
                   color: '#00d4ff',
                   '&:hover': { backgroundColor: 'rgba(0, 212, 255, 0.1)' }
@@ -631,16 +707,17 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             </Toolbar>
           </AppBar>
 
-          <Box sx={{ p: 3, height: 'calc(100vh - 64px)', overflow: 'auto' }}>
+          <Box sx={{ p: 0.5, height: 'calc(100vh - 40px)', overflow: 'auto' }}>
             <Tabs 
               value={tabValue} 
               onChange={(e, v) => setTabValue(v)}
               sx={{
-                mb: 2,
+                mb: 0.5,
                 '& .MuiTab-root': {
                   fontWeight: 600,
                   color: 'rgba(255, 255, 255, 0.7)',
-                  fontSize: '0.95rem',
+                  fontSize: '0.75rem',
+                  minHeight: '36px',
                   '&.Mui-selected': {
                     color: '#00d4ff',
                   },
@@ -652,8 +729,8 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 },
               }}
             >
-              <Tab label="节点模板" />
-              <Tab label="我的节点" />
+              <Tab label="组件模板" />
+              <Tab label="我的组件" />
             </Tabs>
 
             {/* 搜索框 */}
@@ -662,14 +739,15 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 <TextField
                   fullWidth
                   size="small"
-                  placeholder="搜索节点..."
+                  placeholder="搜索组件..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   sx={{
-                    mb: 2,
+                    mb: 0.5,
                     '& .MuiOutlinedInput-root': {
                       backgroundColor: 'rgba(26, 31, 46, 0.8)',
                       borderRadius: '8px',
+                      height: '32px',
                       '& fieldset': {
                         borderColor: 'rgba(0, 212, 255, 0.3)',
                       },
@@ -682,6 +760,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                     },
                     '& .MuiInputBase-input': {
                       color: 'white',
+                      padding: '8px 12px',
                       '&::placeholder': {
                         color: 'rgba(255, 255, 255, 0.5)',
                       },
@@ -697,16 +776,16 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 />
                 
                 {/* 统计信息 */}
-                <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                <Box sx={{ mb: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '0.8rem' }}>
                     {searchTerm ? `找到 ${nodeTemplates.map(cat => 
                       cat.nodes.filter(node =>
                         node.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                         node.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
                         cat.category.toLowerCase().includes(searchTerm.toLowerCase())
                       ).length
-                    ).reduce((a, b) => a + b, 0)} 个节点` : 
-                    `共 ${nodeTemplates.reduce((total, cat) => total + cat.nodes.length, 0)} 个节点`}
+                    ).reduce((a, b) => a + b, 0)} 个组件` : 
+                    `共 ${nodeTemplates.reduce((total, cat) => total + cat.nodes.length, 0)} 个组件`}
                   </Typography>
                   {searchTerm && (
                     <Button
@@ -729,6 +808,72 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
 
             {tabValue === 0 && (
               <Box>
+                {/* 仅保留最精简的节点 */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5, mb: 1 }}>
+                  {/* 只显示最常用的6个节点 */}
+                  <UltraCompactNodeItem
+                    nodeTemplate={{
+                      type: 'llm',
+                      name: 'LLM',
+                      description: '大语言模型',
+                      defaultConfig: { model: 'qwen-turbo', temperature: 0.7 }
+                    }}
+                    onDragStart={onDragStart}
+                    onShowInfo={handleShowNodeInfo}
+                  />
+                  <UltraCompactNodeItem
+                    nodeTemplate={{
+                      type: 'rag_retriever',
+                      name: '检索',
+                      description: '知识库检索',
+                      defaultConfig: { top_k: 5, score_threshold: 0.7 }
+                    }}
+                    onDragStart={onDragStart}
+                    onShowInfo={handleShowNodeInfo}
+                  />
+                  <UltraCompactNodeItem
+                    nodeTemplate={{
+                      type: 'input',
+                      name: '输入',
+                      description: '用户输入',
+                      defaultConfig: { input_type: 'text', required: true }
+                    }}
+                    onDragStart={onDragStart}
+                    onShowInfo={handleShowNodeInfo}
+                  />
+                  <UltraCompactNodeItem
+                    nodeTemplate={{
+                      type: 'output',
+                      name: '输出',
+                      description: '结果输出',
+                      defaultConfig: { output_type: 'text', format: 'json' }
+                    }}
+                    onDragStart={onDragStart}
+                    onShowInfo={handleShowNodeInfo}
+                  />
+                  <UltraCompactNodeItem
+                    nodeTemplate={{
+                      type: 'condition',
+                      name: '条件',
+                      description: '条件判断',
+                      defaultConfig: { condition_type: 'contains', condition_value: '' }
+                    }}
+                    onDragStart={onDragStart}
+                    onShowInfo={handleShowNodeInfo}
+                  />
+                  <UltraCompactNodeItem
+                    nodeTemplate={{
+                      type: 'code_executor',
+                      name: '代码',
+                      description: '代码执行',
+                      defaultConfig: { language: 'python', timeout: 30 }
+                    }}
+                    onDragStart={onDragStart}
+                    onShowInfo={handleShowNodeInfo}
+                  />
+                </Box>
+                
+                {/* 收起的更多组件 */}
                 {nodeTemplates
                   .map((category) => ({
                     ...category,
@@ -743,15 +888,16 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   .map((category) => (
                   <Accordion 
                     key={category.category} 
-                    defaultExpanded={category.category === 'AI模型'}
+                    defaultExpanded={false}
                     sx={{
                       background: 'rgba(26, 31, 46, 0.5)',
                       border: '1px solid rgba(0, 212, 255, 0.1)',
-                      borderRadius: '12px !important',
-                      mb: 2,
+                      borderRadius: '8px !important',
+                      mb: 0.5,
                       '&:before': { display: 'none' },
                       '& .MuiAccordionSummary-root': {
-                        borderRadius: '12px 12px 0 0',
+                        minHeight: '36px',
+                        borderRadius: '8px 8px 0 0',
                         '&:hover': {
                           backgroundColor: 'rgba(0, 212, 255, 0.05)',
                         },
@@ -759,17 +905,17 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                     }}
                   >
                     <AccordionSummary 
-                      expandIcon={<ExpandMoreIcon sx={{ color: '#00d4ff' }} />}
+                      expandIcon={<ExpandMoreIcon sx={{ color: '#00d4ff', fontSize: '1.2rem' }} />}
                       sx={{
                         '& .MuiAccordionSummary-content': {
-                          margin: '12px 0',
+                          margin: '4px 0',
                         },
                       }}
                     >
                       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
                         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                          <Box sx={{ color: '#00d4ff', mr: 1 }}>{category.icon}</Box>
-                          <Typography sx={{ fontWeight: 600, color: 'white' }}>
+                          <Box sx={{ color: '#00d4ff', mr: 1.5, fontSize: '1.1rem' }}>{category.icon}</Box>
+                          <Typography sx={{ fontWeight: 600, color: 'white', fontSize: '0.875rem' }}>
                             {category.category}
                           </Typography>
                         </Box>
@@ -781,53 +927,22 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                             color: '#00d4ff',
                             fontWeight: 600,
                             fontSize: '0.75rem',
+                            height: '20px',
                           }}
                         />
                       </Box>
                     </AccordionSummary>
-                    <AccordionDetails>
-                      <List dense>
+                    <AccordionDetails sx={{ pt: 0, pb: 0.3 }}>
+                      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5 }}>
                         {category.nodes.map((nodeTemplate) => (
-                          <ListItem
+                          <UltraCompactNodeItem
                             key={nodeTemplate.type}
-                            draggable
-                            onDragStart={(e) => onDragStart(e, nodeTemplate)}
-                            sx={{
-                              border: '1px solid rgba(0, 212, 255, 0.2)',
-                              borderRadius: 2,
-                              mb: 1,
-                              cursor: 'grab',
-                              background: 'linear-gradient(135deg, rgba(26, 31, 46, 0.8) 0%, rgba(15, 20, 25, 0.8) 100%)',
-                              transition: 'all 0.3s ease',
-                              '&:hover': {
-                                backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                                borderColor: 'rgba(0, 212, 255, 0.4)',
-                                transform: 'translateY(-2px)',
-                                boxShadow: '0 4px 12px rgba(0, 212, 255, 0.2)',
-                              },
-                              '&:active': {
-                                cursor: 'grabbing',
-                                transform: 'scale(0.95)',
-                              },
-                            }}
-                          >
-                            <ListItemText
-                              primary={nodeTemplate.name}
-                              secondary={nodeTemplate.description}
-                              primaryTypographyProps={{ 
-                                fontSize: '0.95rem',
-                                fontWeight: 600,
-                                color: 'white',
-                              }}
-                              secondaryTypographyProps={{ 
-                                fontSize: '0.8rem',
-                                color: 'rgba(255, 255, 255, 0.7)',
-                                lineHeight: 1.4,
-                              }}
-                            />
-                          </ListItem>
+                            nodeTemplate={nodeTemplate}
+                            onDragStart={onDragStart}
+                            onShowInfo={handleShowNodeInfo}
+                          />
                         ))}
-                      </List>
+                      </Box>
                     </AccordionDetails>
                   </Accordion>
                 ))}
@@ -836,7 +951,85 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
 
             {tabValue === 1 && (
               <Box>
-                <Typography variant="h6" sx={{ mb: 3, color: '#00d4ff', fontWeight: 600 }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                  <Typography variant="h6" sx={{ color: '#00d4ff', fontWeight: 600, fontSize: '0.9rem' }}>
+                    我的自定义组件
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    onClick={() => setCustomFunctionCreatorOpen(true)}
+                    sx={{
+                      color: '#00d4ff',
+                      borderColor: '#00d4ff',
+                      fontSize: '0.7rem',
+                      padding: '2px 8px',
+                      minWidth: 'auto',
+                      '&:hover': {
+                        borderColor: '#00d4ff',
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                      },
+                    }}
+                  >
+                    <AddIcon sx={{ fontSize: '0.8rem', mr: 0.5 }} />
+                    创建函数
+                  </Button>
+                </Box>
+
+                {/* 自定义函数列表 */}
+                {customFunctions.length > 0 ? (
+                  <Box sx={{ mb: 2 }}>
+                    {customFunctions.map((func, index) => (
+                      <Box
+                        key={index}
+                        sx={{
+                          border: '1px solid rgba(76, 175, 80, 0.3)',
+                          borderRadius: 2,
+                          p: 1,
+                          mb: 1,
+                          background: 'rgba(76, 175, 80, 0.1)',
+                          cursor: 'pointer',
+                          '&:hover': {
+                            backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                          },
+                        }}
+                        onClick={() => {
+                          // 添加自定义函数到画布
+                          const newNode = {
+                            id: `custom_${Date.now()}`,
+                            type: 'llm', // 使用CustomLLMNode类型
+                            position: { x: 100, y: 100 },
+                            data: {
+                              name: func.name,
+                              config: {},
+                              functionCode: func.implementation,
+                              type: 'custom',
+                            },
+                          };
+                          setNodes(prev => [...prev, newNode]);
+                        }}
+                      >
+                        <Typography variant="body2" sx={{ color: 'white', fontWeight: 600, fontSize: '0.8rem' }}>
+                          {func.name}
+                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)', fontSize: '0.7rem' }}>
+                          {func.description}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                ) : (
+                  <Box sx={{ textAlign: 'center', py: 2, mb: 2 }}>
+                    <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.5)', fontSize: '0.8rem' }}>
+                      还没有自定义函数
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.3)', fontSize: '0.7rem' }}>
+                      点击"创建函数"来添加您的第一个自定义组件
+                    </Typography>
+                  </Box>
+                )}
+
+                <Typography variant="h6" sx={{ mb: 1, color: '#00d4ff', fontWeight: 600, fontSize: '0.9rem' }}>
                   预定义工作流模板
                 </Typography>
                 
@@ -845,8 +1038,8 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   sx={{
                     border: '1px solid rgba(0, 212, 255, 0.2)',
                     borderRadius: 2,
-                    p: 2.5,
-                    mb: 2,
+                    p: 0.75,
+                    mb: 0.5,
                     background: 'linear-gradient(135deg, rgba(26, 31, 46, 0.8) 0%, rgba(15, 20, 25, 0.8) 100%)',
                     cursor: 'pointer',
                     transition: 'all 0.3s ease',
@@ -856,15 +1049,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                       boxShadow: '0 4px 12px rgba(0, 212, 255, 0.2)',
                     },
                   }}
-                  onClick={() => {
-                    // 加载智能客服模板
-                    alert('正在加载智能客服模板...');
-                  }}
+                  onClick={() => loadTemplate('customer_service')}
                 >
-                  <Typography variant="h6" sx={{ color: 'white', mb: 1 }}>
+                  <Typography variant="subtitle1" sx={{ color: 'white', mb: 0.5, fontWeight: 600, fontSize: '0.85rem' }}>
                     🤖 智能客服助手
                   </Typography>
-                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mb: 2 }}>
+                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mb: 0.5, fontSize: '0.7rem' }}>
                     基于RAG的智能客服工作流，包含意图识别、知识检索和回复生成
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -879,8 +1069,8 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   sx={{
                     border: '1px solid rgba(0, 212, 255, 0.2)',
                     borderRadius: 2,
-                    p: 2.5,
-                    mb: 2,
+                    p: 0.75,
+                    mb: 0.5,
                     background: 'linear-gradient(135deg, rgba(26, 31, 46, 0.8) 0%, rgba(15, 20, 25, 0.8) 100%)',
                     cursor: 'pointer',
                     transition: 'all 0.3s ease',
@@ -890,14 +1080,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                       boxShadow: '0 4px 12px rgba(0, 212, 255, 0.2)',
                     },
                   }}
-                  onClick={() => {
-                    alert('正在加载文档分析模板...');
-                  }}
+                  onClick={() => loadTemplate('document_analysis')}
                 >
-                  <Typography variant="h6" sx={{ color: 'white', mb: 1 }}>
+                  <Typography variant="subtitle1" sx={{ color: 'white', mb: 0.5, fontWeight: 600, fontSize: '0.85rem' }}>
                     📄 智能文档分析
                   </Typography>
-                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mb: 2 }}>
+                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mb: 0.5, fontSize: '0.7rem' }}>
                     自动解析文档，提取关键信息，生成摘要和分析报告
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -912,8 +1100,8 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   sx={{
                     border: '1px solid rgba(0, 212, 255, 0.2)',
                     borderRadius: 2,
-                    p: 2.5,
-                    mb: 2,
+                    p: 0.75,
+                    mb: 0.5,
                     background: 'linear-gradient(135deg, rgba(26, 31, 46, 0.8) 0%, rgba(15, 20, 25, 0.8) 100%)',
                     cursor: 'pointer',
                     transition: 'all 0.3s ease',
@@ -923,14 +1111,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                       boxShadow: '0 4px 12px rgba(0, 212, 255, 0.2)',
                     },
                   }}
-                  onClick={() => {
-                    alert('正在加载多语言翻译模板...');
-                  }}
+                  onClick={() => loadTemplate('translation')}
                 >
-                  <Typography variant="h6" sx={{ color: 'white', mb: 1 }}>
+                  <Typography variant="subtitle1" sx={{ color: 'white', mb: 0.5, fontWeight: 600, fontSize: '0.85rem' }}>
                     🌍 多语言翻译助手
                   </Typography>
-                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mb: 2 }}>
+                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mb: 0.5, fontSize: '0.7rem' }}>
                     自动检测语言并翻译为多种目标语言，支持批量处理
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -945,8 +1131,8 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   sx={{
                     border: '1px solid rgba(0, 212, 255, 0.2)',
                     borderRadius: 2,
-                    p: 2.5,
-                    mb: 2,
+                    p: 0.75,
+                    mb: 0.5,
                     background: 'linear-gradient(135deg, rgba(26, 31, 46, 0.8) 0%, rgba(15, 20, 25, 0.8) 100%)',
                     cursor: 'pointer',
                     transition: 'all 0.3s ease',
@@ -957,13 +1143,14 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                     },
                   }}
                   onClick={() => {
-                    alert('正在加载内容审核模板...');
+                    // 可以添加更多模板
+                    alert('该模板正在开发中...');
                   }}
                 >
-                  <Typography variant="h6" sx={{ color: 'white', mb: 1 }}>
+                  <Typography variant="subtitle1" sx={{ color: 'white', mb: 0.5, fontWeight: 600, fontSize: '0.85rem' }}>
                     🛡️ 智能内容审核
                   </Typography>
-                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mb: 2 }}>
+                  <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.7)', mb: 0.5, fontSize: '0.7rem' }}>
                     自动检测有害内容，进行内容分类和风险评估
                   </Typography>
                   <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -986,9 +1173,15 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           flexGrow: 1, 
           display: 'flex', 
           flexDirection: 'column',
-          width: drawerOpen ? 'calc(100vw - 360px)' : '100vw',
+          width: drawerOpen ? 'calc(100vw - 220px)' : '100vw',
           height: '100vh',
           transition: 'width 0.3s ease-in-out',
+          '@media (max-width: 1200px)': {
+            width: drawerOpen ? 'calc(100vw - 220px)' : '100vw',
+          },
+          '@media (max-width: 768px)': {
+            width: '100vw',
+          },
         }}>
           {/* 顶部工具栏 */}
           <AppBar 
@@ -1002,29 +1195,31 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               flexShrink: 0,
             }}
           >
-            <Toolbar sx={{ minHeight: '72px !important', px: 3 }}>
+            <Toolbar sx={{ minHeight: '28px !important', px: 0.75 }}>
               {!drawerOpen && (
-                <IconButton
-                  onClick={() => setDrawerOpen(true)}
-                  sx={{ 
-                    mr: 2,
-                    color: '#00d4ff',
-                    '&:hover': {
-                      backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                      transform: 'scale(1.1)',
-                    },
-                  }}
-                >
-                  <WorkflowIcon />
-                </IconButton>
+                <Tooltip title="打开组件库" arrow>
+                  <IconButton
+                    onClick={() => setDrawerOpen(true)}
+                    sx={{ 
+                      mr: 2,
+                      color: '#00d4ff',
+                      '&:hover': {
+                        backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        transform: 'scale(1.1)',
+                      },
+                    }}
+                  >
+                    <WorkflowIcon />
+                  </IconButton>
+                </Tooltip>
               )}
               
               <Typography 
-                variant="h5" 
+                variant="h6" 
                 sx={{ 
                   flexGrow: 1,
                   fontWeight: 700,
-                  fontSize: '1.5rem',
+                  fontSize: '1rem',
                   background: 'linear-gradient(45deg, #00d4ff 30%, #ffffff 90%)',
                   backgroundClip: 'text',
                   WebkitBackgroundClip: 'text',
@@ -1037,15 +1232,15 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               <Button
                 startIcon={<SaveIcon />}
                 onClick={handleSave}
-                size="large"
+                size="small"
                 sx={{ 
-                  mr: 1.5,
-                  borderRadius: '10px',
+                  mr: 1,
+                  borderRadius: '8px',
                   textTransform: 'none',
                   fontWeight: 600,
-                  fontSize: '1rem',
-                  px: 3,
-                  py: 1.2,
+                  fontSize: '0.75rem',
+                  px: 1.5,
+                  py: 0.5,
                   border: '1px solid rgba(0, 212, 255, 0.3)',
                   color: '#00d4ff',
                   '&:hover': {
@@ -1062,15 +1257,15 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 startIcon={<PlayIcon />}
                 onClick={handleExecute}
                 variant="contained"
-                size="large"
+                size="small"
                 sx={{ 
-                  mr: 2,
-                  borderRadius: '10px',
+                  mr: 1,
+                  borderRadius: '8px',
                   textTransform: 'none',
                   fontWeight: 600,
-                  fontSize: '1rem',
-                  px: 3,
-                  py: 1.2,
+                  fontSize: '0.75rem',
+                  px: 1.5,
+                  py: 0.5,
                   background: 'linear-gradient(45deg, #00d4ff 0%, #0099cc 100%)',
                   boxShadow: '0 4px 15px rgba(0, 212, 255, 0.3)',
                   '&:hover': {
@@ -1100,6 +1295,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               <IconButton 
                 onClick={() => setCodeEditorOpen(true)}
                 sx={{
+                  mr: 1,
                   color: 'rgba(255, 255, 255, 0.7)',
                   '&:hover': {
                     color: '#00d4ff',
@@ -1109,6 +1305,19 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               >
                 <CodeIcon />
               </IconButton>
+              
+              <IconButton 
+                onClick={() => setDebuggerOpen(true)}
+                sx={{
+                  color: 'rgba(255, 255, 255, 0.7)',
+                  '&:hover': {
+                    color: '#ff9800',
+                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                  },
+                }}
+              >
+                <BugReportIcon />
+              </IconButton>
             </Toolbar>
           </AppBar>
 
@@ -1116,7 +1325,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           <Box
             ref={reactFlowWrapper}
             sx={{ 
-              height: 'calc(100vh - 72px)',
+              height: 'calc(100vh - 28px)',
               width: '100%',
               background: 'linear-gradient(135deg, #0a0e1a 0%, #1a1f2e 50%, #0f1419 100%)',
               position: 'relative',
@@ -1145,9 +1354,17 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               onNodeClick={onNodeClick}
               onInit={setReactFlowInstance}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              connectionLineComponent={EnhancedConnectionLine}
               connectionMode={ConnectionMode.Loose}
               fitView
+              className="custom-workflow-editor"
               style={{ zIndex: 2 }}
+              defaultEdgeOptions={{
+                type: 'enhanced',
+                animated: true,
+                style: { strokeWidth: 2, stroke: '#00d4ff' },
+              }}
             >
               <Background 
                 variant="dots" 
@@ -1194,8 +1411,41 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                     },
                   }}
                 >
-                  从左侧拖拽节点到画布，连接节点创建工作流
+                  从左侧拖拽组件到画布，连接组件创建智能体工作流
                 </Alert>
+              </Panel>
+              
+              <Panel position="top-right">
+                <Box sx={{ 
+                  display: 'flex', 
+                  gap: 1, 
+                  alignItems: 'center',
+                  background: 'rgba(26, 31, 46, 0.9)',
+                  px: 2,
+                  py: 1,
+                  borderRadius: 2,
+                  border: '1px solid rgba(0, 212, 255, 0.3)',
+                  backdropFilter: 'blur(10px)'
+                }}>
+                  <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                    组件: {nodes.length}
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                    连接: {edges.length}
+                  </Typography>
+                  {nodes.length > 0 && (
+                    <Chip 
+                      label="已构建"
+                      size="small"
+                      sx={{
+                        height: '20px',
+                        fontSize: '0.7rem',
+                        backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                        color: '#4caf50',
+                      }}
+                    />
+                  )}
+                </Box>
               </Panel>
             </ReactFlow>
           </Box>
@@ -1241,43 +1491,183 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         <Dialog
           open={codeEditorOpen}
           onClose={() => setCodeEditorOpen(false)}
-          maxWidth="lg"
+          maxWidth={false}
           fullWidth
           fullScreen
+          sx={{
+            '& .MuiDialog-paper': {
+              backgroundColor: '#0a0e1a',
+              backgroundImage: 'none',
+            }
+          }}
         >
-          <DialogTitle>LangGraph代码编辑</DialogTitle>
-          <DialogContent>
-            <Alert severity="info" sx={{ mb: 2 }}>
-              在这里可以编写自定义的LangGraph代码
-            </Alert>
-            {/* 这里可以集成Monaco Editor */}
-            <Paper sx={{ p: 2, backgroundColor: '#1e1e1e', color: 'white' }}>
-              <pre>{`# LangGraph 工作流代码
-from langgraph import StateGraph, END
-from typing import TypedDict
-
-class WorkflowState(TypedDict):
-    messages: list
-    result: str
-
-def llm_node(state: WorkflowState):
-    # LLM节点处理逻辑
-    return {"result": "LLM处理结果"}
-
-def create_workflow():
-    workflow = StateGraph(WorkflowState)
-    workflow.add_node("llm", llm_node)
-    workflow.set_entry_point("llm")
-    workflow.add_edge("llm", END)
-    return workflow.compile()
-`}</pre>
-            </Paper>
+          <DialogTitle 
+            sx={{ 
+              backgroundColor: 'rgba(26, 31, 46, 0.9)',
+              borderBottom: '1px solid rgba(0, 212, 255, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <CodeIcon sx={{ mr: 1, color: '#00d4ff' }} />
+              <Typography variant="h6" sx={{ color: 'white', fontWeight: 600 }}>
+                LangGraph 代码编辑器
+              </Typography>
+            </Box>
+            <IconButton
+              onClick={() => setCodeEditorOpen(false)}
+              sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          
+          <DialogContent sx={{ p: 0, height: 'calc(100vh - 64px)' }}>
+            <CodeEditor
+              nodes={nodes}
+              edges={edges}
+              onSave={(code) => {
+                console.log('保存代码:', code);
+                // 这里可以保存到后端
+              }}
+              onExecute={(code) => {
+                console.log('执行代码:', code);
+                // 这里可以执行工作流
+              }}
+            />
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setCodeEditorOpen(false)}>关闭</Button>
-            <Button variant="contained">保存代码</Button>
-          </DialogActions>
         </Dialog>
+
+        {/* 调试器对话框 */}
+        <Dialog
+          open={debuggerOpen}
+          onClose={() => setDebuggerOpen(false)}
+          maxWidth={false}
+          fullWidth
+          fullScreen
+          sx={{
+            '& .MuiDialog-paper': {
+              backgroundColor: '#0a0e1a',
+              backgroundImage: 'none',
+            }
+          }}
+        >
+          <DialogTitle 
+            sx={{ 
+              backgroundColor: 'rgba(26, 31, 46, 0.9)',
+              borderBottom: '1px solid rgba(255, 152, 0, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <BugReportIcon sx={{ mr: 1, color: '#ff9800' }} />
+              <Typography variant="h6" sx={{ color: 'white', fontWeight: 600 }}>
+                工作流调试器
+              </Typography>
+              <Chip 
+                label={`${nodes.length} 节点 · ${edges.length} 连接`}
+                size="small"
+                sx={{ 
+                  ml: 2,
+                  backgroundColor: 'rgba(255, 152, 0, 0.2)',
+                  color: '#ff9800'
+                }}
+              />
+            </Box>
+            <IconButton
+              onClick={() => setDebuggerOpen(false)}
+              sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          
+          <DialogContent sx={{ p: 0, height: 'calc(100vh - 64px)' }}>
+            <WorkflowDebugger
+              nodes={nodes}
+              edges={edges}
+              onExecute={(debugMode, breakpoints) => {
+                console.log('执行工作流:', { debugMode, breakpoints });
+                // 这里可以执行实际的工作流
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+
+        {/* 工作流执行器对话框 */}
+        <Dialog
+          open={executionOpen}
+          onClose={() => setExecutionOpen(false)}
+          maxWidth={false}
+          fullWidth
+          fullScreen
+          sx={{
+            '& .MuiDialog-paper': {
+              backgroundColor: '#0a0e1a',
+              backgroundImage: 'none',
+            }
+          }}
+        >
+          <DialogTitle 
+            sx={{ 
+              backgroundColor: 'rgba(26, 31, 46, 0.9)',
+              borderBottom: '1px solid rgba(76, 175, 80, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <PlayIcon sx={{ mr: 1, color: '#4caf50' }} />
+              <Typography variant="h6" sx={{ color: 'white', fontWeight: 600 }}>
+                工作流执行器
+              </Typography>
+              <Chip 
+                label={`${nodes.length} 节点 · ${edges.length} 连接`}
+                size="small"
+                sx={{ 
+                  ml: 2,
+                  backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                  color: '#4caf50'
+                }}
+              />
+            </Box>
+            <IconButton
+              onClick={() => setExecutionOpen(false)}
+              sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          
+          <DialogContent sx={{ p: 0, height: 'calc(100vh - 64px)' }}>
+            <WorkflowExecution
+              workflowId={workflowId}
+              nodes={nodes}
+              edges={edges}
+              onSave={(workflow) => {
+                console.log('保存工作流:', workflow);
+                onSave?.(workflow);
+                setExecutionOpen(false);
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+
+        {/* 自定义函数创建器 */}
+        <CustomFunctionCreator
+          open={customFunctionCreatorOpen}
+          onClose={() => setCustomFunctionCreatorOpen(false)}
+          onSave={(customFunction) => {
+            setCustomFunctions(prev => [...prev, customFunction]);
+            console.log('保存自定义函数:', customFunction);
+            // 这里可以将自定义函数保存到后端或本地存储
+          }}
+        />
       </Box>
     </ReactFlowProvider>
   );

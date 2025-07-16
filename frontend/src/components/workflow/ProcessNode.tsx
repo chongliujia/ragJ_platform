@@ -199,8 +199,8 @@ const ProcessNode: React.FC<NodeProps<ProcessNodeData>> = ({ data, selected }) =
           background: getNodeColor(),
           border: selected ? '2px solid #00d4ff' : '1px solid rgba(255, 255, 255, 0.1)',
           borderRadius: 3,
-          padding: 2.5,
-          minWidth: 280,
+          padding: 0.5,
+          minWidth: 100,
           color: 'white',
           position: 'relative',
           boxShadow: selected 
@@ -243,9 +243,9 @@ const ProcessNode: React.FC<NodeProps<ProcessNodeData>> = ({ data, selected }) =
         )}
 
         {/* 节点头部 */}
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
           {getNodeIcon()}
-          <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '1rem', ml: 1 }}>
+          <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '0.8rem', ml: 1 }}>
             {data.name || '流程节点'}
           </Typography>
           <IconButton
@@ -265,21 +265,21 @@ const ProcessNode: React.FC<NodeProps<ProcessNodeData>> = ({ data, selected }) =
             sx={{
               backgroundColor: 'rgba(255,255,255,0.2)',
               color: 'white',
-              mb: 1,
+              mb: 0.5,
             }}
           />
           {data.type === 'loop' && (
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
               最大: {config.max_iterations || 10} 次
             </Typography>
           )}
           {data.type === 'parallel' && (
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
               分支: {config.parallel_branches || 2} 个
             </Typography>
           )}
           {data.type === 'delay' && (
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
               延迟: {config.delay_seconds || 1} 秒
             </Typography>
           )}

@@ -64,8 +64,8 @@ const LLMNode: React.FC<NodeProps<LLMNodeData>> = ({ data, selected }) => {
           background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
           border: selected ? '2px solid #00d4ff' : '1px solid rgba(255, 255, 255, 0.1)',
           borderRadius: 3,
-          padding: 2.5,
-          minWidth: 280,
+          padding: 0.5,
+          minWidth: 100,
           color: 'white',
           position: 'relative',
           boxShadow: selected 
@@ -106,9 +106,9 @@ const LLMNode: React.FC<NodeProps<LLMNodeData>> = ({ data, selected }) => {
         />
 
         {/* 节点头部 */}
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
           <AIIcon sx={{ mr: 1, color: '#fff' }} />
-          <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '1rem' }}>
+          <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '0.8rem' }}>
             {data.name || 'LLM节点'}
           </Typography>
           <IconButton
@@ -122,10 +122,10 @@ const LLMNode: React.FC<NodeProps<LLMNodeData>> = ({ data, selected }) => {
 
         {/* 节点内容 */}
         <Box>
-          <Typography variant="body2" sx={{ opacity: 0.9, mb: 1 }}>
+          <Typography variant="body2" sx={{ opacity: 0.9, mb: 0.5 }}>
             模型: {config.model || 'qwen-turbo'}
           </Typography>
-          <Typography variant="body2" sx={{ opacity: 0.9, mb: 1 }}>
+          <Typography variant="body2" sx={{ opacity: 0.9, mb: 0.5 }}>
             温度: {config.temperature || 0.7}
           </Typography>
           {config.system_prompt && (

@@ -217,8 +217,8 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
           background: getNodeColor(),
           border: selected ? '2px solid #00d4ff' : '1px solid rgba(255, 255, 255, 0.1)',
           borderRadius: 3,
-          padding: 2.5,
-          minWidth: 280,
+          padding: 0.5,
+          minWidth: 100,
           color: 'white',
           position: 'relative',
           boxShadow: selected 
@@ -259,9 +259,9 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
         />
 
         {/* 节点头部 */}
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
           {getNodeIcon()}
-          <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '1rem', ml: 1 }}>
+          <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '0.8rem', ml: 1 }}>
             {data.name || '数据节点'}
           </Typography>
           <IconButton
@@ -281,26 +281,26 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
             sx={{
               backgroundColor: 'rgba(255,255,255,0.2)',
               color: 'white',
-              mb: 1,
+              mb: 0.5,
             }}
           />
           {data.type === 'rag_retriever' && (
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
               检索: {config.top_k || 5} 条
             </Typography>
           )}
           {data.type === 'parser' && (
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
               文件: {(config.file_types || []).join(', ') || 'pdf, docx'}
             </Typography>
           )}
           {data.type === 'database' && (
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
               操作: {config.query_type || 'SELECT'}
             </Typography>
           )}
           {data.type === 'embeddings' && (
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
               维度: {config.dimensions || 1536}
             </Typography>
           )}

@@ -169,7 +169,7 @@ const ConditionNode: React.FC<NodeProps<ConditionNodeData>> = ({ data, selected 
               placeholder="例如: data.category"
               sx={{ mb: 2, mt: 1 }}
             />
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
               分支配置
             </Typography>
             <TextField
@@ -379,8 +379,8 @@ const ConditionNode: React.FC<NodeProps<ConditionNodeData>> = ({ data, selected 
           background: getNodeColor(),
           border: selected ? '2px solid #00d4ff' : '1px solid rgba(255, 255, 255, 0.1)',
           borderRadius: 3,
-          padding: 2.5,
-          minWidth: 280,
+          padding: 0.5,
+          minWidth: 100,
           color: 'white',
           position: 'relative',
           boxShadow: selected 
@@ -421,9 +421,9 @@ const ConditionNode: React.FC<NodeProps<ConditionNodeData>> = ({ data, selected 
         />
 
         {/* 节点头部 */}
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
           {getNodeIcon()}
-          <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '1rem', ml: 1 }}>
+          <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '0.8rem', ml: 1 }}>
             {data.name || '条件节点'}
           </Typography>
           <IconButton
@@ -443,14 +443,14 @@ const ConditionNode: React.FC<NodeProps<ConditionNodeData>> = ({ data, selected 
             sx={{
               backgroundColor: 'rgba(255,255,255,0.2)',
               color: 'white',
-              mb: 1,
+              mb: 0.5,
             }}
           />
-          <Typography variant="body2" sx={{ opacity: 0.9, mb: 1 }}>
+          <Typography variant="body2" sx={{ opacity: 0.9, mb: 0.5 }}>
             条件: {config.condition_type || '未设置'}
           </Typography>
           {config.field_path && (
-            <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
               字段: {config.field_path}
             </Typography>
           )}

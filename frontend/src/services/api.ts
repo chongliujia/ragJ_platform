@@ -208,6 +208,229 @@ export const teamApi = {
   leaveTeam: (teamId: number) => api.post(`/api/v1/teams/${teamId}/leave`),
 };
 
+// 工作流相关 API
+export const workflowApi = {
+  // 创建工作流
+  create: (data: { 
+    name: string; 
+    description?: string; 
+    nodes: any[]; 
+    edges: any[]; 
+    config?: any; 
+  }) => api.post('/api/v1/workflows', data),
+  
+  // 获取工作流列表
+  getList: () => api.get('/api/v1/workflows'),
+  
+  // 获取工作流详情
+  getDetail: (id: string) => api.get(`/api/v1/workflows/${id}`),
+  
+  // 更新工作流
+  update: (id: string, data: {
+    name?: string;
+    description?: string;
+    nodes?: any[];
+    edges?: any[];
+    config?: any;
+  }) => api.put(`/api/v1/workflows/${id}`, data),
+  
+  // 删除工作流
+  delete: (id: string) => api.delete(`/api/v1/workflows/${id}`),
+  
+  // 执行工作流
+  execute: (id: string, data: {
+    input_data: any;
+    config?: any;
+    debug?: boolean;
+  }) => api.post(`/api/v1/workflows/${id}/execute`, data, { timeout: 300000 }), // 5分钟超时
+  
+  // 流式执行工作流
+  executeStream: async (
+    id: string,
+    data: { input_data: any; config?: any; debug?: boolean },
+    onProgress: (progress: any) => void,
+    onError: (error: any) => void,
+    onComplete: (result: any) => void
+  ) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/workflows/${id}/execute/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') {
+                return;
+              }
+              
+              try {
+                const parsed = JSON.parse(data);
+                
+                if (parsed.type === 'progress') {
+                  onProgress(parsed);
+                } else if (parsed.type === 'complete') {
+                  onComplete(parsed);
+                } else if (parsed.type === 'error') {
+                  onError(parsed);
+                }
+              } catch (e) {
+                console.warn('Failed to parse SSE data:', data);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (error) {
+      console.error('Workflow execution stream error:', error);
+      onError(error);
+    }
+  },
+  
+  // 获取执行历史
+  getExecutionHistory: (id: string) => api.get(`/api/v1/workflows/${id}/executions`),
+  
+  // 停止工作流执行
+  stopExecution: (id: string, executionId: string) => 
+    api.post(`/api/v1/workflows/${id}/executions/${executionId}/stop`),
+  
+  // 验证工作流配置
+  validate: (data: { nodes: any[]; edges: any[] }) => 
+    api.post('/api/v1/workflows/validate', data),
+  
+  // 生成LangGraph代码
+  generateCode: (data: { nodes: any[]; edges: any[] }) => 
+    api.post('/api/v1/workflows/generate-code', data),
+  
+  // 保存代码
+  saveCode: (id: string, data: { code: string; language: string }) =>
+    api.post(`/api/v1/workflows/${id}/code`, data),
+  
+  // 获取代码
+  getCode: (id: string) => api.get(`/api/v1/workflows/${id}/code`),
+};
+
+// 智能体相关 API
+export const agentApi = {
+  // 获取智能体列表
+  getList: () => api.get('/api/v1/agents'),
+  
+  // 创建智能体
+  create: (data: {
+    name: string;
+    description?: string;
+    workflow_id?: string;
+    config?: any;
+  }) => api.post('/api/v1/agents', data),
+  
+  // 获取智能体详情
+  getDetail: (id: string) => api.get(`/api/v1/agents/${id}`),
+  
+  // 更新智能体
+  update: (id: string, data: {
+    name?: string;
+    description?: string;
+    workflow_id?: string;
+    config?: any;
+  }) => api.put(`/api/v1/agents/${id}`, data),
+  
+  // 删除智能体
+  delete: (id: string) => api.delete(`/api/v1/agents/${id}`),
+  
+  // 与智能体对话
+  chat: (id: string, data: {
+    message: string;
+    context?: any;
+  }) => api.post(`/api/v1/agents/${id}/chat`, data, { timeout: 90000 }),
+  
+  // 流式对话
+  chatStream: async (
+    id: string,
+    data: { message: string; context?: any },
+    onChunk: (chunk: any) => void,
+    onError: (error: any) => void,
+    onComplete: () => void
+  ) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/v1/agents/${id}/chat/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error('No reader available');
+      }
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') {
+                onComplete();
+                return;
+              }
+              
+              try {
+                const parsed = JSON.parse(data);
+                onChunk(parsed);
+              } catch (e) {
+                console.warn('Failed to parse SSE data:', data);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (error) {
+      console.error('Agent chat stream error:', error);
+      onError(error);
+    }
+  },
+};
+
 // 导出 api 实例
 export { api };
 export default api; 
