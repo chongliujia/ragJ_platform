@@ -16,6 +16,7 @@ from app.api.api_v1.endpoints import (
     users,
     admin,
     teams,
+    workflows,
 )
 
 api_router = APIRouter()
@@ -50,4 +51,9 @@ api_router.include_router(
 # Add team management endpoints
 api_router.include_router(
     teams.router, prefix="/teams", tags=["Team Management"]
+)
+
+# Add workflow management endpoints
+api_router.include_router(
+    workflows.router, prefix="/workflows", tags=["Workflow Management"]
 )

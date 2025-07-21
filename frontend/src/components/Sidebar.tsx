@@ -40,6 +40,8 @@ import {
   ChevronLeft as ChevronLeftIcon,
   Group as GroupIcon,
   AccountTree as WorkflowIcon,
+  LibraryBooks as TemplateIcon,
+  List as ListIcon,
 } from '@mui/icons-material';
 import LanguageSwitcher from './LanguageSwitcher';
 import { TeamSelector } from './TeamSelector';
@@ -62,6 +64,7 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
+  const [workflowMenuOpen, setWorkflowMenuOpen] = useState(false);
   const isMobile = useMediaQuery('(max-width:768px)');
   
   const authManager = AuthManager.getInstance();
@@ -78,9 +81,13 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
     { text: t('nav.documents'), icon: <DocumentIcon />, path: '/documents' },
     { text: t('nav.chat'), icon: <ChatIcon />, path: '/chat' },
     { text: t('nav.teams'), icon: <GroupIcon />, path: '/teams' },
-    { text: t('nav.workflows'), icon: <WorkflowIcon />, path: '/workflows' },
     { text: t('nav.settings'), icon: <SettingsIcon />, path: '/settings' },
     { text: t('nav.connectionTest'), icon: <TestIcon />, path: '/test' },
+  ];
+
+  const workflowMenuItems = [
+    { text: '工作流管理', icon: <ListIcon />, path: '/workflows' },
+    { text: '模板库', icon: <TemplateIcon />, path: '/workflows/templates' },
   ];
 
   const adminMenuItems = [
@@ -233,6 +240,96 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
             </Tooltip>
           </ListItem>
         ))}
+
+        {/* 工作流菜单 */}
+        {open ? (
+          <>
+            <ListItem disablePadding>
+              <ListItemButton
+                onClick={() => setWorkflowMenuOpen(!workflowMenuOpen)}
+                sx={{
+                  mx: 1,
+                  mb: 0.5,
+                  borderRadius: 1,
+                  backgroundColor: location.pathname.startsWith('/workflows') ? '#3b82f6' : 'transparent',
+                  '&:hover': {
+                    backgroundColor: location.pathname.startsWith('/workflows') ? '#2563eb' : '#334155',
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
+                  <WorkflowIcon />
+                </ListItemIcon>
+                <ListItemText 
+                  primary={t('nav.workflows')}
+                  sx={{ 
+                    '& .MuiListItemText-primary': { 
+                      fontSize: '0.9rem',
+                      fontWeight: location.pathname.startsWith('/workflows') ? 600 : 400,
+                    } 
+                  }}
+                />
+                {workflowMenuOpen ? <ExpandLess /> : <ExpandMore />}
+              </ListItemButton>
+            </ListItem>
+            <Collapse in={workflowMenuOpen} timeout="auto" unmountOnExit>
+              <List component="div" disablePadding>
+                {workflowMenuItems.map((item) => (
+                  <ListItem key={item.text} disablePadding>
+                    <ListItemButton
+                      onClick={() => navigate(item.path)}
+                      sx={{
+                        mx: 2,
+                        mb: 0.5,
+                        borderRadius: 1,
+                        backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
+                        '&:hover': {
+                          backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
+                        },
+                      }}
+                    >
+                      <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
+                        {item.icon}
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={item.text}
+                        sx={{ 
+                          '& .MuiListItemText-primary': { 
+                            fontSize: '0.85rem',
+                            fontWeight: location.pathname === item.path ? 600 : 400,
+                          } 
+                        }}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                ))}
+              </List>
+            </Collapse>
+          </>
+        ) : (
+          // 折叠状态下显示工作流图标
+          <ListItem disablePadding>
+            <Tooltip title={t('nav.workflows')} placement="right">
+              <ListItemButton
+                onClick={() => navigate('/workflows')}
+                sx={{
+                  mx: 1,
+                  mb: 0.5,
+                  borderRadius: 1,
+                  backgroundColor: location.pathname.startsWith('/workflows') ? '#3b82f6' : 'transparent',
+                  justifyContent: 'center',
+                  '&:hover': {
+                    backgroundColor: location.pathname.startsWith('/workflows') ? '#2563eb' : '#334155',
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ color: 'inherit', minWidth: 0, justifyContent: 'center' }}>
+                  <WorkflowIcon />
+                </ListItemIcon>
+              </ListItemButton>
+            </Tooltip>
+          </ListItem>
+        )}
 
         {/* 管理员菜单 */}
         {canAccessAdminMenu() && (

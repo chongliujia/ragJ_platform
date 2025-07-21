@@ -52,6 +52,7 @@ import {
   Visibility as ViewIcon,
   Edit as EditIcon,
   BugReport as BugReportIcon,
+  DataUsage as DataFlowIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -126,6 +127,7 @@ import EnhancedConnectionLine from '../components/workflow/EnhancedConnectionLin
 import EnhancedEdge from '../components/workflow/EnhancedEdge';
 import CustomLLMNode from '../components/workflow/CustomLLMNode';
 import CustomFunctionCreator from '../components/workflow/CustomFunctionCreator';
+import WorkflowDataFlowManager from '../components/workflow/WorkflowDataFlowManager';
 
 // 工作流节点类型定义
 export interface WorkflowNodeData {
@@ -347,10 +349,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
   const [debuggerOpen, setDebuggerOpen] = useState(false);
   const [executionOpen, setExecutionOpen] = useState(false);
+  const [dataFlowOpen, setDataFlowOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [customFunctionCreatorOpen, setCustomFunctionCreatorOpen] = useState(false);
   const [customFunctions, setCustomFunctions] = useState<any[]>([]);
+  const [dataFlowValidation, setDataFlowValidation] = useState<any>(null);
 
   // 连接处理
   const onConnect = useCallback(
@@ -1309,6 +1313,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               <IconButton 
                 onClick={() => setDebuggerOpen(true)}
                 sx={{
+                  mr: 1,
                   color: 'rgba(255, 255, 255, 0.7)',
                   '&:hover': {
                     color: '#ff9800',
@@ -1317,6 +1322,19 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 }}
               >
                 <BugReportIcon />
+              </IconButton>
+              
+              <IconButton 
+                onClick={() => setDataFlowOpen(true)}
+                sx={{
+                  color: dataFlowValidation?.isValid === false ? '#f44336' : 'rgba(255, 255, 255, 0.7)',
+                  '&:hover': {
+                    color: '#00d4ff',
+                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                  },
+                }}
+              >
+                <DataFlowIcon />
               </IconButton>
             </Toolbar>
           </AppBar>
@@ -1668,6 +1686,66 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             // 这里可以将自定义函数保存到后端或本地存储
           }}
         />
+
+        {/* 数据流管理器对话框 */}
+        <Dialog
+          open={dataFlowOpen}
+          onClose={() => setDataFlowOpen(false)}
+          maxWidth="lg"
+          fullWidth
+          sx={{
+            '& .MuiDialog-paper': {
+              backgroundColor: '#0a0e1a',
+              backgroundImage: 'none',
+              height: '80vh',
+            }
+          }}
+        >
+          <DialogTitle 
+            sx={{ 
+              backgroundColor: 'rgba(26, 31, 46, 0.9)',
+              borderBottom: '1px solid rgba(0, 212, 255, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+              <DataFlowIcon sx={{ mr: 1, color: '#00d4ff' }} />
+              <Typography variant="h6" sx={{ color: 'white', fontWeight: 600 }}>
+                数据流管理器
+              </Typography>
+              {dataFlowValidation && (
+                <Chip 
+                  label={dataFlowValidation.isValid ? '验证通过' : '验证失败'}
+                  size="small"
+                  color={dataFlowValidation.isValid ? 'success' : 'error'}
+                  sx={{ ml: 2 }}
+                />
+              )}
+            </Box>
+            <IconButton
+              onClick={() => setDataFlowOpen(false)}
+              sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
+            >
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          
+          <DialogContent sx={{ p: 0, height: 'calc(100vh - 120px)' }}>
+            <WorkflowDataFlowManager
+              nodes={nodes}
+              edges={edges}
+              onDataFlowUpdate={(validation) => {
+                setDataFlowValidation(validation);
+              }}
+              onConnectionFix={(connection) => {
+                console.log('修复连接:', connection);
+                // 这里可以自动修复连接问题
+              }}
+            />
+          </DialogContent>
+        </Dialog>
       </Box>
     </ReactFlowProvider>
   );
