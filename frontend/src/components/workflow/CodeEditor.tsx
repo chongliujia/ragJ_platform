@@ -30,6 +30,7 @@ import {
 } from '@mui/icons-material';
 import Editor from '@monaco-editor/react';
 import type { Node, Edge } from 'reactflow';
+import { workflowApi } from '../../services/api';
 
 interface CodeEditorProps {
   nodes: Node[];
@@ -46,8 +47,38 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ nodes, edges, onSave, onExecute
   const [isExecuting, setIsExecuting] = useState(false);
   const editorRef = useRef<any>(null);
 
-  // 生成LangGraph代码的模板
-  const generateLangGraphCode = () => {
+  // 生成LangGraph代码：优先调用后端，失败则本地生成
+  const generateLangGraphCode = async () => {
+    try {
+      const payload = {
+        name: 'Workflow',
+        description: 'Generated from editor',
+        nodes: nodes.map((n) => ({
+          id: n.id,
+          type: (n as any).data?.type || n.type,
+          name: (n as any).data?.name || n.id,
+          description: (n as any).data?.description,
+          config: (n as any).data?.config || {},
+          position: n.position,
+        })),
+        edges: edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          source_output: (e as any).sourceHandle || 'output',
+          target_input: (e as any).targetHandle || 'input',
+        })),
+      } as any;
+
+      const resp = await workflowApi.generateCode(payload);
+      const pythonCode = resp.data?.python_code;
+      if (pythonCode) {
+        setCode(pythonCode);
+        return;
+      }
+    } catch (e) {
+      console.warn('Backend code generation failed, fallback to local template:', e);
+    }
     const template = `"""
 LangGraph 工作流代码
 自动生成于: ${new Date().toLocaleString()}

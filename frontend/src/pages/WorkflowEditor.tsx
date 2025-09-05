@@ -35,6 +35,8 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Snackbar,
+  
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
@@ -53,6 +55,9 @@ import {
   Edit as EditIcon,
   BugReport as BugReportIcon,
   DataUsage as DataFlowIcon,
+  CheckCircle as ValidateIcon,
+  ViewModule as LayoutIcon,
+  CenterFocusStrong as FitIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -120,6 +125,7 @@ import ToolNode from '../components/workflow/ToolNode';
 import CodeEditor from '../components/workflow/CodeEditor';
 import WorkflowDebugger from '../components/workflow/WorkflowDebugger';
 import WorkflowExecution from '../components/workflow/WorkflowExecution';
+import NodeConfigPanel from '../components/workflow/NodeConfigPanel';
 import UltraCompactNodeItem from '../components/workflow/UltraCompactNodeItem';
 import QuickAccessPanel from '../components/workflow/QuickAccessPanel';
 import EnhancedLLMNode from '../components/workflow/EnhancedLLMNode';
@@ -322,18 +328,37 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   
   // 使用路由参数或props传入的workflowId
   const workflowId = routeWorkflowId || propWorkflowId;
+  // 已持久化的工作流ID（用于执行/加载历史）。当路由是 'new' 时，保存成功后会更新为真实ID
+  const [persistedWorkflowId, setPersistedWorkflowId] = useState<string | undefined>(
+    workflowId && workflowId !== 'new' ? workflowId : undefined
+  );
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
 
   // 如果从WorkflowManagement页面跳转过来，初始化工作流名称
   useEffect(() => {
-    if (workflowId && workflowId !== 'new') {
-      // 这里可以根据workflowId加载现有工作流数据
-      // 目前先使用默认名称
-      setWorkflowName(`工作流 ${workflowId}`);
-    } else if (workflowId === 'new' || !workflowId) {
-      setWorkflowName('新建工作流');
-    }
+    const init = async () => {
+      if (workflowId && workflowId !== 'new') {
+        // 验证此ID是否真实存在于后端；不存在则视为未持久化
+        try {
+          const res = await fetch(`/api/v1/workflows/${workflowId}`, {
+            headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
+          });
+          if (res.ok) {
+            setWorkflowName(`工作流 ${workflowId}`);
+            setPersistedWorkflowId(workflowId);
+            return;
+          }
+        } catch {}
+        // 不存在：作为新建处理
+        setWorkflowName(workflowName || `工作流 ${workflowId}`);
+        setPersistedWorkflowId(undefined);
+      } else {
+        setWorkflowName('新建工作流');
+        setPersistedWorkflowId(undefined);
+      }
+    };
+    init();
   }, [workflowId]);
 
   // 工作流状态
@@ -345,6 +370,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   // UI状态
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
+  const [nodeConfigOpen, setNodeConfigOpen] = useState(false);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
   const [debuggerOpen, setDebuggerOpen] = useState(false);
@@ -355,6 +381,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const [customFunctionCreatorOpen, setCustomFunctionCreatorOpen] = useState(false);
   const [customFunctions, setCustomFunctions] = useState<any[]>([]);
   const [dataFlowValidation, setDataFlowValidation] = useState<any>(null);
+  const [validating, setValidating] = useState(false);
+  const [snackbar, setSnackbar] = useState<{open: boolean; message: string; severity: 'success'|'info'|'warning'|'error'}>({ open: false, message: '', severity: 'info' });
+
+  const showSnackbar = useCallback((message: string, severity: 'success'|'info'|'warning'|'error' = 'info') => {
+    setSnackbar({ open: true, message, severity });
+  }, []);
 
   // 连接处理
   const onConnect = useCallback(
@@ -407,10 +439,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   // 节点选择处理
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     setSelectedNode(node);
+    setNodeConfigOpen(true);
   }, []);
 
   // 保存工作流
-  const handleSave = useCallback(async () => {
+  // 保存当前工作流；返回保存后的工作流ID（新建时）
+  const handleSave = useCallback(async (): Promise<string | undefined> => {
     const workflow = {
       name: workflowName,
       description: workflowDescription,
@@ -422,17 +456,20 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         position: node.position,
       })),
       edges: edges.map((edge) => ({
-        from_node: edge.source,
-        to_node: edge.target,
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        source_output: (edge as any).sourceHandle || 'output',
+        target_input: (edge as any).targetHandle || 'input',
         condition: edge.data?.condition,
       })),
     };
 
     try {
       // 如果有workflowId且不是'new'，尝试更新现有工作流
-      if (workflowId && workflowId !== 'new') {
+      if (persistedWorkflowId) {
         try {
-          const response = await fetch(`/api/v1/workflows/${workflowId}`, {
+          const response = await fetch(`/api/v1/workflows/${persistedWorkflowId}`, {
             method: 'PUT',
             headers: {
               'Content-Type': 'application/json',
@@ -442,9 +479,9 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           });
 
           if (response.ok) {
-            alert('工作流更新成功！');
+            showSnackbar('工作流更新成功！', 'success');
             onSave?.(workflow);
-            return;
+            return persistedWorkflowId;
           }
         } catch (updateError) {
           console.error('Update error:', updateError);
@@ -452,7 +489,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       }
 
       // 尝试创建新工作流
-      const response = await fetch('/api/v1/workflows', {
+      const response = await fetch('/api/v1/workflows/', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -462,8 +499,16 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       });
 
       if (response.ok) {
-        alert('工作流保存成功！');
-        onSave?.(workflow);
+        const data = await response.json();
+        const newId = data?.id;
+        if (newId) {
+          setPersistedWorkflowId(newId);
+          // 导航到可编辑路由，确保后续执行/历史使用后端ID
+          navigate(`/workflows/${newId}/edit`);
+        }
+        showSnackbar('工作流保存成功！', 'success');
+        onSave?.({ ...workflow, id: newId });
+        return newId;
       } else {
         throw new Error('保存失败');
       }
@@ -479,18 +524,149 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         };
         savedWorkflows.push(workflowWithId);
         localStorage.setItem('saved_workflows', JSON.stringify(savedWorkflows));
-        alert('后端服务不可用，工作流已保存到本地');
+        showSnackbar('后端服务不可用，工作流已保存到本地', 'warning');
         onSave?.(workflowWithId);
+        return workflowWithId.id as string;
       } catch (localError) {
-        alert('保存失败，请检查网络连接和本地存储空间');
+        showSnackbar('保存失败，请检查网络连接和本地存储空间', 'error');
       }
     }
-  }, [workflowName, workflowDescription, nodes, edges, onSave]);
+    return undefined;
+  }, [workflowName, workflowDescription, nodes, edges, onSave, navigate, persistedWorkflowId]);
 
   // 执行工作流
   const handleExecute = useCallback(async () => {
+    // 确保已保存并有后端ID
+    let id = persistedWorkflowId;
+    if (!id) {
+      id = await handleSave();
+    }
+    if (!id) {
+      showSnackbar('请先保存工作流再执行', 'warning');
+      return;
+    }
     setExecutionOpen(true);
-  }, []);
+  }, [persistedWorkflowId, handleSave, showSnackbar]);
+
+  // 后端校验工作流
+  const handleValidate = useCallback(async () => {
+    try {
+      setValidating(true);
+      const payload = {
+        name: workflowName,
+        description: workflowDescription,
+        nodes: nodes.map((n) => ({
+          id: n.id,
+          type: (n as any).data?.type || n.type,
+          name: (n as any).data?.name || n.id,
+          description: (n as any).data?.description,
+          config: (n as any).data?.config || {},
+          position: n.position,
+        })),
+        edges: edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          source_output: (e as any).sourceHandle || 'output',
+          target_input: (e as any).targetHandle || 'input',
+        })),
+      };
+
+      const res = await fetch('/api/v1/workflows/validate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error('validate failed');
+      const data = await res.json();
+      const result = {
+        isValid: data.is_valid,
+        errors: data.errors || [],
+        warnings: data.warnings || [],
+        suggestions: data.suggestions || [],
+      };
+      setDataFlowValidation(result);
+      showSnackbar(result.isValid ? '验证通过' : `发现 ${result.errors.length} 个错误、${result.warnings.length} 个警告`, result.isValid ? 'success' : 'warning');
+    } catch (err) {
+      console.error('Validate error:', err);
+      showSnackbar('验证失败，请稍后重试', 'error');
+    } finally {
+      setValidating(false);
+    }
+  }, [workflowName, workflowDescription, nodes, edges, showSnackbar]);
+
+  // 简易自动布局（分层排列）
+  const handleAutoLayout = useCallback(() => {
+    const inDegree: Record<string, number> = {};
+    nodes.forEach((n) => (inDegree[n.id] = 0));
+    edges.forEach((e) => {
+      inDegree[e.target] = (inDegree[e.target] || 0) + 1;
+    });
+
+    const levels: string[][] = [];
+    const visited = new Set<string>();
+    let current = Object.keys(inDegree).filter((id) => inDegree[id] === 0);
+    const edgeList = edges.map((e) => ({ ...e }));
+
+    while (current.length) {
+      levels.push(current);
+      current.forEach((id) => visited.add(id));
+      const next = new Set<string>();
+      edgeList.forEach((e) => {
+        if (visited.has(e.source) && !visited.has(e.target)) {
+          inDegree[e.target] = Math.max(0, (inDegree[e.target] || 1) - 1);
+          if (inDegree[e.target] === 0) next.add(e.target);
+        }
+      });
+      current = Array.from(next);
+    }
+
+    const unvisited = nodes.filter((n) => !visited.has(n.id)).map((n) => n.id);
+    if (unvisited.length) levels.push(unvisited);
+
+    const xGap = 280;
+    const yGap = 140;
+    const newNodes = nodes.map((n) => ({ ...n }));
+    levels.forEach((level, li) => {
+      level.forEach((id, idx) => {
+        const node = newNodes.find((nn) => nn.id === id);
+        if (node) node.position = { x: li * xGap + 40, y: idx * yGap + 60 };
+      });
+    });
+    setNodes(newNodes);
+  }, [nodes, edges, setNodes]);
+
+  const handleFitView = useCallback(() => {
+    try {
+      reactFlowInstance?.fitView({ padding: 0.2 });
+    } catch {}
+  }, [reactFlowInstance]);
+
+  // 快捷键支持：保存(Cmd/Ctrl+S)、执行(Cmd/Ctrl+Enter)、验证(Cmd/Ctrl+Shift+V)、自动布局(L)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (mod && key === 's') {
+        e.preventDefault();
+        handleSave();
+      } else if (mod && e.key === 'Enter') {
+        e.preventDefault();
+        handleExecute();
+      } else if (mod && e.shiftKey && key === 'v') {
+        e.preventDefault();
+        handleValidate();
+      } else if (key === 'l') {
+        handleAutoLayout();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleSave, handleExecute, handleValidate, handleAutoLayout]);
 
   // 拖拽开始处理
   const onDragStart = (event: React.DragEvent, nodeData: any) => {
@@ -1282,6 +1458,28 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 执行
               </Button>
 
+              {persistedWorkflowId && (
+                <Button
+                  onClick={() => navigate(`/workflows/${persistedWorkflowId}/test`)}
+                  variant="outlined"
+                  size="small"
+                  sx={{ 
+                    mr: 1,
+                    borderRadius: '8px',
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    fontSize: '0.75rem',
+                    px: 1.5,
+                    py: 0.5,
+                    border: '1px solid rgba(0, 212, 255, 0.3)',
+                    color: '#00d4ff',
+                    '&:hover': { backgroundColor: 'rgba(0, 212, 255, 0.1)', borderColor: '#00d4ff' },
+                  }}
+                >
+                  测试（聊天）
+                </Button>
+              )}
+
               <IconButton 
                 onClick={() => setConfigDialogOpen(true)}
                 sx={{
@@ -1322,6 +1520,35 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 }}
               >
                 <BugReportIcon />
+              </IconButton>
+
+              <IconButton 
+                onClick={handleValidate}
+                disabled={validating}
+                sx={{
+                  mr: 1,
+                  color: dataFlowValidation?.isValid === false ? '#f44336' : 'rgba(255, 255, 255, 0.7)',
+                  '&:hover': {
+                    color: '#4caf50',
+                    backgroundColor: 'rgba(76, 175, 80, 0.12)',
+                  },
+                }}
+              >
+                <ValidateIcon />
+              </IconButton>
+
+              <IconButton 
+                onClick={handleAutoLayout}
+                sx={{
+                  mr: 1,
+                  color: 'rgba(255, 255, 255, 0.7)',
+                  '&:hover': {
+                    color: '#00d4ff',
+                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                  },
+                }}
+              >
+                <LayoutIcon />
               </IconButton>
               
               <IconButton 
@@ -1375,6 +1602,8 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               edgeTypes={edgeTypes}
               connectionLineComponent={EnhancedConnectionLine}
               connectionMode={ConnectionMode.Loose}
+              snapToGrid
+              snapGrid={[20, 20]}
               fitView
               className="custom-workflow-editor"
               style={{ zIndex: 2 }}
@@ -1463,6 +1692,31 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                       }}
                     />
                   )}
+                </Box>
+              </Panel>
+
+              <Panel position="bottom-left">
+                <Box sx={{ display: 'flex', gap: 1, p: 1, background: 'rgba(26, 31, 46, 0.9)', borderRadius: 2, border: '1px solid rgba(0, 212, 255, 0.3)' }}>
+                  <Tooltip title="保存 (⌘/Ctrl+S)"><span>
+                    <IconButton size="small" onClick={handleSave} sx={{ color: '#00d4ff' }}>
+                      <SaveIcon fontSize="small" />
+                    </IconButton>
+                  </span></Tooltip>
+                  <Tooltip title="验证 (⌘/Ctrl+Shift+V)"><span>
+                    <IconButton size="small" onClick={handleValidate} disabled={validating} sx={{ color: '#4caf50' }}>
+                      <ValidateIcon fontSize="small" />
+                    </IconButton>
+                  </span></Tooltip>
+                  <Tooltip title="自动布局 (L)"><span>
+                    <IconButton size="small" onClick={handleAutoLayout} sx={{ color: '#00d4ff' }}>
+                      <LayoutIcon fontSize="small" />
+                    </IconButton>
+                  </span></Tooltip>
+                  <Tooltip title="适配视图"><span>
+                    <IconButton size="small" onClick={handleFitView} sx={{ color: '#00d4ff' }}>
+                      <FitIcon fontSize="small" />
+                    </IconButton>
+                  </span></Tooltip>
                 </Box>
               </Panel>
             </ReactFlow>
@@ -1664,7 +1918,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           
           <DialogContent sx={{ p: 0, height: 'calc(100vh - 64px)' }}>
             <WorkflowExecution
-              workflowId={workflowId}
+              workflowId={persistedWorkflowId}
               nodes={nodes}
               edges={edges}
               onSave={(workflow) => {
@@ -1675,6 +1929,19 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             />
           </DialogContent>
         </Dialog>
+
+        {/* 节点配置右侧抽屉 */}
+        <NodeConfigPanel
+          key={selectedNode?.id || 'none'}
+          open={nodeConfigOpen}
+          node={selectedNode}
+          onClose={() => setNodeConfigOpen(false)}
+          onSave={(config) => {
+            if (!selectedNode) return;
+            setNodes((nds) => nds.map(n => n.id === selectedNode.id ? { ...n, data: { ...n.data, config } } : n));
+            showSnackbar('节点配置已保存', 'success');
+          }}
+        />
 
         {/* 自定义函数创建器 */}
         <CustomFunctionCreator
@@ -1747,6 +2014,21 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           </DialogContent>
         </Dialog>
       </Box>
+      {/* 全局 Snackbar 提示 */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar((s) => ({ ...s, open: false }))}
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </ReactFlowProvider>
   );
 };

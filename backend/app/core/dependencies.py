@@ -2,7 +2,7 @@
 依赖注入相关功能
 """
 
-from typing import Optional
+from typing import Optional, Tuple
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -54,6 +54,20 @@ async def get_current_active_user(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user"
         )
     return current_user
+
+
+async def get_current_user_with_tenant(
+    current_user: User = Depends(get_current_user),
+) -> Tuple[User, int]:
+    """获取当前用户及其租户ID"""
+    return current_user, current_user.tenant_id
+
+
+async def get_tenant_id(
+    current_user: User = Depends(get_current_user),
+) -> int:
+    """获取当前用户的租户ID"""
+    return current_user.tenant_id
 
 
 def require_permission(permission_name: str):
@@ -142,3 +156,22 @@ def check_tenant_access(
     # 普通用户只能访问自己租户的数据
     # 这个检查会在具体的业务逻辑中实现
     return current_user
+
+
+def validate_tenant_access(
+    resource_tenant_id: int,
+    current_user: User = Depends(get_current_active_user)
+):
+    """验证用户是否有权限访问指定租户的资源"""
+    # 超级管理员可以访问所有租户的资源
+    if current_user.role == "super_admin":
+        return True
+    
+    # 普通用户只能访问自己租户的资源
+    if current_user.tenant_id != resource_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You can only access resources in your own tenant"
+        )
+    
+    return True

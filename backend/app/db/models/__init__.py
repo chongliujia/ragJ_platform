@@ -8,8 +8,17 @@ from .tenant import Tenant, TeamType
 from .user_tenant import UserTenant, UserTenantRole, MemberType
 from .team_invitation import TeamInvitation
 from .knowledge_base import KnowledgeBase
-from .document import Document
+from .document import Document, DocumentStatus
 from .permission import Permission, RolePermission
+from .workflow import (
+    WorkflowDefinition,
+    WorkflowExecution,
+    WorkflowExecutionStep,
+    WorkflowTemplate,
+    WorkflowSchedule,
+    WorkflowStatus,
+    ExecutionStatus
+)
 
 __all__ = [
     "Base",
@@ -24,6 +33,14 @@ __all__ = [
     "TeamInvitation",
     "KnowledgeBase",
     "Document",
+    "DocumentStatus",
     "Permission",
     "RolePermission",
+    "WorkflowDefinition",
+    "WorkflowExecution",
+    "WorkflowExecutionStep",
+    "WorkflowTemplate",
+    "WorkflowSchedule",
+    "WorkflowStatus",
+    "ExecutionStatus",
 ]

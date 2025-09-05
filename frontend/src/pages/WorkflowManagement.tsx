@@ -88,6 +88,9 @@ const WorkflowManagement: React.FC = () => {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [newWorkflowName, setNewWorkflowName] = useState('');
   const [newWorkflowDescription, setNewWorkflowDescription] = useState('');
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
 
   // 模拟数据，当后端接口不可用时使用
   const mockWorkflows: Workflow[] = [
@@ -195,6 +198,34 @@ const WorkflowManagement: React.FC = () => {
       setNewWorkflowName('');
       setNewWorkflowDescription('');
       navigate('/workflows/new');
+    }
+  };
+
+  const openTemplateDialog = async () => {
+    setTemplateDialogOpen(true);
+    setLoadingTemplates(true);
+    try {
+      const resp = await workflowApi.getTemplates();
+      setTemplates(resp.data || []);
+    } catch (e) {
+      console.error('Failed to load templates:', e);
+      setTemplates([]);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const useTemplate = async (templateId: string) => {
+    try {
+      const resp = await workflowApi.useTemplate(templateId, newWorkflowName || undefined);
+      const workflowId = resp.data?.workflow_id || resp.data?.id;
+      setTemplateDialogOpen(false);
+      if (workflowId) {
+        navigate(`/workflows/${workflowId}/edit`);
+      }
+    } catch (e) {
+      console.error('Use template failed:', e);
+      alert('使用模板失败');
     }
   };
 
@@ -637,9 +668,42 @@ const WorkflowManagement: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCreateDialogOpen(false)}>取消</Button>
+          <Button onClick={openTemplateDialog}>从模板创建</Button>
           <Button onClick={handleCreateWorkflow} variant="contained">
             创建并编辑
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 模板选择对话框 */}
+      <Dialog open={templateDialogOpen} onClose={() => setTemplateDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>选择模板</DialogTitle>
+        <DialogContent>
+          {loadingTemplates ? (
+            <Typography>加载模板中...</Typography>
+          ) : (
+            <List>
+              {templates.map((tpl) => (
+                <ListItem key={tpl.id} secondaryAction={
+                  <Button variant="contained" size="small" onClick={() => useTemplate(tpl.id)}>使用</Button>
+                }>
+                  <ListItemIcon>
+                    <WorkflowIcon />
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={`${tpl.name}（节点: ${tpl.node_count ?? '-'}）`}
+                    secondary={tpl.description}
+                  />
+                </ListItem>
+              ))}
+              {templates.length === 0 && (
+                <Typography>暂无可用模板</Typography>
+              )}
+            </List>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTemplateDialogOpen(false)}>关闭</Button>
         </DialogActions>
       </Dialog>
 

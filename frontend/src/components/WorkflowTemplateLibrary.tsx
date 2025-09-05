@@ -57,7 +57,7 @@ import {
   Code as CodeIcon,
   Timeline as TimelineIcon,
   TrendingUp as TrendingUpIcon,
-  New as NewIcon,
+  FiberNew as NewIcon,
   ExpandMore as ExpandMoreIcon,
   FilterList as FilterIcon,
   Sort as SortIcon,

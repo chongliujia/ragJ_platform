@@ -17,6 +17,7 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseCreate,
     KnowledgeBaseCreateResponse,
 )
+from app.core.dependencies import get_tenant_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ def validate_collection_name(name: str) -> bool:
 )
 async def create_knowledge_base(
     kb_create: KnowledgeBaseCreate,
+    tenant_id: int = Depends(get_tenant_id),
     es_service: ElasticsearchService = Depends(get_elasticsearch_service),
 ):
     """
@@ -50,8 +52,6 @@ async def create_knowledge_base(
     """
     kb_name = kb_create.name
     
-    # TODO: Get actual tenant_id from authentication context
-    tenant_id = 1  # Default tenant ID for now
     tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
 
     # Validate collection name
@@ -113,14 +113,12 @@ async def create_knowledge_base(
 
 
 @router.get("/", response_model=List[KnowledgeBase])
-async def list_knowledge_bases():
+async def list_knowledge_bases(tenant_id: int = Depends(get_tenant_id)):
     """
     List all available Knowledge Bases for the current tenant.
     This corresponds to listing all collections in Milvus that belong to the tenant.
     """
     try:
-        # TODO: Get actual tenant_id from authentication context
-        tenant_id = 1  # Default tenant ID for now
         tenant_prefix = f"tenant_{tenant_id}_"
         
         collection_names = milvus_service.list_collections()
@@ -158,13 +156,11 @@ async def list_knowledge_bases():
 
 
 @router.get("/{kb_name}", response_model=KnowledgeBase)
-async def get_knowledge_base(kb_name: str):
+async def get_knowledge_base(kb_name: str, tenant_id: int = Depends(get_tenant_id)):
     """
     Get details of a specific Knowledge Base.
     """
     try:
-        # TODO: Get actual tenant_id from authentication context
-        tenant_id = 1  # Default tenant ID for now
         tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
         
         if not milvus_service.has_collection(tenant_collection_name):
@@ -202,15 +198,15 @@ async def get_knowledge_base(kb_name: str):
 
 @router.delete("/{kb_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_knowledge_base(
-    kb_name: str, es_service: ElasticsearchService = Depends(get_elasticsearch_service)
+    kb_name: str, 
+    tenant_id: int = Depends(get_tenant_id),
+    es_service: ElasticsearchService = Depends(get_elasticsearch_service)
 ):
     """
     Delete a Knowledge Base.
     This will drop the corresponding collection in Milvus and index in Elasticsearch.
     """
     try:
-        # TODO: Get actual tenant_id from authentication context
-        tenant_id = 1  # Default tenant ID for now
         tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
         
         # We need to check existence before attempting deletion

@@ -686,7 +686,6 @@ const Login: React.FC = () => {
                     fontWeight: 600,
                     boxShadow: '0 8px 32px rgba(0, 212, 255, 0.4)',
                     fontSize: '1rem',
-                    fontWeight: 600,
                     textTransform: 'none',
                     transition: 'all 0.3s ease',
                     '&:hover': {
@@ -996,7 +995,6 @@ const Login: React.FC = () => {
                         fontWeight: 600,
                         boxShadow: '0 8px 32px rgba(255, 107, 53, 0.4)',
                         fontSize: '1rem',
-                        fontWeight: 600,
                         textTransform: 'none',
                         transition: 'all 0.3s ease',
                         '&:hover': {

@@ -1,7 +1,10 @@
 import axios from 'axios';
 
-// 配置 axios 默认设置
-const API_BASE_URL = 'http://localhost:8000';
+// 配置 axios 默认设置（与全局 api.ts 一致）
+const isViteDev = !!(import.meta as any).hot || (import.meta as any).env?.DEV;
+const isLocalDevHost = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+const isDev = isViteDev || isLocalDevHost;
+const API_BASE_URL = isDev ? '' : ((import.meta as any).env?.VITE_BACKEND_URL || '');
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -10,6 +13,18 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+if (isDev) {
+  api.defaults.baseURL = '';
+}
+
+api.interceptors.request.use(
+  (config) => {
+    if (isDev) config.baseURL = '';
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 // 请求拦截器
 api.interceptors.request.use(

@@ -99,8 +99,9 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
   const [isExecuting, setIsExecuting] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [inputDialogOpen, setInputDialogOpen] = useState(false);
+  const [inputError, setInputError] = useState<string | null>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const [executionInput, setExecutionInput] = useState('');
+  const [executionInput, setExecutionInput] = useState('{}');
   const [currentExecution, setCurrentExecution] = useState<ExecutionResult | null>(null);
   const [executionHistory, setExecutionHistory] = useState<ExecutionResult[]>([]);
   const [workflowName, setWorkflowName] = useState('');
@@ -119,7 +120,8 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
     
     try {
       const response = await workflowApi.getExecutionHistory(workflowId);
-      setExecutionHistory(response.data || []);
+      const list = response.data?.executions || response.data || [];
+      setExecutionHistory(list);
     } catch (error) {
       console.error('Failed to load execution history:', error);
     }
@@ -130,6 +132,7 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
       setInputDialogOpen(true);
       return;
     }
+    try { JSON.parse(executionInput); setInputError(null); } catch (e: any) { setInputError(e.message || 'JSON 解析错误'); setInputDialogOpen(true); return; }
 
     setIsExecuting(true);
     const executionId = `exec_${Date.now()}`;
@@ -167,6 +170,25 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
       setIsExecuting(false);
       executionIdRef.current = null;
     }
+  };
+
+  // 构建推荐输入（简单根据节点类型推断）
+  const buildRecommendedInput = () => {
+    const recommended: any = {};
+    const hasLLM = nodes.some((n: any) => (n.data?.type || n.type) === 'llm');
+    const hasRetriever = nodes.some((n: any) => (n.data?.type || n.type) === 'rag_retriever');
+    const hasInput = nodes.some((n: any) => (n.data?.type || n.type) === 'input');
+    if (hasLLM) {
+      recommended.prompt = recommended.prompt || '请用一句话介绍这个系统';
+      recommended.system_prompt = '';
+    }
+    if (hasRetriever) {
+      recommended.query = recommended.query || '公司加班政策';
+    }
+    if (hasInput) {
+      recommended.text = recommended.text || '测试输入';
+    }
+    setExecutionInput(JSON.stringify(recommended, null, 2));
   };
 
   const executeWithBackend = async (workflowId: string, execution: ExecutionResult) => {
@@ -453,6 +475,16 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
               <MenuItem value="debug">调试模式</MenuItem>
             </Select>
           </FormControl>
+
+          {/* 输入参数编辑快捷按钮 */}
+          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Button size="small" variant="outlined" onClick={() => setInputDialogOpen(true)} sx={{ color: '#00d4ff', borderColor: '#00d4ff' }}>
+              编辑输入
+            </Button>
+            <Button size="small" variant="outlined" onClick={buildRecommendedInput} sx={{ color: '#9ccc65', borderColor: '#9ccc65' }}>
+              填充建议
+            </Button>
+          </Box>
         </Box>
         
         {isExecuting && currentExecution && (
@@ -538,6 +570,18 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
                         {step.memory && (
                           <Typography variant="body2">内存: {step.memory} MB</Typography>
                         )}
+                        {step.input && (
+                          <Accordion sx={{ mt: 1, backgroundColor: 'rgba(0, 0, 0, 0.2)' }}>
+                            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                              <Typography variant="body2">输入数据</Typography>
+                            </AccordionSummary>
+                            <AccordionDetails>
+                              <pre style={{ fontSize: '0.75rem', margin: 0 }}>
+                                {JSON.stringify(step.input, null, 2)}
+                              </pre>
+                            </AccordionDetails>
+                          </Accordion>
+                        )}
                         {step.output && (
                           <Accordion sx={{ mt: 1, backgroundColor: 'rgba(0, 0, 0, 0.2)' }}>
                             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -555,6 +599,9 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
                             {step.error}
                           </Alert>
                         )}
+                        <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
+                          <Button size="small" variant="outlined" onClick={() => alert('单步重试：当前为前端模拟，后端逐步重试接口待对接')}>重试该步</Button>
+                        </Box>
                       </Box>
                     </StepContent>
                   </Step>
@@ -627,25 +674,30 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
       </Box>
 
       {/* 输入对话框 */}
-      <Dialog open={inputDialogOpen} onClose={() => setInputDialogOpen(false)}>
-        <DialogTitle>设置执行输入</DialogTitle>
+      <Dialog open={inputDialogOpen} onClose={() => setInputDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>执行输入参数</DialogTitle>
         <DialogContent>
+          <Typography variant="body2" sx={{ mb: 1, color: 'text.secondary' }}>
+            使用 JSON 格式填写工作流执行的 input_data。你也可以点击“填充建议”快速生成示例。
+          </Typography>
           <TextField
             fullWidth
             multiline
-            rows={4}
-            label="输入数据"
+            minRows={10}
+            label="输入数据 (JSON)"
             value={executionInput}
             onChange={(e) => setExecutionInput(e.target.value)}
-            placeholder='输入JSON格式数据，例如: {"query": "你好", "context": {}}'
-            sx={{ mt: 1 }}
+            placeholder='例如: {"prompt": "你好", "system_prompt": "你是助手"}'
+            sx={{ mt: 1, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
           />
+          {inputError && <Alert severity="error" sx={{ mt: 1 }}>{inputError}</Alert>}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setInputDialogOpen(false)}>取消</Button>
+          <Button onClick={buildRecommendedInput}>填充建议</Button>
           <Button 
             onClick={() => {
-              setInputDialogOpen(false);
+              try { JSON.parse(executionInput); setInputError(null); setInputDialogOpen(false); } catch (e: any) { setInputError(e.message || 'JSON 解析错误'); return; }
               handleExecute();
             }} 
             variant="contained"

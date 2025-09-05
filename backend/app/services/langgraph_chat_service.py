@@ -218,7 +218,7 @@ class LangGraphChatService:
                             index_name=tenant_index_name,
                             query=query_text,
                             top_k=top_k,
-                            filter_query={"term": {"tenant_id": tenant_id}},
+                            filter_query={"tenant_id": tenant_id},
                         )
                     )
                 else:

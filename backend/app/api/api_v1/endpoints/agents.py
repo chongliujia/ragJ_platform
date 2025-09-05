@@ -1,5 +1,5 @@
 """
-智能体工作流管理API端点
+智能体管理API端点
 """
 
 from typing import List, Optional, Dict, Any
@@ -13,174 +13,180 @@ from app.services.chat_service import ChatService
 router = APIRouter()
 
 
-class WorkflowNode(BaseModel):
-    id: str
-    type: str
-    name: str
-    config: Dict[str, Any] = {}
-
-
-class WorkflowEdge(BaseModel):
-    from_node: str
-    to_node: str
-    condition: Optional[str] = None
-
-
-class WorkflowCreate(BaseModel):
+class AgentCreate(BaseModel):
     name: str
     description: Optional[str] = None
-    nodes: List[WorkflowNode]
-    edges: List[WorkflowEdge]
+    system_prompt: Optional[str] = None
+    model: str = "qwen-turbo"
+    temperature: float = 0.7
+    max_tokens: int = 1000
+    knowledge_bases: List[str] = []
+    tools: List[str] = []
 
 
-class WorkflowResponse(BaseModel):
+class AgentResponse(BaseModel):
     id: str
     name: str
     description: Optional[str]
-    nodes: List[WorkflowNode]
-    edges: List[WorkflowEdge]
+    system_prompt: Optional[str]
+    model: str
+    temperature: float
+    max_tokens: int
+    knowledge_bases: List[str]
+    tools: List[str]
     created_at: datetime
     status: str = "active"
 
 
 # 简化版本的内存存储
-workflows = {}
+agents = {}
 
 
 def get_chat_service() -> ChatService:
     return ChatService()
 
 
-@router.post("/workflows", response_model=WorkflowResponse)
-async def create_workflow(request: WorkflowCreate):
+@router.post("", response_model=AgentResponse)
+async def create_agent(request: AgentCreate):
     """
-    创建智能体工作流
+    创建智能体
     """
-    workflow_id = f"wf_{uuid.uuid4().hex[:8]}"
+    agent_id = f"agent_{uuid.uuid4().hex[:8]}"
 
-    workflow = WorkflowResponse(
-        id=workflow_id,
+    agent = AgentResponse(
+        id=agent_id,
         name=request.name,
         description=request.description,
-        nodes=request.nodes,
-        edges=request.edges,
+        system_prompt=request.system_prompt,
+        model=request.model,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+        knowledge_bases=request.knowledge_bases,
+        tools=request.tools,
         created_at=datetime.now(),
     )
 
-    workflows[workflow_id] = workflow
-    return workflow
+    agents[agent_id] = agent
+    return agent
 
 
-@router.get("/workflows", response_model=List[WorkflowResponse])
-async def list_workflows():
+@router.get("", response_model=List[AgentResponse])
+async def list_agents():
     """
-    获取工作流列表
+    获取智能体列表
     """
-    return list(workflows.values())
+    return list(agents.values())
 
 
-@router.get("/workflows/{workflow_id}", response_model=WorkflowResponse)
-async def get_workflow(workflow_id: str):
+@router.get("/{agent_id}", response_model=AgentResponse)
+async def get_agent(agent_id: str):
     """
-    获取工作流详情
+    获取智能体详情
     """
-    if workflow_id not in workflows:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    if agent_id not in agents:
+        raise HTTPException(status_code=404, detail="Agent not found")
 
-    return workflows[workflow_id]
+    return agents[agent_id]
 
 
-@router.post("/workflows/{workflow_id}/execute")
-async def execute_workflow(
-    workflow_id: str,
+@router.put("/{agent_id}", response_model=AgentResponse)
+async def update_agent(agent_id: str, request: AgentCreate):
+    """
+    更新智能体
+    """
+    if agent_id not in agents:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    agent = agents[agent_id]
+    agent.name = request.name
+    agent.description = request.description
+    agent.system_prompt = request.system_prompt
+    agent.model = request.model
+    agent.temperature = request.temperature
+    agent.max_tokens = request.max_tokens
+    agent.knowledge_bases = request.knowledge_bases
+    agent.tools = request.tools
+
+    return agent
+
+
+@router.delete("/{agent_id}")
+async def delete_agent(agent_id: str):
+    """
+    删除智能体
+    """
+    if agent_id not in agents:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    del agents[agent_id]
+    return {"message": "Agent deleted successfully"}
+
+
+@router.post("/{agent_id}/chat")
+async def chat_with_agent(
+    agent_id: str,
     request: Dict[str, Any],
     chat_service: ChatService = Depends(get_chat_service),
 ):
     """
-    执行工作流
+    与智能体对话
     """
-    if workflow_id not in workflows:
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    if agent_id not in agents:
+        raise HTTPException(status_code=404, detail="Agent not found")
 
-    result = await chat_service.execute_workflow(workflow_id, request)
+    agent = agents[agent_id]
+    message = request.get("message", "")
+    
+    # 使用智能体配置进行对话
+    result = await chat_service.chat(
+        message=message,
+        model=agent.model,
+        temperature=agent.temperature,
+        max_tokens=agent.max_tokens,
+        system_prompt=agent.system_prompt,
+        knowledge_bases=agent.knowledge_bases
+    )
     return result
 
 
-@router.delete("/workflows/{workflow_id}")
-async def delete_workflow(workflow_id: str):
-    """
-    删除工作流
-    """
-    if workflow_id not in workflows:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-
-    del workflows[workflow_id]
-    return {"message": "Workflow deleted successfully"}
-
-
-# 预定义的工作流模板
+# 预定义的智能体模板
 @router.get("/templates")
-async def get_workflow_templates():
+async def get_agent_templates():
     """
-    获取工作流模板
+    获取智能体模板
     """
     return [
         {
-            "id": "customer_service",
+            "id": "customer_service_agent",
             "name": "智能客服",
-            "description": "基于知识库的智能客服工作流",
-            "nodes": [
-                {
-                    "id": "intent_detection",
-                    "type": "classifier",
-                    "name": "意图识别",
-                    "config": {"model": "qwen-turbo"},
-                },
-                {
-                    "id": "knowledge_retrieval",
-                    "type": "rag_retriever",
-                    "name": "知识检索",
-                    "config": {"top_k": 5},
-                },
-                {
-                    "id": "response_generation",
-                    "type": "generator",
-                    "name": "回复生成",
-                    "config": {"model": "qwen-turbo"},
-                },
-            ],
-            "edges": [
-                {"from_node": "intent_detection", "to_node": "knowledge_retrieval"},
-                {"from_node": "knowledge_retrieval", "to_node": "response_generation"},
-            ],
+            "description": "基于知识库的智能客服助手",
+            "system_prompt": "你是一个专业的客服助手，请根据知识库内容为用户提供准确、友好的帮助。",
+            "model": "qwen-turbo",
+            "temperature": 0.3,
+            "max_tokens": 1000,
+            "knowledge_bases": [],
+            "tools": ["knowledge_search", "faq"]
         },
         {
-            "id": "document_analysis",
-            "name": "文档分析",
-            "description": "智能文档分析和总结工作流",
-            "nodes": [
-                {
-                    "id": "document_parser",
-                    "type": "parser",
-                    "name": "文档解析",
-                    "config": {},
-                },
-                {
-                    "id": "content_analyzer",
-                    "type": "analyzer",
-                    "name": "内容分析",
-                    "config": {"model": "qwen-turbo"},
-                },
-                {
-                    "id": "summary_generator",
-                    "type": "summarizer",
-                    "name": "摘要生成",
-                    "config": {"model": "qwen-turbo"},
-                },
-            ],
-            "edges": [
-                {"from_node": "document_parser", "to_node": "content_analyzer"},
-                {"from_node": "content_analyzer", "to_node": "summary_generator"},
-            ],
+            "id": "document_analyst",
+            "name": "文档分析师",
+            "description": "专业的文档分析和总结助手",
+            "system_prompt": "你是一个文档分析专家，擅长分析、总结和提取文档中的关键信息。",
+            "model": "qwen-turbo", 
+            "temperature": 0.2,
+            "max_tokens": 1500,
+            "knowledge_bases": [],
+            "tools": ["document_parse", "summarize"]
         },
+        {
+            "id": "code_assistant",
+            "name": "编程助手",
+            "description": "代码编写、调试和优化助手",
+            "system_prompt": "你是一个专业的编程助手，能帮助用户编写、调试和优化代码。",
+            "model": "qwen-turbo",
+            "temperature": 0.1,
+            "max_tokens": 2000,
+            "knowledge_bases": [],
+            "tools": ["code_execute", "code_review"]
+        }
     ]

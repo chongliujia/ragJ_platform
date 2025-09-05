@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: ragj_backend
+    environment:
+      # Override hosts for in-cluster services
+      - ELASTICSEARCH_HOSTS=["http://elasticsearch:9200"]
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - DEBUG=true
+    volumes:
+      - ./backend:/app/backend
+      # Mount project root .env so pydantic Settings(env_file='../../../.env') can load it as /app/.env
+      - ./.env:/app/.env:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      - elasticsearch
+      - milvus
+    networks:
+      - rag_network
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app/frontend
+    container_name: ragj_frontend
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
+    volumes:
+      - ./frontend:/app/frontend
+      - /app/frontend/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      # Used in vite proxy or code if referenced (use service DNS inside Docker network)
+      - VITE_BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - rag_network
+
+  elasticsearch:
+    image: elasticsearch:8.11.3
+    container_name: elasticsearch_for_rag
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - rag_network
+
+  milvus:
+    image: milvusdb/milvus:v2.4.12
+    container_name: milvus_standalone
+    command: ["milvus", "run", "standalone"]
+    environment:
+      - ETCD_USE_EMBED=true
+      - MINIO_USE_EMBED=true
+      - COMMON_STORAGETYPE=local
+    volumes:
+      - milvus_data:/var/lib/milvus
+    ports:
+      - "19530:19530"
+    networks:
+      - rag_network
+
+volumes:
+  es_data:
+    driver: local
+  milvus_data:
+    driver: local
+
+networks:
+  rag_network:
+    driver: bridge

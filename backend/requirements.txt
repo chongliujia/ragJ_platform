@@ -61,6 +61,7 @@ aiofiles
 # 监控和日志
 structlog
 prometheus-client
+psutil
 
 # 开发工具
 pytest

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Dialog,
@@ -65,6 +65,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   
   // 分片策略相关状态
   const [strategies, setStrategies] = useState<ChunkingStrategyConfig[]>([]);
@@ -119,6 +120,25 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
       });
       setStrategyParams(newParams);
     }
+  };
+
+  // 支持拖拽添加文件
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length > 0) {
+      const newFiles: FileUploadStatus[] = droppedFiles.map(file => ({
+        file,
+        status: 'pending',
+        progress: 0,
+      }));
+      setFiles(prev => [...prev, ...newFiles]);
+      setError(null);
+    }
+  };
+
+  const openFilePicker = () => {
+    fileInputRef.current?.click();
   };
 
   // 处理参数变化
@@ -303,15 +323,17 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
             textAlign: 'center',
             border: '2px dashed',
             borderColor: files.length > 0 ? 'primary.main' : 'grey.300',
-            bgcolor: files.length > 0 ? 'primary.50' : 'grey.50',
+            bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.03)' : (files.length > 0 ? 'primary.50' : 'grey.50'),
             cursor: 'pointer',
             transition: 'all 0.2s',
             '&:hover': {
               borderColor: 'primary.main',
-              bgcolor: 'primary.50',
+              bgcolor: (theme) => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'primary.50',
             },
           }}
-          component="label"
+          onClick={openFilePicker}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
         >
           <input
             type="file"
@@ -319,6 +341,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
             onChange={handleFileChange}
             multiple
             style={{ display: 'none' }}
+            ref={fileInputRef}
           />
           
           <Box>
@@ -336,6 +359,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
               startIcon={<AddIcon />}
               sx={{ mt: 2 }}
               size="small"
+              onClick={(e) => { e.stopPropagation(); openFilePicker(); }}
             >
               {t('document.upload.file.browse')}
             </Button>

@@ -139,14 +139,47 @@ class ElasticsearchService:
             raise
 
     async def search(
-        self, index_name: str, query: str, top_k: int = 5
+        self, 
+        index_name: str, 
+        query: str, 
+        top_k: int = 5,
+        filter_query: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
-        """Performs a keyword search against the 'text' field."""
+        """
+        Performs a keyword search against the 'text' field with optional filtering.
+        
+        Args:
+            index_name: The Elasticsearch index to search in
+            query: The search query text
+            top_k: Maximum number of results to return
+            filter_query: Optional filter conditions (e.g., {"tenant_id": 1})
+        
+        Returns:
+            List of search results with scores and text content
+        """
         if not await self.index_exists(index_name):
             logger.warning(f"Cannot search in non-existent index '{index_name}'.")
             return []
 
-        body = {"query": {"match": {"text": query}}, "size": top_k}
+        # Build the query using bool query for combining match and filter
+        if filter_query:
+            # Use bool query with must (for matching text) and filter (for exact matches)
+            body = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"match": {"text": query}}
+                        ],
+                        "filter": [
+                            {"term": {key: value}} for key, value in filter_query.items()
+                        ]
+                    }
+                },
+                "size": top_k
+            }
+        else:
+            # Simple match query when no filters
+            body = {"query": {"match": {"text": query}}, "size": top_k}
 
         try:
             response = await self.client.search(index=index_name, body=body)

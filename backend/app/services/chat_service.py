@@ -163,7 +163,7 @@ class ChatService:
                         index_name=tenant_index_name,
                         query=query_text,
                         top_k=top_k,
-                        filter_query={"term": {"tenant_id": tenant_id}},
+                        filter_query={"tenant_id": tenant_id},
                     )
                 )
             else:
@@ -277,8 +277,8 @@ class ChatService:
 请提供结构化的Markdown回答："""
         return prompt_template.format(context=context, query=query)
 
-    async def stream_chat(self, request: ChatRequest) -> AsyncGenerator[str, None]:
-        """Streaming chat response with RAG support"""
+    async def stream_chat(self, request: ChatRequest, tenant_id: int = None, user_id: int = None) -> AsyncGenerator[str, None]:
+        """Streaming chat response with RAG support. Requires tenant_id/user_id for RAG."""
         logger.info("Initiating stream chat.")
         
         try:
@@ -287,6 +287,8 @@ class ChatService:
             
             # Check if this is a RAG request
             if request.knowledge_base_id:
+                if tenant_id is None or user_id is None:
+                    raise ValueError("tenant_id and user_id are required for RAG stream chat.")
                 logger.info(f"Streaming RAG chat with knowledge base: {request.knowledge_base_id}")
                 
                 # Perform RAG retrieval first
@@ -297,11 +299,12 @@ class ChatService:
                 
                 # Get documents from Elasticsearch
                 # Add tenant prefix to knowledge base ID for proper indexing
-                es_index_name = f"tenant_1_{request.knowledge_base_id}"
+                es_index_name = f"tenant_{tenant_id}_{request.knowledge_base_id}"
                 es_results = await self.elasticsearch_service.search(
                     index_name=es_index_name,
                     query=query_text,
-                    top_k=5
+                    top_k=5,
+                    filter_query={"tenant_id": tenant_id}
                 )
                 
                 # Get documents from vector database (first need to get query embedding)

@@ -46,6 +46,8 @@ class Document(Base):
     knowledge_base_id = Column(
         Integer, ForeignKey("knowledge_bases.id"), nullable=False
     )
+    knowledge_base_name = Column(String(255), nullable=False)  # 冗余字段便于查询
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
     uploaded_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     # 处理状态
@@ -71,3 +73,4 @@ class Document(Base):
     # 关联关系
     knowledge_base = relationship("KnowledgeBase", back_populates="documents")
     uploader = relationship("User")
+    tenant = relationship("Tenant")

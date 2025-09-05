@@ -601,8 +601,16 @@ class WorkflowExecutionEngine:
         
         query_vector = embedding_response['embeddings'][0]
         
-        # 向量搜索
-        collection_name = f"tenant_1_{knowledge_base}"
+        # 获取租户ID（优先从全局上下文，其次从输入数据）
+        tenant_id = (
+            (context.global_context or {}).get("tenant_id")
+            or (context.input_data or {}).get("tenant_id")
+        )
+        if tenant_id is None:
+            raise RuntimeError("缺少租户ID，无法执行RAG检索节点")
+
+        # 向量搜索（按租户隔离集合）
+        collection_name = f"tenant_{tenant_id}_{knowledge_base}"
         results = await milvus_service.search(
             collection_name=collection_name,
             query_vector=query_vector,
@@ -819,6 +827,64 @@ class WorkflowExecutionEngine:
         else:
             raise RuntimeError(f"嵌入生成失败: {response.get('error', 'Unknown error')}")
     
+    async def _execute_parser_node(
+        self,
+        node: WorkflowNode,
+        input_data: Dict[str, Any],
+        context: WorkflowExecutionContext
+    ) -> Dict[str, Any]:
+        """执行解析节点"""
+        
+        config = node.config
+        text = input_data.get('text', '')
+        parser_type = config.get('parser_type', 'json')
+        
+        if parser_type == 'json':
+            # JSON解析
+            try:
+                parsed_data = json.loads(text)
+                return {
+                    'parsed_data': parsed_data,
+                    'parser_type': parser_type,
+                    'success': True
+                }
+            except json.JSONDecodeError as e:
+                return {
+                    'parsed_data': {},
+                    'parser_type': parser_type,
+                    'success': False,
+                    'error': f"JSON解析失败: {str(e)}"
+                }
+        elif parser_type == 'extract_fields':
+            # 字段提取
+            fields = config.get('fields', [])
+            patterns = config.get('patterns', {})
+            
+            extracted = {}
+            for field in fields:
+                if field in patterns:
+                    # 使用正则表达式提取
+                    import re
+                    pattern = patterns[field]
+                    match = re.search(pattern, text)
+                    extracted[field] = match.group(1) if match else None
+                else:
+                    # 简单字符串匹配
+                    extracted[field] = text if field in text.lower() else None
+            
+            return {
+                'parsed_data': extracted,
+                'parser_type': parser_type,
+                'success': True
+            }
+        else:
+            # 默认返回原始文本
+            return {
+                'parsed_data': {'content': text},
+                'parser_type': parser_type,
+                'success': True
+            }
+
     async def _execute_reranker_node(
         self,
         node: WorkflowNode,

@@ -3,7 +3,7 @@ Chat API Endpoints
 Handles regular and RAG-based chat completions, both streaming and non-streaming.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 import structlog
 import json
@@ -12,6 +12,8 @@ from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
 from app.services.langgraph_chat_service import langgraph_chat_service
 from app.services.reranking_service import reranking_service
+from app.core.dependencies import get_tenant_id, get_current_user
+from app.db.models.user import User
 
 # Use a single instance of the service
 chat_service = ChatService()
@@ -21,7 +23,11 @@ logger = structlog.get_logger(__name__)
 
 
 @router.post("/", response_model=ChatResponse)
-async def handle_chat(request: ChatRequest):
+async def handle_chat(
+    request: ChatRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """
     Main chat endpoint for non-streaming responses.
     Dispatches to RAG or standard chat based on the request.
@@ -34,12 +40,8 @@ async def handle_chat(request: ChatRequest):
         
         # Use LangGraph service for RAG chat if knowledge base is specified
         if request.knowledge_base_id:
-            # TODO: Get actual tenant_id and user_id from authentication context
-            tenant_id = 1  # Default tenant ID for now
-            user_id = 1    # Default user ID for now
-            
             logger.info("Using LangGraph RAG workflow for knowledge base chat")
-            response = await langgraph_chat_service.chat(request, tenant_id, user_id)
+            response = await langgraph_chat_service.chat(request, tenant_id, current_user.id)
         else:
             # Use original chat service for standard chat
             response = await chat_service.chat(request)
@@ -53,7 +55,11 @@ async def handle_chat(request: ChatRequest):
 
 
 @router.post("/stream")
-async def handle_stream_chat(request: ChatRequest):
+async def handle_stream_chat(
+    request: ChatRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """
     Chat endpoint for streaming responses.
     """
@@ -63,7 +69,7 @@ async def handle_stream_chat(request: ChatRequest):
             knowledge_base_id=request.knowledge_base_id,
         )
         return StreamingResponse(
-            chat_service.stream_chat(request), 
+            chat_service.stream_chat(request, tenant_id=tenant_id, user_id=current_user.id), 
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -130,7 +136,11 @@ async def execute_workflow(workflow_id: str, request: dict):
 
 
 @router.post("/rag", response_model=ChatResponse)
-async def handle_rag_chat(request: ChatRequest):
+async def handle_rag_chat(
+    request: ChatRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """
     专门用于RAG对话的LangGraph端点
     """
@@ -146,11 +156,7 @@ async def handle_rag_chat(request: ChatRequest):
             knowledge_base_id=request.knowledge_base_id,
         )
         
-        # TODO: Get actual tenant_id and user_id from authentication context
-        tenant_id = 1  # Default tenant ID for now
-        user_id = 1    # Default user ID for now
-        
-        response = await langgraph_chat_service.chat(request, tenant_id, user_id)
+        response = await langgraph_chat_service.chat(request, tenant_id, current_user.id)
         return response
         
     except HTTPException:

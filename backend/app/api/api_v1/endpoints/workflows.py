@@ -28,15 +28,13 @@ from app.services.workflow_execution_engine import workflow_execution_engine
 from app.services.workflow_error_handler import workflow_error_handler, RecoveryStrategy, RetryConfig, RecoveryAction, RetryStrategy
 from app.services.workflow_parallel_executor import workflow_parallel_executor
 from app.services.workflow_performance_monitor import workflow_performance_monitor, AlertRule, AlertSeverity
+from app.services.workflow_persistence_service import workflow_persistence_service
+from app.core.dependencies import get_tenant_id, get_current_user
+from app.db.models.user import User
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
-
-# 内存存储（生产环境应该使用数据库）
-workflows_db: Dict[str, WorkflowDefinition] = {}
-executions_db: Dict[str, List[WorkflowExecutionContext]] = {}
-templates_db: Dict[str, WorkflowTemplate] = {}
 
 
 class WorkflowCreateRequest(BaseModel):
@@ -87,8 +85,12 @@ class WorkflowTemplateSearchRequest(BaseModel):
     offset: int = 0
 
 
-@router.post("/workflows", response_model=Dict[str, Any])
-async def create_workflow(request: WorkflowCreateRequest):
+@router.post("/", response_model=Dict[str, Any])
+async def create_workflow(
+    request: WorkflowCreateRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
     """创建工作流"""
     try:
         # 转换前端数据到工作流定义
@@ -102,18 +104,21 @@ async def create_workflow(request: WorkflowCreateRequest):
                 detail=f"工作流验证失败: {validation.errors}"
             )
         
-        # 保存工作流
-        workflows_db[workflow_definition.id] = workflow_definition
-        executions_db[workflow_definition.id] = []
+        # 使用持久化服务保存工作流
+        workflow_id = workflow_persistence_service.save_workflow_definition(
+            workflow_definition, tenant_id, current_user.id
+        )
         
         logger.info(
             "工作流创建成功",
-            workflow_id=workflow_definition.id,
-            name=workflow_definition.name
+            workflow_id=workflow_id,
+            name=workflow_definition.name,
+            tenant_id=tenant_id,
+            user_id=current_user.id
         )
         
         return {
-            "id": workflow_definition.id,
+            "id": workflow_id,
             "name": workflow_definition.name,
             "description": workflow_definition.description,
             "created_at": datetime.now().isoformat(),
@@ -125,30 +130,18 @@ async def create_workflow(request: WorkflowCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/workflows", response_model=List[Dict[str, Any]])
-async def list_workflows():
+@router.get("/", response_model=List[Dict[str, Any]])
+async def list_workflows(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0
+):
     """获取工作流列表"""
     try:
-        workflows = []
-        for workflow_id, workflow_def in workflows_db.items():
-            executions = executions_db.get(workflow_id, [])
-            last_execution = executions[-1] if executions else None
-            
-            workflows.append({
-                "id": workflow_def.id,
-                "name": workflow_def.name,
-                "description": workflow_def.description,
-                "version": workflow_def.version,
-                "node_count": len(workflow_def.nodes),
-                "edge_count": len(workflow_def.edges),
-                "last_execution": {
-                    "id": last_execution.execution_id,
-                    "status": last_execution.status,
-                    "start_time": last_execution.start_time,
-                    "end_time": last_execution.end_time
-                } if last_execution else None,
-                "execution_count": len(executions)
-            })
+        workflows = workflow_persistence_service.list_workflow_definitions(
+            tenant_id, limit, offset
+        )
         
         return workflows
         
@@ -157,15 +150,21 @@ async def list_workflows():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/workflows/{workflow_id}", response_model=Dict[str, Any])
-async def get_workflow(workflow_id: str):
+@router.get("/{workflow_id}", response_model=Dict[str, Any])
+async def get_workflow(
+    workflow_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user)
+):
     """获取工作流详情"""
     try:
-        if workflow_id not in workflows_db:
+        workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
+        
+        if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
         
-        workflow_def = workflows_db[workflow_id]
-        executions = executions_db.get(workflow_id, [])
+        # 获取执行历史
+        executions = workflow_persistence_service.list_workflow_executions(workflow_id, tenant_id)
         
         return {
             "id": workflow_def.id,
@@ -186,45 +185,64 @@ async def get_workflow(workflow_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/workflows/{workflow_id}", response_model=Dict[str, Any])
-async def update_workflow(workflow_id: str, request: WorkflowUpdateRequest):
+@router.put("/{workflow_id}", response_model=Dict[str, Any])
+async def update_workflow(
+    workflow_id: str,
+    request: WorkflowUpdateRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """更新工作流"""
     try:
-        if workflow_id not in workflows_db:
+        # 获取现有定义
+        existing = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
+        if not existing:
             raise HTTPException(status_code=404, detail="工作流不存在")
-        
-        workflow_def = workflows_db[workflow_id]
-        
-        # 更新字段
+
+        # 构造更新字典
+        updates: Dict[str, Any] = {}
         if request.name is not None:
-            workflow_def.name = request.name
+            updates["name"] = request.name
         if request.description is not None:
-            workflow_def.description = request.description
+            updates["description"] = request.description
         if request.global_config is not None:
-            workflow_def.global_config = request.global_config
-        
-        # 更新节点和边
+            updates["global_config"] = request.global_config
         if request.nodes is not None:
-            workflow_def.nodes = await _convert_nodes(request.nodes)
+            nodes = await _convert_nodes(request.nodes)
+            updates["nodes"] = [n.dict() for n in nodes]
         if request.edges is not None:
-            workflow_def.edges = await _convert_edges(request.edges)
-        
-        # 重新验证工作流
-        validation = await workflow_execution_engine._validate_workflow(workflow_def)
-        if not validation.is_valid:
-            raise HTTPException(
-                status_code=400,
-                detail=f"工作流验证失败: {validation.errors}"
+            edges = await _convert_edges(request.edges)
+            updates["edges"] = [e.dict() for e in edges]
+
+        # 如果节点/边被更新，需要重新校验
+        if "nodes" in updates or "edges" in updates or "global_config" in updates:
+            new_def = WorkflowDefinition(
+                id=existing.id,
+                name=updates.get("name", existing.name),
+                description=updates.get("description", existing.description),
+                nodes=[WorkflowNode(**n) for n in (updates.get("nodes") or [node.dict() for node in existing.nodes])],
+                edges=[WorkflowEdge(**e) for e in (updates.get("edges") or [edge.dict() for edge in existing.edges])],
+                global_config=updates.get("global_config", existing.global_config),
+                version=existing.version,
+                metadata=existing.metadata,
             )
-        
-        logger.info("工作流更新成功", workflow_id=workflow_id)
-        
+            validation = await workflow_execution_engine._validate_workflow(new_def)
+            if not validation.is_valid:
+                raise HTTPException(status_code=400, detail=f"工作流验证失败: {validation.errors}")
+
+        ok = workflow_persistence_service.update_workflow_definition(workflow_id, tenant_id, updates)
+        if not ok:
+            raise HTTPException(status_code=500, detail="工作流更新失败")
+
+        logger.info("工作流更新成功", workflow_id=workflow_id, user_id=current_user.id)
+
+        updated = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
         return {
-            "id": workflow_def.id,
-            "name": workflow_def.name,
-            "description": workflow_def.description,
+            "id": updated.id,
+            "name": updated.name,
+            "description": updated.description,
             "updated_at": datetime.now().isoformat(),
-            "status": "updated"
+            "status": "updated",
         }
         
     except HTTPException:
@@ -234,19 +252,19 @@ async def update_workflow(workflow_id: str, request: WorkflowUpdateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/workflows/{workflow_id}")
-async def delete_workflow(workflow_id: str):
+@router.delete("/{workflow_id}")
+async def delete_workflow(
+    workflow_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """删除工作流"""
     try:
-        if workflow_id not in workflows_db:
+        ok = workflow_persistence_service.delete_workflow_definition(workflow_id, tenant_id)
+        if not ok:
             raise HTTPException(status_code=404, detail="工作流不存在")
-        
-        del workflows_db[workflow_id]
-        if workflow_id in executions_db:
-            del executions_db[workflow_id]
-        
-        logger.info("工作流删除成功", workflow_id=workflow_id)
-        
+
+        logger.info("工作流删除成功", workflow_id=workflow_id, user_id=current_user.id)
         return {"message": "工作流删除成功"}
         
     except HTTPException:
@@ -256,31 +274,37 @@ async def delete_workflow(workflow_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/workflows/{workflow_id}/execute", response_model=Dict[str, Any])
+@router.post("/{workflow_id}/execute", response_model=Dict[str, Any])
 async def execute_workflow(
     workflow_id: str,
     request: WorkflowExecuteRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
     """执行工作流"""
     try:
-        if workflow_id not in workflows_db:
+        workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
+        if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
         
-        workflow_def = workflows_db[workflow_id]
-        
         # 后台执行工作流
+        # 注入租户/用户上下文信息
+        input_data = dict(request.input_data or {})
+        input_data.setdefault("tenant_id", tenant_id)
+        input_data.setdefault("user_id", current_user.id)
+
         execution_context = await workflow_execution_engine.execute_workflow(
             workflow_definition=workflow_def,
-            input_data=request.input_data,
+            input_data=input_data,
             debug=request.debug,
             enable_parallel=request.enable_parallel
         )
         
         # 保存执行记录
-        if workflow_id not in executions_db:
-            executions_db[workflow_id] = []
-        executions_db[workflow_id].append(execution_context)
+        workflow_persistence_service.save_workflow_execution(
+            execution_context, tenant_id, current_user.id
+        )
         
         logger.info(
             "工作流执行完成",
@@ -317,24 +341,30 @@ async def execute_workflow(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/workflows/{workflow_id}/execute/stream")
+@router.post("/{workflow_id}/execute/stream")
 async def execute_workflow_stream(
     workflow_id: str,
-    request: WorkflowExecuteRequest
+    request: WorkflowExecuteRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
 ):
     """流式执行工作流"""
     try:
-        if workflow_id not in workflows_db:
+        workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
+        if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
-        
-        workflow_def = workflows_db[workflow_id]
         
         async def stream_execution():
             try:
                 # 创建执行上下文
+                # 注入租户/用户上下文信息
+                input_data = dict(request.input_data or {})
+                input_data.setdefault("tenant_id", tenant_id)
+                input_data.setdefault("user_id", current_user.id)
+
                 execution_context = await workflow_execution_engine.execute_workflow(
                     workflow_definition=workflow_def,
-                    input_data=request.input_data,
+                    input_data=input_data,
                     debug=request.debug,
                     enable_parallel=request.enable_parallel
                 )
@@ -380,9 +410,9 @@ async def execute_workflow_stream(
                 yield "data: [DONE]\n\n"
                 
                 # 保存执行记录
-                if workflow_id not in executions_db:
-                    executions_db[workflow_id] = []
-                executions_db[workflow_id].append(execution_context)
+                workflow_persistence_service.save_workflow_execution(
+                    execution_context, tenant_id, current_user.id
+                )
                 
             except Exception as e:
                 error_data = {
@@ -411,32 +441,32 @@ async def execute_workflow_stream(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/workflows/{workflow_id}/executions", response_model=List[Dict[str, Any]])
-async def get_execution_history(workflow_id: str):
-    """获取执行历史"""
+@router.get("/{workflow_id}/executions", response_model=Dict[str, Any])
+async def get_execution_history(
+    workflow_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    limit: int = 20,
+    offset: int = 0
+):
+    """获取执行历史（分页）"""
     try:
-        if workflow_id not in workflows_db:
+        # 验证工作流是否存在
+        workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
+        if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
         
-        executions = executions_db.get(workflow_id, [])
+        executions = workflow_persistence_service.list_workflow_executions(
+            workflow_id, tenant_id, limit, offset
+        )
         
-        return [
-            {
-                "execution_id": exec_ctx.execution_id,
-                "status": exec_ctx.status,
-                "start_time": exec_ctx.start_time,
-                "end_time": exec_ctx.end_time,
-                "duration": (exec_ctx.end_time - exec_ctx.start_time) if exec_ctx.end_time else None,
-                "error": exec_ctx.error,
-                "steps_count": len(exec_ctx.steps),
-                "success_steps": len([s for s in exec_ctx.steps if s.status == "completed"]),
-                "failed_steps": len([s for s in exec_ctx.steps if s.status == "error"]),
-                "recovered_steps": len([s for s in exec_ctx.steps if s.status == "recovered"]),
-                "ignored_steps": len([s for s in exec_ctx.steps if s.status == "ignored"]),
-                "metrics": exec_ctx.metrics
-            }
-            for exec_ctx in reversed(executions)  # 最新的在前面
-        ]
+        return {
+            "executions": executions,
+            "total": len(executions),  # TODO: 实现真正的总数统计
+            "limit": limit,
+            "offset": offset,
+            "workflow_id": workflow_id
+        }
         
     except HTTPException:
         raise
@@ -445,13 +475,50 @@ async def get_execution_history(workflow_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/workflows/{workflow_id}/executions/{execution_id}/stop")
-async def stop_execution(workflow_id: str, execution_id: str):
+@router.get("/executions", response_model=Dict[str, Any])
+async def get_execution_history_paginated(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    workflow_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0
+):
+    """获取分页的执行历史记录"""
+    try:
+        executions, total = workflow_persistence_service.get_execution_history_paginated(
+            tenant_id=tenant_id,
+            workflow_id=workflow_id,
+            status=status,
+            limit=limit,
+            offset=offset
+        )
+        
+        return {
+            "executions": executions,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "workflow_id": workflow_id,
+                "status": status
+            }
+        }
+        
+    except Exception as e:
+        logger.error("获取分页执行历史失败", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{workflow_id}/executions/{execution_id}/stop")
+async def stop_execution(
+    workflow_id: str,
+    execution_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """停止工作流执行"""
     try:
-        if workflow_id not in workflows_db:
-            raise HTTPException(status_code=404, detail="工作流不存在")
-        
         success = await workflow_execution_engine.stop_execution(execution_id)
         
         if success:
@@ -466,7 +533,7 @@ async def stop_execution(workflow_id: str, execution_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/workflows/validate", response_model=Dict[str, Any])
+@router.post("/validate", response_model=Dict[str, Any])
 async def validate_workflow(request: WorkflowCreateRequest):
     """验证工作流定义"""
     try:
@@ -485,7 +552,7 @@ async def validate_workflow(request: WorkflowCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/workflows/generate-code", response_model=Dict[str, Any])
+@router.post("/generate-code", response_model=Dict[str, Any])
 async def generate_workflow_code(request: WorkflowCreateRequest):
     """生成工作流代码"""
     try:
@@ -1094,13 +1161,15 @@ async def reset_parallel_cache():
 
 
 @router.get("/workflow-optimization-analysis/{workflow_id}")
-async def analyze_workflow_optimization(workflow_id: str):
+async def analyze_workflow_optimization(
+    workflow_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+):
     """分析工作流优化潜力"""
     try:
-        if workflow_id not in workflows_db:
+        workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
+        if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
-        
-        workflow_def = workflows_db[workflow_id]
         
         # 分析工作流结构
         analysis = {

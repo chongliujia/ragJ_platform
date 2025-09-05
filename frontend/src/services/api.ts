@@ -1,7 +1,13 @@
 import axios from 'axios';
 
 // 配置 axios 默认设置
-const API_BASE_URL = 'http://localhost:8000';
+// 使用环境变量以便在不同环境（本地、Docker、生产）下正确指向后端
+// 在开发环境（vite dev）下一律走 Vite 代理：baseURL 置空，所有请求使用相对路径 `/api/...`
+// 在生产环境（build 后部署）才读取 VITE_BACKEND_URL
+const isViteDev = !!(import.meta as any).hot || (import.meta as any).env?.DEV;
+const isLocalDevHost = typeof window !== 'undefined' && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+const isDev = isViteDev || isLocalDevHost;
+const API_BASE_URL = isDev ? '' : ((import.meta as any).env?.VITE_BACKEND_URL || '');
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -11,10 +17,19 @@ const api = axios.create({
   },
 });
 
+// 保险：在本地开发时强制使用相对路径，确保走 Vite 代理
+if (isDev) {
+  api.defaults.baseURL = '';
+}
+
 // 请求拦截器
 api.interceptors.request.use(
   (config) => {
-    // 可以在这里添加认证 token 等
+    // 开发模式强制相对路径，避免任何遗留 baseURL 导致 backend:8000 直连
+    if (isDev) {
+      config.baseURL = '';
+    }
+    // 可以在这里添加认证 token 等（已由 AuthManager 统一设置）
     return config;
   },
   (error) => {
@@ -36,12 +51,12 @@ api.interceptors.response.use(
 
 // 知识库相关 API
 export const knowledgeBaseApi = {
-  // 获取知识库列表
-  getList: () => api.get('/api/v1/knowledge-bases'),
+  // 获取知识库列表（带结尾斜杠，避免 307 重定向导致浏览器跳到不可解析的主机名）
+  getList: () => api.get('/api/v1/knowledge-bases/'),
   
   // 创建知识库
   create: (data: { name: string; description?: string }) => 
-    api.post('/api/v1/knowledge-bases', data),
+    api.post('/api/v1/knowledge-bases/', data),
   
   // 删除知识库
   delete: (id: string) => api.delete(`/api/v1/knowledge-bases/${id}`),
@@ -64,10 +79,12 @@ export const chatApi = {
     onComplete: () => void
   ) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
       const response = await fetch(`${API_BASE_URL}/api/v1/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(data),
       });
@@ -128,16 +145,11 @@ export const documentApi = {
   getList: (knowledgeBaseId: string) => 
     api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`),
   
-  // 上传文档 - 修复API路径，后端使用 /api/v1/documents/ 而不是 knowledge-bases 子路径
-  upload: (knowledgeBaseId: string, formData: FormData) => {
-    // 后端API需要 kb_name 参数，将其添加到FormData中
-    formData.append('kb_name', knowledgeBaseId);
-    return api.post('/api/v1/documents/', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-  },
+  // 上传文档（使用嵌套路由，避免额外参数解析不一致）
+  upload: (knowledgeBaseId: string, formData: FormData) => 
+    api.post(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
   
   // 删除文档
   delete: (knowledgeBaseId: string, documentId: string) => 
@@ -217,10 +229,10 @@ export const workflowApi = {
     nodes: any[]; 
     edges: any[]; 
     config?: any; 
-  }) => api.post('/api/v1/workflows', data),
+  }) => api.post('/api/v1/workflows/', data),
   
   // 获取工作流列表
-  getList: () => api.get('/api/v1/workflows'),
+  getList: () => api.get('/api/v1/workflows/'),
   
   // 获取工作流详情
   getDetail: (id: string) => api.get(`/api/v1/workflows/${id}`),
@@ -253,10 +265,12 @@ export const workflowApi = {
     onComplete: (result: any) => void
   ) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
       const response = await fetch(`${API_BASE_URL}/api/v1/workflows/${id}/execute/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(data),
       });
@@ -326,6 +340,15 @@ export const workflowApi = {
   // 生成LangGraph代码
   generateCode: (data: { nodes: any[]; edges: any[] }) => 
     api.post('/api/v1/workflows/generate-code', data),
+
+  // 获取工作流模板列表
+  getTemplates: () => api.get('/api/v1/workflows/templates'),
+
+  // 使用模板创建工作流
+  useTemplate: (templateId: string, workflowName?: string) =>
+    api.post(`/api/v1/workflows/templates/${templateId}/use`, null, {
+      params: workflowName ? { workflow_name: workflowName } : undefined,
+    }),
   
   // 保存代码
   saveCode: (id: string, data: { code: string; language: string }) =>
@@ -377,10 +400,12 @@ export const agentApi = {
     onComplete: () => void
   ) => {
     try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
       const response = await fetch(`${API_BASE_URL}/api/v1/agents/${id}/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(data),
       });
