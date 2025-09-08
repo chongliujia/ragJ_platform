@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import json
 import asyncio
+import uuid
 from datetime import datetime
 import structlog
 
@@ -369,6 +370,43 @@ async def execute_workflow_stream(
                     enable_parallel=request.enable_parallel
                 )
                 
+                # 从步骤中提取最终输出
+                final_output = {}
+                if execution_context.steps:
+                    logger.info(f"处理执行步骤，总数: {len(execution_context.steps)}")
+                    
+                    # 从最后一个输出节点或LLM节点提取结果
+                    for step in reversed(execution_context.steps):
+                        logger.info(f"检查步骤: {step.node_name}, 输出数据: {step.output_data}")
+                        if step.output_data:
+                            # 检查输出节点
+                            if step.node_name in ['输出', 'Output', 'output'] and step.output_data.get('result'):
+                                result_data = step.output_data.get('result', {})
+                                if isinstance(result_data, dict):
+                                    final_output = result_data
+                                    logger.info(f"从输出节点提取结果: {final_output}")
+                                    break
+                            # 检查LLM节点
+                            elif 'LLM' in step.node_name and step.output_data.get('content'):
+                                final_output = step.output_data
+                                logger.info(f"从LLM节点提取结果: {final_output}")
+                                break
+                    
+                    # 如果没有找到特定的输出，使用最后一个非空输出
+                    if not final_output:
+                        logger.info("未找到特定输出，查找最后一个非空输出")
+                        for step in reversed(execution_context.steps):
+                            if step.output_data and isinstance(step.output_data, dict):
+                                if step.output_data.get('content') or step.output_data.get('result'):
+                                    final_output = step.output_data
+                                    logger.info(f"使用最后一个非空输出: {final_output}")
+                                    break
+                
+                logger.info(f"最终输出数据: {final_output}")
+                
+                # 更新执行上下文的输出数据
+                execution_context.output_data = final_output
+                
                 # 流式返回执行状态
                 for i, step in enumerate(execution_context.steps):
                     progress_data = {
@@ -400,21 +438,27 @@ async def execute_workflow_stream(
                     "result": {
                         "execution_id": execution_context.execution_id,
                         "status": execution_context.status,
-                        "output_data": execution_context.output_data,
+                        "output_data": final_output,
                         "error": execution_context.error,
                         "metrics": execution_context.metrics
                     }
                 }
                 
+                logger.info(f"发送完成事件: {final_result}")
                 yield f"data: {json.dumps(final_result)}\n\n"
+                logger.info("发送 [DONE] 事件")
                 yield "data: [DONE]\n\n"
                 
                 # 保存执行记录
-                workflow_persistence_service.save_workflow_execution(
-                    execution_context, tenant_id, current_user.id
-                )
+                try:
+                    workflow_persistence_service.save_workflow_execution(
+                        execution_context, tenant_id, current_user.id
+                    )
+                except Exception as save_error:
+                    logger.error("保存执行记录失败", error=str(save_error))
                 
             except Exception as e:
+                logger.error("流式工作流执行异常", error=str(e), exc_info=True)
                 error_data = {
                     "type": "error",
                     "error": {
@@ -430,7 +474,11 @@ async def execute_workflow_stream(
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
-                "Connection": "keep-alive"
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                "X-Accel-Buffering": "no"  # 防止nginx缓冲
             }
         )
         
@@ -530,6 +578,69 @@ async def stop_execution(
         raise
     except Exception as e:
         logger.error("停止执行失败", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{workflow_id}/executions/{execution_id}/steps/{node_id}/retry", response_model=Dict[str, Any])
+async def retry_execution_step(
+    workflow_id: str,
+    execution_id: str,
+    node_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """从指定节点及其下游重新执行（单步重试）。"""
+    try:
+        # 获取工作流与基线执行
+        workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
+        if not workflow_def:
+            raise HTTPException(status_code=404, detail="工作流不存在")
+
+        base_execution = workflow_persistence_service.get_workflow_execution(execution_id, tenant_id)
+        if not base_execution:
+            raise HTTPException(status_code=404, detail="基线执行不存在")
+        if base_execution.workflow_id != workflow_id:
+            raise HTTPException(status_code=400, detail="执行与工作流ID不匹配")
+
+        # 执行部分重试
+        new_context = await workflow_execution_engine.retry_from_node(
+            workflow_definition=workflow_def,
+            base_execution=base_execution,
+            start_node_id=node_id,
+            debug=False,
+        )
+
+        # 持久化此次重试执行
+        workflow_persistence_service.save_workflow_execution(
+            new_context, tenant_id, current_user.id
+        )
+
+        return {
+            "execution_id": new_context.execution_id,
+            "status": new_context.status,
+            "start_time": new_context.start_time,
+            "end_time": new_context.end_time,
+            "output_data": new_context.output_data,
+            "error": new_context.error,
+            "steps": [
+                {
+                    "step_id": s.step_id,
+                    "node_id": s.node_id,
+                    "node_name": s.node_name,
+                    "status": s.status,
+                    "duration": s.duration,
+                    "error": s.error,
+                    "input": s.input_data,
+                    "output": s.output_data,
+                }
+                for s in new_context.steps
+            ],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("单步重试失败", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -732,6 +843,33 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                 )
             ]
         ),
+        'parser': NodeFunctionSignature(
+            name="parse_text",
+            description="解析文本为结构化数据",
+            category="parser",
+            inputs=[
+                NodeInputSchema(
+                    name="text",
+                    type=DataType.STRING,
+                    description="待解析文本",
+                    required=True
+                )
+            ],
+            outputs=[
+                NodeOutputSchema(
+                    name="parsed_data",
+                    type=DataType.OBJECT,
+                    description="解析后的数据",
+                    required=True
+                ),
+                NodeOutputSchema(
+                    name="success",
+                    type=DataType.BOOLEAN,
+                    description="是否解析成功",
+                    required=True
+                )
+            ]
+        ),
         'rag_retriever': NodeFunctionSignature(
             name="rag_retrieve",
             description="从知识库检索相关文档",
@@ -750,6 +888,27 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     type=DataType.ARRAY,
                     description="检索到的文档",
                     required=True
+                )
+            ]
+        ),
+        'data_transformer': NodeFunctionSignature(
+            name="data_transform",
+            description="对输入数据进行转换或提取",
+            category="transform",
+            inputs=[
+                NodeInputSchema(
+                    name="data",
+                    type=DataType.OBJECT,
+                    description="输入数据对象",
+                    required=True
+                )
+            ],
+            outputs=[
+                NodeOutputSchema(
+                    name="json_output",
+                    type=DataType.STRING,
+                    description="JSON字符串输出",
+                    required=False
                 )
             ]
         ),
@@ -777,6 +936,33 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     type=DataType.NUMBER,
                     description="置信度",
                     required=True
+                )
+            ]
+        ),
+        'code_executor': NodeFunctionSignature(
+            name="execute_code",
+            description="执行用户代码以变换数据",
+            category="code",
+            inputs=[
+                NodeInputSchema(
+                    name="data",
+                    type=DataType.OBJECT,
+                    description="输入数据对象",
+                    required=True
+                )
+            ],
+            outputs=[
+                NodeOutputSchema(
+                    name="result",
+                    type=DataType.OBJECT,
+                    description="执行结果",
+                    required=False
+                ),
+                NodeOutputSchema(
+                    name="execution_output",
+                    type=DataType.STRING,
+                    description="执行输出/状态",
+                    required=False
                 )
             ]
         ),
@@ -835,7 +1021,61 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     required=True
                 )
             ]
-        )
+        ),
+        'embeddings': NodeFunctionSignature(
+            name="generate_embeddings",
+            description="生成文本嵌入向量",
+            category="ai",
+            inputs=[
+                NodeInputSchema(
+                    name="text",
+                    type=DataType.STRING,
+                    description="待嵌入的文本",
+                    required=True
+                )
+            ],
+            outputs=[
+                NodeOutputSchema(
+                    name="embedding",
+                    type=DataType.ARRAY,
+                    description="向量表示",
+                    required=True
+                ),
+                NodeOutputSchema(
+                    name="dimensions",
+                    type=DataType.NUMBER,
+                    description="向量维度",
+                    required=False
+                )
+            ]
+        ),
+        'reranker': NodeFunctionSignature(
+            name="rerank_documents",
+            description="对文档集合进行重排序",
+            category="ai",
+            inputs=[
+                NodeInputSchema(
+                    name="query",
+                    type=DataType.STRING,
+                    description="查询文本",
+                    required=True
+                ),
+                NodeInputSchema(
+                    name="documents",
+                    type=DataType.ARRAY,
+                    description="待重排文档",
+                    required=True
+                )
+            ],
+            outputs=[
+                NodeOutputSchema(
+                    name="reranked_documents",
+                    type=DataType.ARRAY,
+                    description="重排后的文档",
+                    required=True
+                )
+            ]
+        ),
     }
     
     return signatures.get(node_type, NodeFunctionSignature(

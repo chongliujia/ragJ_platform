@@ -42,6 +42,8 @@ const EnhancedEdge: React.FC<EdgeProps<EnhancedEdgeData>> = ({
   data,
   selected,
   markerEnd,
+  sourceHandle,
+  targetHandle,
 }) => {
   const { setEdges } = useReactFlow();
   const [isHovered, setIsHovered] = useState(false);
@@ -171,12 +173,20 @@ const EnhancedEdge: React.FC<EdgeProps<EnhancedEdgeData>> = ({
             }}
           />
 
-          {/* 边标签 */}
-          {data?.label && (
-            <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>
-              {data.label}
-            </Typography>
-          )}
+          {/* 边标签：源输出 → 目标输入 */}
+          {(() => {
+            const labelMode = (data as any)?.labelMode || 'always';
+            const show = labelMode === 'always' || isHovered || selected;
+            if (!show) return null;
+            const src = sourceHandle || 'output';
+            const tgt = targetHandle || 'input';
+            const text = (data?.label as any) || `${src} → ${tgt}`;
+            return (
+              <Typography variant="caption" sx={{ fontSize: '0.65rem' }}>
+                {text}
+              </Typography>
+            );
+          })()}
 
           {/* 性能指标 */}
           {data?.dataFlow && (

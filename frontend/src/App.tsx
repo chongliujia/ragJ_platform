@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
-import { CssBaseline, Box, Typography, useMediaQuery } from '@mui/material';
+import { CssBaseline, Box, Typography } from '@mui/material';
 import './i18n';
-import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
 import AuthGuard from './components/AuthGuard';
 import Login from './pages/Login';
@@ -313,21 +312,7 @@ const theme = createTheme({
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const authManager = AuthManager.getInstance();
-  const isMobile = useMediaQuery('(max-width:768px)');
-  const isTablet = useMediaQuery('(max-width:1024px)');
-
-  // 根据屏幕尺寸自动调整侧边栏状态
-  useEffect(() => {
-    if (isMobile) {
-      setSidebarOpen(false);
-    } else if (isTablet) {
-      setSidebarOpen(false);
-    } else {
-      setSidebarOpen(true);
-    }
-  }, [isMobile, isTablet]);
 
   useEffect(() => {
     // 检查认证状态
@@ -427,7 +412,7 @@ function App() {
                   width: '100%',
                   height: '100%',
                   '&::before': {
-                    content: '\"\"',
+                    content: '""',
                     position: 'absolute',
                     top: -2,
                     left: -2,
@@ -470,32 +455,29 @@ function App() {
             path="/*"
             element={
               <AuthGuard>
-                <Box sx={{ display: 'flex' }}>
-                  <TopBar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
-                  <Sidebar open={sidebarOpen} onToggle={() => setSidebarOpen(!sidebarOpen)} />
+                <Box sx={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  height: '100vh',
+                  maxHeight: '100vh',
+                  overflow: 'hidden'
+                }}>
+                  {/* 顶部导航栏 */}
+                  <TopBar />
+                  
+                  {/* 主内容区域 */}
                   <Box
                     component="main"
                     sx={{
                       flexGrow: 1,
-                      p: { xs: 1, sm: 2, md: 3 },
-                      pt: { xs: 9, sm: 3 }, // 移动设备需要为顶部导航栏留出空间
-                      width: {
-                        xs: '100%',
-                        sm: sidebarOpen ? `calc(100% - 240px)` : `calc(100% - 64px)`,
-                      },
-                      ml: {
-                        xs: 0,
-                        sm: sidebarOpen ? '240px' : '64px',
-                      },
-                      minHeight: '100vh',
+                      height: 'calc(100vh - 64px)', // 减去TopBar高度
+                      overflow: 'auto',
                       backgroundColor: 'background.default',
-                      transition: 'all 0.3s ease-in-out',
+                      p: { xs: 1, sm: 2, md: 3 },
                       // 针对移动设备优化
                       '@media (max-width: 768px)': {
                         p: 1,
-                        pt: 9, // 为顶部导航栏留出空间
-                        ml: 0,
-                        width: '100%',
+                        height: 'calc(100vh - 56px)', // 移动端TopBar可能更小
                       },
                       // 针对平板设备优化
                       '@media (min-width: 769px) and (max-width: 1024px)': {

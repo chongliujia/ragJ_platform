@@ -185,7 +185,7 @@ const LangGraphNodeBase: React.FC<LangGraphNodeProps> = ({
           <Handle
             type="target"
             position={Position.Left}
-            id={`input-${index}`}
+            id={input.name}
             style={{
               background: `linear-gradient(45deg, #ffffff 0%, ${theme.accentColor} 100%)`,
               border: `2px solid ${getTypeColor(input.type)}`,
@@ -240,7 +240,7 @@ const LangGraphNodeBase: React.FC<LangGraphNodeProps> = ({
           <Handle
             type="source"
             position={Position.Right}
-            id={`output-${index}`}
+            id={output.name}
             style={{
               background: `linear-gradient(45deg, ${theme.accentColor} 0%, #ffffff 100%)`,
               border: `2px solid ${getTypeColor(output.type)}`,

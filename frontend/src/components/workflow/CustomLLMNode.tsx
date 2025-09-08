@@ -30,9 +30,10 @@ import {
   Description as PromptIcon,
 } from '@mui/icons-material';
 import type { NodeProps } from 'reactflow';
+import { useEffect } from 'react';
 import LangGraphNodeBase from './LangGraphNodeBase';
 
-// 函数签名定义
+// 函数签名定义 - 简化版本
 const llmFunctionSignature = {
   name: 'llm_chat_completion',
   description: '调用大语言模型进行文本生成和对话',
@@ -45,13 +46,6 @@ const llmFunctionSignature = {
       required: true,
       example: '请帮我写一个关于AI的故事',
     },
-    {
-      name: 'system_prompt',
-      type: 'string' as const,
-      description: '系统提示词，定义AI的角色和行为',
-      required: false,
-      example: '你是一个有用的AI助手，擅长创意写作。',
-    },
   ],
   outputs: [
     {
@@ -60,13 +54,6 @@ const llmFunctionSignature = {
       description: '生成的文本内容',
       required: true,
       example: '这是一个关于AI的精彩故事...',
-    },
-    {
-      name: 'metadata',
-      type: 'object' as const,
-      description: '包含token使用、模型信息等元数据',
-      required: true,
-      example: '{"tokens_used": 256, "model": "qwen-turbo"}',
     },
   ],
 };
@@ -103,28 +90,32 @@ const defaultFunctionCode = `async function llm_chat_completion(inputs) {
   // 构建完整的提示
   const full_prompt = system_prompt + "\\n\\n用户: " + prompt;
   
-  // 调用LLM API (这里是模拟调用)
+  // 调用后端测试接口（代理到 /api/v1/test/llm/chat）
   const startTime = Date.now();
   
   try {
-    const response = await fetch('/api/llm/chat', {
+    const response = await fetch('/api/v1/test/llm/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        prompt: full_prompt,
+        message: full_prompt,
+        model,
         temperature,
-        max_tokens,
-        model
+        max_tokens
       })
     });
     
+    if (!response.ok) {
+      const txt = await response.text().catch(() => '');
+      throw new Error('HTTP ' + response.status + (txt ? ': ' + txt : ''));
+    }
     const result = await response.json();
     const endTime = Date.now();
     
     return {
-      content: result.content,
-      tokens_used: result.usage.total_tokens,
-      finish_reason: result.finish_reason,
+      content: result?.response?.message || result?.response?.content || '',
+      tokens_used: result?.response?.usage?.total_tokens || 0,
+      finish_reason: result?.response?.finish_reason || 'stop',
       model_info: {
         model: model,
         temperature: temperature,
@@ -136,7 +127,7 @@ const defaultFunctionCode = `async function llm_chat_completion(inputs) {
   }
 }`;
 
-const CustomLLMNode: React.FC<NodeProps<CustomLLMNodeData>> = ({ data, selected }) => {
+const CustomLLMNode: React.FC<NodeProps<CustomLLMNodeData>> = ({ id, data, selected }) => {
   const [configOpen, setConfigOpen] = useState(false);
   const [codeEditorOpen, setCodeEditorOpen] = useState(false);
   const [config, setConfig] = useState(data.config || {});
@@ -144,6 +135,13 @@ const CustomLLMNode: React.FC<NodeProps<CustomLLMNodeData>> = ({ data, selected 
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionTime, setExecutionTime] = useState<number>();
   const [memoryUsage, setMemoryUsage] = useState<number>();
+
+  // 同步data.config的变化到本地状态
+  useEffect(() => {
+    if (data.config) {
+      setConfig(data.config);
+    }
+  }, [data.config]);
 
   const modelOptions = [
     { value: 'qwen-turbo', label: 'Qwen Turbo', cost: 0.001 },
@@ -166,22 +164,57 @@ const CustomLLMNode: React.FC<NodeProps<CustomLLMNodeData>> = ({ data, selected 
   const handleExecute = async () => {
     setIsExecuting(true);
     const startTime = Date.now();
-    
-    // 模拟函数执行
-    setTimeout(() => {
+
+    try {
+      // 读取必要参数（优先用右侧面板“测试输入”的覆盖值）
+      const cfg = data?.config || {} as any;
+      const overrides = (cfg.overrides || {}) as any;
+      const prompt: string = overrides.prompt || cfg.user_prompt || '请用一句话介绍这个系统';
+      const system_prompt: string = overrides.system_prompt || cfg.system_prompt || '你是一个有用的AI助手';
+      const model: string = cfg.model || 'qwen-turbo';
+      const temperature: number = typeof cfg.temperature === 'number' ? cfg.temperature : 0.7;
+      const max_tokens: number = typeof cfg.max_tokens === 'number' ? cfg.max_tokens : 1000;
+
+      const fullPrompt = `${system_prompt}\n\n用户: ${prompt}`;
+
+      const res = await fetch('/api/v1/test/llm/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: fullPrompt,
+          model,
+          temperature,
+          max_tokens,
+        }),
+      });
+
       const endTime = Date.now();
       setExecutionTime(endTime - startTime);
       setMemoryUsage(Math.random() * 50 + 10);
-      
-      // 更新性能数据
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => '');
+        data.status = 'error';
+        setIsExecuting(false);
+        console.error('LLM 测试失败:', res.status, txt);
+        return;
+      }
+
+      const json = await res.json();
+      const usage = json?.response?.usage?.total_tokens || 0;
+      // 更新性能数据与状态
       data.performance = {
         latency: endTime - startTime,
-        tokens_used: Math.floor(Math.random() * 1000 + 100),
+        tokens_used: usage,
         cost: Math.random() * 0.01 + 0.001,
       };
       data.status = 'success';
+    } catch (e) {
+      console.error('LLM 测试异常:', e);
+      data.status = 'error';
+    } finally {
       setIsExecuting(false);
-    }, 2000);
+    }
   };
 
   const getTemperatureColor = (temp: number) => {
@@ -196,70 +229,60 @@ const CustomLLMNode: React.FC<NodeProps<CustomLLMNodeData>> = ({ data, selected 
     return '创意';
   };
 
-  // 渲染节点内容
+  // 允许从全局配置抽屉触发自定义函数代码编辑
+  useEffect(() => {
+    const handler = (e: any) => {
+      const nodeId = e?.detail?.nodeId as string | undefined;
+      if (nodeId === id) setCodeEditorOpen(true);
+    };
+    window.addEventListener('open-node-function-code', handler as any);
+    return () => window.removeEventListener('open-node-function-code', handler as any);
+  }, [id]);
+
+  // 渲染节点内容 - 简化版本
   const renderNodeContent = () => (
     <Box>
-      <Grid container spacing={1} sx={{ mb: 1 }}>
-        <Grid item xs={12}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <AIIcon sx={{ mr: 1, fontSize: '1rem', color: '#00d4ff' }} />
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-              {config.model || 'qwen-turbo'}
-            </Typography>
-          </Box>
-        </Grid>
-        <Grid item xs={6}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <SpeedIcon sx={{ mr: 0.5, fontSize: '0.8rem', color: getTemperatureColor(config.temperature || 0.7) }} />
-            <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-              {getTemperatureLabel(config.temperature || 0.7)}
-            </Typography>
-          </Box>
-        </Grid>
-        <Grid item xs={6}>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <TokenIcon sx={{ mr: 0.5, fontSize: '0.8rem', color: '#4caf50' }} />
-            <Typography variant="caption" sx={{ fontSize: '0.7rem' }}>
-              {config.max_tokens || 1000}
-            </Typography>
-          </Box>
-        </Grid>
-      </Grid>
-
-      {/* 函数状态标签 */}
+      {/* 显示模型名称 */}
+      <Typography variant="body2" sx={{ opacity: 0.9, mb: 0.5 }}>
+        {config.model || '请选择模型'}
+      </Typography>
+      
+      {/* 状态标签 */}
       <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
-        <Chip
-          label="可编程"
-          size="small"
-          sx={{
-            backgroundColor: 'rgba(76, 175, 80, 0.2)',
-            color: '#4caf50',
-            fontSize: '0.6rem',
-            height: 20,
-          }}
-        />
-        {config.system_prompt && (
+        {!config.model && (
           <Chip
-            label="系统提示"
+            label="未配置"
             size="small"
-            icon={<PromptIcon />}
             sx={{
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              backgroundColor: 'rgba(255, 152, 0, 0.3)',
               color: 'white',
-              fontSize: '0.6rem',
-              height: 20,
+              fontSize: '0.7rem',
+              height: '20px'
             }}
           />
         )}
-        {data.functionCode && (
+        {config.system_prompt && (
           <Chip
-            label="自定义代码"
+            label="自定义提示"
             size="small"
             sx={{
-              backgroundColor: 'rgba(255, 152, 0, 0.2)',
-              color: '#ff9800',
-              fontSize: '0.6rem',
-              height: 20,
+              backgroundColor: 'rgba(76, 175, 80, 0.3)',
+              color: 'white',
+              fontSize: '0.7rem',
+              height: '20px'
+            }}
+          />
+        )}
+        {(config.temperature && config.temperature !== 0.7) && (
+          <Chip
+            label={`创造性: ${config.temperature}`}
+            size="small"
+            sx={{
+              backgroundColor: 'rgba(255, 193, 7, 0.3)',
+              color: 'white',
+              fontSize: '0.7rem',
+              height: '20px',
+              ml: 0.5
             }}
           />
         )}
@@ -279,7 +302,7 @@ const CustomLLMNode: React.FC<NodeProps<CustomLLMNodeData>> = ({ data, selected 
             }} 
           />
           <Typography variant="caption" sx={{ fontSize: '0.6rem', opacity: 0.7 }}>
-            正在执行自定义函数...
+            正在执行...
           </Typography>
         </Box>
       )}
@@ -295,132 +318,13 @@ const CustomLLMNode: React.FC<NodeProps<CustomLLMNodeData>> = ({ data, selected 
         status={isExecuting ? 'running' : data.status}
         executionTime={executionTime}
         memoryUsage={memoryUsage}
-        onConfigClick={() => setConfigOpen(true)}
+        onConfigClick={() => { try { window.dispatchEvent(new CustomEvent('open-node-config', { detail: { nodeId: id } } as any)); } catch {} }}
         onExecuteClick={handleExecute}
       >
         {renderNodeContent()}
       </LangGraphNodeBase>
 
-      {/* 配置对话框 */}
-      <Dialog
-        open={configOpen}
-        onClose={() => setConfigOpen(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{
-          sx: {
-            background: 'linear-gradient(135deg, #1a1f2e 0%, #2d3748 100%)',
-            color: 'white',
-          },
-        }}
-      >
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <AIIcon sx={{ mr: 1 }} />
-            LLM函数配置
-          </Box>
-        </DialogTitle>
-        <DialogContent sx={{ mt: 2 }}>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>模型</InputLabel>
-                <Select
-                  value={config.model || 'qwen-turbo'}
-                  onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                  label="模型"
-                  sx={{ color: 'white' }}
-                >
-                  {modelOptions.map((model) => (
-                    <MenuItem key={model.value} value={model.value}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                        <span>{model.label}</span>
-                        <Chip 
-                          label={`$${model.cost}/1K tokens`} 
-                          size="small" 
-                          sx={{ backgroundColor: 'rgba(0, 212, 255, 0.2)' }}
-                        />
-                      </Box>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                type="number"
-                label="最大Token数"
-                value={config.max_tokens || 1000}
-                onChange={(e) => setConfig({ ...config, max_tokens: parseInt(e.target.value) })}
-                InputProps={{ style: { color: 'white' } }}
-                InputLabelProps={{ style: { color: 'rgba(255, 255, 255, 0.7)' } }}
-              />
-            </Grid>
-
-            <Grid item xs={12}>
-              <Typography gutterBottom sx={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-                创意度: {config.temperature || 0.7} - {getTemperatureLabel(config.temperature || 0.7)}
-              </Typography>
-              <Slider
-                value={config.temperature || 0.7}
-                onChange={(e, value) => setConfig({ ...config, temperature: value as number })}
-                min={0}
-                max={2}
-                step={0.1}
-                marks={[
-                  { value: 0, label: '精确' },
-                  { value: 0.7, label: '平衡' },
-                  { value: 1.4, label: '创意' },
-                  { value: 2, label: '随机' },
-                ]}
-                sx={{
-                  color: getTemperatureColor(config.temperature || 0.7),
-                  '& .MuiSlider-markLabel': {
-                    color: 'rgba(255, 255, 255, 0.7)',
-                  },
-                }}
-              />
-            </Grid>
-
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="系统提示词"
-                multiline
-                rows={3}
-                value={config.system_prompt || ''}
-                onChange={(e) => setConfig({ ...config, system_prompt: e.target.value })}
-                placeholder="定义AI的角色和行为规范..."
-                InputProps={{ style: { color: 'white' } }}
-                InputLabelProps={{ style: { color: 'rgba(255, 255, 255, 0.7)' } }}
-              />
-            </Grid>
-
-            <Grid item xs={12}>
-              <Alert severity="info" sx={{ mb: 2 }}>
-                💡 你可以点击"编辑函数代码"来自定义这个LLM节点的具体实现逻辑
-              </Alert>
-              <Button
-                variant="outlined"
-                onClick={() => setCodeEditorOpen(true)}
-                sx={{ color: '#00d4ff', borderColor: '#00d4ff' }}
-              >
-                编辑函数代码
-              </Button>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setConfigOpen(false)} sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-            取消
-          </Button>
-          <Button onClick={handleConfigSave} variant="contained">
-            保存配置
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* 配置已统一到右侧抽屉（NodeConfigPanel） */}
 
       {/* 代码编辑器对话框 */}
       <Dialog

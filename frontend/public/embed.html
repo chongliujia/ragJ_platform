@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAGJ Embed Chat</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; font-family: system-ui, -apple-system, Roboto, Arial, sans-serif; }
+      .wrap { display: flex; flex-direction: column; height: 100%; }
+      .header { padding: 8px 12px; background: #0f172a; color: #fff; font-size: 14px; }
+      .chat { flex: 1; overflow: auto; background: #f8fafc; padding: 12px; }
+      .msg { padding: 8px 10px; border-radius: 8px; margin: 6px 0; max-width: 90%; white-space: pre-wrap; word-break: break-word; }
+      .user { background: #dcfce7; align-self: flex-end; }
+      .bot { background: #e2e8f0; align-self: flex-start; }
+      .footer { padding: 8px; border-top: 1px solid #e2e8f0; display: flex; gap: 8px; }
+      input { flex: 1; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+      button { padding: 8px 12px; background: #0ea5e9; color: #fff; border: none; border-radius: 6px; cursor: pointer; }
+      button:disabled { opacity: 0.6; cursor: not-allowed; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="header">RAGJ Embedded Chat</div>
+      <div id="chat" class="chat"></div>
+      <div class="footer">
+        <input id="input" placeholder="Type your message..." />
+        <button id="send">Send</button>
+      </div>
+    </div>
+    <script>
+      const qs = new URLSearchParams(location.search);
+      const API_KEY = qs.get('api_key');
+      const KB = qs.get('kb'); // optional knowledge base
+      const API_BASE = qs.get('api_base') || '';
+      if (!API_KEY) {
+        alert('Missing ?api_key= in URL');
+      }
+
+      const chatEl = document.getElementById('chat');
+      const inputEl = document.getElementById('input');
+      const sendBtn = document.getElementById('send');
+
+      function addMsg(text, who) {
+        const div = document.createElement('div');
+        div.className = `msg ${who}`;
+        div.textContent = text;
+        chatEl.appendChild(div);
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+
+      async function send() {
+        const text = inputEl.value.trim();
+        if (!text) return;
+        inputEl.value = '';
+        addMsg(text, 'user');
+        sendBtn.disabled = true;
+        try {
+          const url = `${API_BASE}/api/v1/public/chat/stream`;
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+            body: JSON.stringify({ message: text, knowledge_base_id: KB })
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let botBuf = '';
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const chunk = decoder.decode(value, { stream: true });
+              const lines = chunk.split('\n');
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const data = line.slice(6);
+                if (data === '[DONE]') break;
+                try {
+                  const j = JSON.parse(data);
+                  if (j.success && j.content) {
+                    botBuf += j.content;
+                  }
+                } catch {}
+              }
+            }
+          } finally { reader.releaseLock(); }
+          if (botBuf) addMsg(botBuf, 'bot');
+        } catch (e) {
+          addMsg('Error: ' + (e && e.message || e), 'bot');
+        } finally {
+          sendBtn.disabled = false;
+        }
+      }
+
+      sendBtn.addEventListener('click', send);
+      inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+    </script>
+  </body>
+  </html>
+

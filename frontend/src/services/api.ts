@@ -29,21 +29,29 @@ api.interceptors.request.use(
     if (isDev) {
       config.baseURL = '';
     }
-    // 可以在这里添加认证 token 等（已由 AuthManager 统一设置）
+    // 附加认证令牌：优先使用已设置的 header，否则从 localStorage 读取
+    const token = (config.headers as any)?.Authorization || (typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null);
+    if (token && !(config.headers as any)?.Authorization) {
+      (config.headers as any) = (config.headers as any) || {};
+      (config.headers as any).Authorization = `Bearer ${token}`;
+    }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error)
 );
 
 // 响应拦截器
 api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
   (error) => {
-    // 统一错误处理
+    const status = error?.response?.status;
+    if (status === 401 || status === 403) {
+      // 清除无效token并引导登录
+      try { localStorage.removeItem('auth_token'); } catch {}
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login';
+      }
+    }
     console.error('API Error:', error);
     return Promise.reject(error);
   }
@@ -298,21 +306,26 @@ export const workflowApi = {
             if (line.startsWith('data: ')) {
               const data = line.slice(6);
               if (data === '[DONE]') {
+                onComplete(null); // 确保在流结束时调用完成回调
                 return;
               }
               
               try {
                 const parsed = JSON.parse(data);
+                console.log('SSE parsed data:', parsed); // 添加调试日志
                 
                 if (parsed.type === 'progress') {
                   onProgress(parsed);
                 } else if (parsed.type === 'complete') {
+                  console.log('Calling onComplete with:', parsed); // 添加调试日志
                   onComplete(parsed);
                 } else if (parsed.type === 'error') {
                   onError(parsed);
+                } else {
+                  console.log('Unknown event type:', parsed); // 添加调试日志
                 }
               } catch (e) {
-                console.warn('Failed to parse SSE data:', data);
+                console.warn('Failed to parse SSE data:', data, e);
               }
             }
           }
@@ -332,6 +345,13 @@ export const workflowApi = {
   // 停止工作流执行
   stopExecution: (id: string, executionId: string) => 
     api.post(`/api/v1/workflows/${id}/executions/${executionId}/stop`),
+
+  // 单步重试：从指定节点及其下游重新执行
+  retryStep: (
+    id: string,
+    executionId: string,
+    nodeId: string
+  ) => api.post(`/api/v1/workflows/${id}/executions/${executionId}/steps/${nodeId}/retry`),
   
   // 验证工作流配置
   validate: (data: { nodes: any[]; edges: any[] }) => 

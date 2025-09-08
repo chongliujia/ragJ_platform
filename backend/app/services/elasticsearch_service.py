@@ -194,8 +194,12 @@ class ElasticsearchService:
             return []
 
 
-async def get_elasticsearch_service() -> ElasticsearchService:
-    return await ElasticsearchService.get_instance()
+async def get_elasticsearch_service() -> Optional[ElasticsearchService]:
+    try:
+        return await ElasticsearchService.get_instance()
+    except Exception:
+        # 返回 None 以便上层优雅降级
+        return None
 
 
 # This is a module-level instance that will be managed by get_instance

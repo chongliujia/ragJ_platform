@@ -20,6 +20,46 @@ This project aims to create a powerful RAG platform, inspired by systems like Di
 
 ## 🏗️ System Architecture
 
+## 🌐 Public API & Embedding
+
+The platform exposes a simple public API (x-api-key) so you can validate workflows via chat and embed the assistant into any web page.
+
+- Public endpoints (no login, require `x-api-key`):
+  - `POST /api/v1/public/chat` — non-stream chat, request body is `ChatRequest`.
+  - `POST /api/v1/public/chat/stream` — streaming chat (SSE), suitable for web embeds.
+  - `POST /api/v1/public/workflows/{workflow_id}/execute` — run a saved workflow with input payload.
+
+- Admin endpoints for API key management:
+  - `POST /api/v1/admin/api-keys` — create a key (scopes: `chat`, `workflow`; optional `allowed_kb`, `allowed_workflow_id`).
+  - `GET /api/v1/admin/api-keys` — list keys for your tenant.
+  - `DELETE /api/v1/admin/api-keys/{id}` — revoke key.
+
+### Embedding example
+
+Option 1: iframe
+
+```html
+<iframe
+  src="https://your-host/embed.html?api_key=YOUR_KEY&kb=your_kb&api_base=https://your-host"
+  style="width: 100%; height: 560px; border: 1px solid #eee; border-radius: 8px"
+></iframe>
+```
+
+Option 2: fetch from your own widget
+
+```js
+const res = await fetch('https://your-host/api/v1/public/chat/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'x-api-key': 'YOUR_KEY' },
+  body: JSON.stringify({ message: 'Hello', knowledge_base_id: 'your_kb' }),
+});
+// Read SSE chunks from res.body and render progressively.
+```
+
+Notes:
+- Public chat supports RAG with `knowledge_base_id` and will route to your tenant’s KB automatically.
+- Public workflow execution injects `tenant_id` and a system user for isolation and auditing.
+
 The system is designed with a clean separation of concerns:
 
 -   **FastAPI Backend (Python)**: Handles all API requests, business logic, and orchestration.

@@ -138,6 +138,15 @@ export const modelConfigApi = {
     api.post(`/api/v1/model-config/providers/${provider}/models/${modelType}`, null, {
       params: { model_name: modelName }
     }),
+  
+  // 获取可用的聊天模型列表（只返回已配置API密钥的模型）
+  getAvailableChatModels: () => 
+    api.get<{models: Array<{
+      model_name: string;
+      provider: string;
+      provider_display_name: string;
+      model_display_name: string;
+    }>}>('/api/v1/model-config/available-chat-models'),
 };
 
 export default api;

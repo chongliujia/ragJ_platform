@@ -3,7 +3,7 @@
  * 基于React Flow实现拖拽式工作流设计
  */
 
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -116,7 +116,6 @@ if (typeof document !== 'undefined') {
 }
 
 // 自定义节点类型
-import LLMNode from '../components/workflow/LLMNode';
 import DataNode from '../components/workflow/DataNode';
 import ProcessNode from '../components/workflow/ProcessNode';
 import ConditionNode from '../components/workflow/ConditionNode';
@@ -128,12 +127,12 @@ import WorkflowExecution from '../components/workflow/WorkflowExecution';
 import NodeConfigPanel from '../components/workflow/NodeConfigPanel';
 import UltraCompactNodeItem from '../components/workflow/UltraCompactNodeItem';
 import QuickAccessPanel from '../components/workflow/QuickAccessPanel';
-import EnhancedLLMNode from '../components/workflow/EnhancedLLMNode';
 import EnhancedConnectionLine from '../components/workflow/EnhancedConnectionLine';
 import EnhancedEdge from '../components/workflow/EnhancedEdge';
 import CustomLLMNode from '../components/workflow/CustomLLMNode';
 import CustomFunctionCreator from '../components/workflow/CustomFunctionCreator';
 import WorkflowDataFlowManager from '../components/workflow/WorkflowDataFlowManager';
+import ChatTesterWidget from '../components/ChatTesterWidget';
 
 // 工作流节点类型定义
 export interface WorkflowNodeData {
@@ -157,6 +156,7 @@ const nodeTypes = {
   parser: DataNode,
   database: DataNode,
   embeddings: DataNode,
+  reranker: DataNode,
   web_scraper: DataNode,
   data_transformer: DataNode,
   vector_store: DataNode,
@@ -181,10 +181,10 @@ const nodeTypes = {
   cache: ToolNode,
   scheduler: ToolNode,
   // AI模型节点类型
-  summarizer: LLMNode,
-  translator: LLMNode,
-  rewriter: LLMNode,
-  classifier: LLMNode,
+  summarizer: CustomLLMNode,
+  translator: CustomLLMNode,
+  rewriter: CustomLLMNode,
+  classifier: CustomLLMNode,
 };
 
 // 边类型配置 - 移到组件外部以避免重新创建
@@ -204,10 +204,22 @@ const nodeTemplates = [
         name: 'LLM调用',
         description: '调用大语言模型进行文本生成',
         defaultConfig: {
-          model: 'qwen-turbo',
+          model: '', // 默认为空，需要用户选择
           temperature: 0.7,
           max_tokens: 1000,
-          system_prompt: '你是一个有用的AI助手。',
+          system_prompt: '',
+        },
+        // 提供函数签名，便于参数表单与连线句柄匹配
+        function_signature: {
+          name: 'llm_chat_completion',
+          description: '调用大语言模型进行文本生成和对话',
+          category: 'llm',
+          inputs: [
+            { name: 'prompt', type: 'string', description: '用户输入的提示文本', required: true, example: '请用一句话介绍这个系统' },
+          ],
+          outputs: [
+            { name: 'content', type: 'string', description: '生成的文本内容', required: true, example: '这是生成的文本...' },
+          ],
         },
       },
       {
@@ -345,8 +357,84 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             headers: { Authorization: `Bearer ${localStorage.getItem('auth_token')}` }
           });
           if (res.ok) {
-            setWorkflowName(`工作流 ${workflowId}`);
+            // 加载后端已保存的工作流定义
+            const data = await res.json();
+            const serverNodes = Array.isArray(data?.nodes) ? data.nodes : [];
+            const serverEdges = Array.isArray(data?.edges) ? data.edges : [];
+
+            // 转换为 React Flow 节点
+            const rfNodes = serverNodes.map((n: any) => ({
+              id: n.id,
+              type: n.type,
+              position: n.position || { x: 100, y: 100 },
+              data: {
+                type: n.type,
+                name: n.name || n.type,
+                description: n.description,
+                config: n.config || {},
+                function_signature: n.function_signature,
+              },
+            }));
+            // 节点类型映射，便于推断默认句柄
+            const nodeTypeMap: Record<string, string> = Object.fromEntries(
+              rfNodes.map((n: any) => [n.id, n.type])
+            );
+
+            const rfEdges = serverEdges.map((e: any) => {
+              const edge: any = {
+                id: e.id || `e_${e.source}_${e.target}`,
+                source: e.source,
+                target: e.target,
+              };
+              const srcType = nodeTypeMap[e.source];
+              const tgtType = nodeTypeMap[e.target];
+              const srcOut = e.source_output as string | undefined;
+              const tgtIn = e.target_input as string | undefined;
+
+              // 将通用别名映射为语义句柄名
+              const mapAlias = (type: string | undefined, alias: string | undefined, side: 'src'|'tgt') => {
+                if (!alias) return undefined;
+                const a = String(alias);
+                if (type === 'llm') {
+                  if (side === 'src' && a.startsWith('output')) return 'content';
+                  if (side === 'tgt' && a.startsWith('input')) return 'prompt';
+                }
+                if (type === 'rag_retriever') {
+                  if (side === 'src' && a.startsWith('output')) return 'documents';
+                  if (side === 'tgt' && a.startsWith('input')) return 'query';
+                }
+                if (type === 'embeddings') {
+                  if (side === 'src' && a.startsWith('output')) return 'embedding';
+                  if (side === 'tgt' && a.startsWith('input')) return 'text';
+                }
+                if (type === 'parser') {
+                  if (side === 'src' && a.startsWith('output')) return 'parsed_data';
+                  if (side === 'tgt' && a.startsWith('input')) return 'text';
+                }
+                if (type === 'output') {
+                  if (side === 'tgt' && a.startsWith('input')) return 'data';
+                }
+                if (type === 'input') {
+                  if (side === 'src' && a.startsWith('output')) return 'data';
+                }
+                // 非别名，保留原值
+                if ((side === 'src' && !a.startsWith('output')) || (side === 'tgt' && !a.startsWith('input'))) return a;
+                return undefined;
+              };
+
+              const mappedSrc = mapAlias(srcType, srcOut, 'src');
+              const mappedTgt = mapAlias(tgtType, tgtIn, 'tgt');
+              if (mappedSrc) edge.sourceHandle = mappedSrc;
+              if (mappedTgt) edge.targetHandle = mappedTgt;
+              return edge;
+            });
+
+            setNodes(rfNodes);
+            setEdges(rfEdges);
+            setWorkflowName(data?.name || `工作流 ${workflowId}`);
+            setWorkflowDescription(data?.description || '');
             setPersistedWorkflowId(workflowId);
+            try { localStorage.setItem('current_workflow_id', workflowId); } catch {}
             return;
           }
         } catch {}
@@ -366,6 +454,44 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [workflowName, setWorkflowName] = useState('新建工作流');
   const [workflowDescription, setWorkflowDescription] = useState('');
+  // 运行高亮：用于聊天小窗执行时在编辑区动态展示
+  const runActiveRef = useRef(false);
+
+  const updateRunProgress = useCallback((evt: any) => {
+    const step = evt?.step || evt?.data || evt || {};
+    const nodeId: string | undefined = step.nodeId || step.node_id || step.node || step.id;
+    const st: string | undefined = step.status || evt?.status;
+    if (!nodeId) return;
+    runActiveRef.current = true;
+    const mapStatus = (s?: string) => {
+      if (!s) return undefined as any;
+      if (s === 'running') return 'running';
+      if (s === 'completed' || s === 'success' || s === 'done') return 'success';
+      if (s === 'error' || s === 'failed') return 'error';
+      return undefined as any;
+    };
+    const ns = mapStatus(st);
+    if (!ns) return;
+    setNodes(nds => nds.map(n => n.id === nodeId ? { ...n, data: { ...n.data, status: ns } } : n));
+    setEdges(eds => eds.map(e => e.source === nodeId ? {
+      ...e,
+      data: { ...(e.data || {}), status: ns === 'running' ? 'active' : (ns === 'success' ? 'success' : ns === 'error' ? 'error' : 'idle'), animated: ns === 'running' },
+    } : e));
+  }, [setNodes, setEdges]);
+
+  const handleRunComplete = useCallback((evt: any) => {
+    // 完成后，短暂保留高亮，再缓慢恢复
+    setTimeout(() => {
+      setEdges(eds => eds.map(e => ({ ...e, data: { ...(e.data || {}), status: 'idle', animated: false } })));
+      setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, status: undefined } })));
+      runActiveRef.current = false;
+    }, 1500);
+  }, [setNodes, setEdges]);
+
+  const handleRunError = useCallback((evt: any) => {
+    // 错误时保留颜色，下一次进度再清理
+    runActiveRef.current = false;
+  }, []);
 
   // UI状态
   const [drawerOpen, setDrawerOpen] = useState(true);
@@ -378,21 +504,99 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const [dataFlowOpen, setDataFlowOpen] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
+  // 边标签显示模式: always | hover
+  const [edgeLabelMode, setEdgeLabelMode] = useState<'always' | 'hover'>(() => {
+    if (typeof window === 'undefined') return 'always';
+    return (localStorage.getItem('edge_label_mode') as any) || 'always';
+  });
   const [customFunctionCreatorOpen, setCustomFunctionCreatorOpen] = useState(false);
   const [customFunctions, setCustomFunctions] = useState<any[]>([]);
   const [dataFlowValidation, setDataFlowValidation] = useState<any>(null);
   const [validating, setValidating] = useState(false);
   const [snackbar, setSnackbar] = useState<{open: boolean; message: string; severity: 'success'|'info'|'warning'|'error'}>({ open: false, message: '', severity: 'info' });
 
+  // 兼容旧连接：自动补齐缺失的句柄（避免出现 output -> input）
+  useEffect(() => {
+    if (!nodes.length || !edges.length) return;
+    setEdges((eds) => eds.map((e) => {
+      const src = nodes.find(n => n.id === e.source);
+      const tgt = nodes.find(n => n.id === e.target);
+      const srcType = (src as any)?.data?.type || src?.type;
+      const tgtType = (tgt as any)?.data?.type || tgt?.type;
+      const sh = (e as any).sourceHandle || (
+        srcType === 'input' ? 'data' :
+        srcType === 'rag_retriever' ? 'documents' :
+        srcType === 'parser' ? 'parsed_data' :
+        srcType === 'embeddings' ? 'embedding' :
+        srcType === 'llm' ? 'content' : undefined
+      );
+      const th = (e as any).targetHandle || (
+        tgtType === 'llm' ? 'prompt' :
+        tgtType === 'output' ? 'data' :
+        tgtType === 'rag_retriever' ? 'query' :
+        (tgtType === 'embeddings' || tgtType === 'parser') ? 'text' : undefined
+      );
+      if (sh === (e as any).sourceHandle && th === (e as any).targetHandle) return e;
+      return { ...e, sourceHandle: sh, targetHandle: th } as any;
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes]);
+
   const showSnackbar = useCallback((message: string, severity: 'success'|'info'|'warning'|'error' = 'info') => {
     setSnackbar({ open: true, message, severity });
   }, []);
 
+  // 监听来自节点组件的“打开配置”事件
+  useEffect(() => {
+    const handler = (e: any) => {
+      const nodeId = e?.detail?.nodeId as string | undefined;
+      if (nodeId) {
+        const n = nodes.find(nn => nn.id === nodeId) || null;
+        setSelectedNode(n);
+      }
+      setNodeConfigOpen(true);
+    };
+    window.addEventListener('open-node-config', handler as any);
+    return () => window.removeEventListener('open-node-config', handler as any);
+  }, [nodes]);
+
   // 连接处理
   const onConnect = useCallback(
-    (params: Connection) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
+    (params: Connection) => {
+      const src = nodes.find(n => n.id === params.source);
+      const tgt = nodes.find(n => n.id === params.target);
+      const p = { ...params } as any;
+      // 兜底：当未指定句柄时，用节点类型的语义句柄名
+      const srcType = (src as any)?.data?.type || src?.type;
+      const tgtType = (tgt as any)?.data?.type || tgt?.type;
+      if (!p.sourceHandle) {
+        if (srcType === 'input') p.sourceHandle = 'data';
+        if (srcType === 'rag_retriever') p.sourceHandle = 'documents';
+        if (srcType === 'parser') p.sourceHandle = 'parsed_data';
+        if (srcType === 'embeddings') p.sourceHandle = 'embedding';
+        if (srcType === 'llm') p.sourceHandle = 'content';
+      }
+      if (!p.targetHandle) {
+        if (tgtType === 'llm') p.targetHandle = 'prompt';
+        if (tgtType === 'output') p.targetHandle = 'data';
+        if (tgtType === 'rag_retriever') p.targetHandle = 'query';
+        if (tgtType === 'embeddings' || tgtType === 'parser') p.targetHandle = 'text';
+      }
+      setEdges((eds) => addEdge(p, eds));
+    },
+    [nodes, setEdges]
   );
+
+  // 切换边标签显示模式
+  const toggleEdgeLabelMode = useCallback(() => {
+    setEdgeLabelMode((prev) => {
+      const next = prev === 'always' ? 'hover' : 'always';
+      try { localStorage.setItem('edge_label_mode', next); } catch {}
+      // 更新所有边以触发重渲染
+      setEdges((eds) => eds.map((e) => ({ ...e, data: { ...(e.data || {}), labelMode: next } })));
+      return next;
+    });
+  }, [setEdges]);
 
   // 拖拽创建节点
   const onDragOver = useCallback((event: React.DragEvent) => {
@@ -436,6 +640,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     [reactFlowInstance, setNodes]
   );
 
+  // 初始化边的标签显示模式到 data 中，便于 EnhancedEdge 渲染
+  useEffect(() => {
+    setEdges((eds) => eds.map(e => ({ ...e, data: { ...(e.data || {}), labelMode: edgeLabelMode } })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgeLabelMode]);
+
   // 节点选择处理
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
     setSelectedNode(node);
@@ -445,25 +655,58 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   // 保存工作流
   // 保存当前工作流；返回保存后的工作流ID（新建时）
   const handleSave = useCallback(async (): Promise<string | undefined> => {
-    const workflow = {
-      name: workflowName,
-      description: workflowDescription,
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        type: node.data.type,
-        name: node.data.name,
-        config: node.data.config,
-        position: node.position,
-      })),
-      edges: edges.map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        source_output: (edge as any).sourceHandle || 'output',
-        target_input: (edge as any).targetHandle || 'input',
-        condition: edge.data?.condition,
-      })),
-    };
+      const normalizeHandle = (h: any) => {
+        if (!h) return undefined;
+        // 若是通用别名（input*/output*），则不写入句柄，由后端按默认处理
+        if (typeof h === 'string' && (h.startsWith('output') || h.startsWith('input'))) return undefined;
+        return h;
+      };
+
+      const nodeTypeMap: Record<string, string> = Object.fromEntries(nodes.map(n => [n.id, (n as any).data?.type || n.type]));
+      const fallbackHandle = (edge: any, side: 'src' | 'tgt') => {
+        const type = side === 'src' ? nodeTypeMap[edge.source] : nodeTypeMap[edge.target];
+        if (side === 'src') {
+          if (!edge.sourceHandle) {
+            if (type === 'input') return 'data';
+            if (type === 'rag_retriever') return 'documents';
+            if (type === 'parser') return 'parsed_data';
+            if (type === 'embeddings') return 'embedding';
+          }
+          return edge.sourceHandle;
+        } else {
+          if (!edge.targetHandle) {
+            if (type === 'llm') return 'prompt';
+            if (type === 'output') return 'data';
+            if (type === 'rag_retriever') return 'query';
+            if (type === 'embeddings' || type === 'parser') return 'text';
+          }
+          return edge.targetHandle;
+        }
+      };
+
+      const workflow = {
+        name: workflowName,
+        description: workflowDescription,
+        nodes: nodes.map((node) => ({
+          id: node.id,
+          type: node.data.type,
+          name: node.data.name,
+          config: node.data.config,
+          position: node.position,
+        })),
+        edges: edges.map((edge) => {
+          const sh = normalizeHandle(fallbackHandle(edge, 'src'));
+          const th = normalizeHandle(fallbackHandle(edge, 'tgt'));
+          return {
+            id: edge.id,
+            source: edge.source,
+            target: edge.target,
+            ...(sh ? { source_output: sh } : {}),
+            ...(th ? { target_input: th } : {}),
+            condition: edge.data?.condition,
+          };
+        }),
+      };
 
     try {
       // 如果有workflowId且不是'new'，尝试更新现有工作流
@@ -482,6 +725,11 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             showSnackbar('工作流更新成功！', 'success');
             onSave?.(workflow);
             return persistedWorkflowId;
+          }
+          if (response.status === 401 || response.status === 403) {
+            showSnackbar('未登录或无权限，请先登录后再保存', 'warning');
+            navigate('/login');
+            return undefined;
           }
         } catch (updateError) {
           console.error('Update error:', updateError);
@@ -505,12 +753,19 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           setPersistedWorkflowId(newId);
           // 导航到可编辑路由，确保后续执行/历史使用后端ID
           navigate(`/workflows/${newId}/edit`);
+          try { localStorage.setItem('current_workflow_id', newId); } catch {}
         }
         showSnackbar('工作流保存成功！', 'success');
         onSave?.({ ...workflow, id: newId });
         return newId;
       } else {
-        throw new Error('保存失败');
+        if (response.status === 401 || response.status === 403) {
+          showSnackbar('未登录或无权限，请先登录后再保存', 'warning');
+          navigate('/login');
+          return undefined;
+        }
+        const msg = await response.text().catch(() => '');
+        throw new Error(`保存失败 ${response.status}${msg ? `: ${msg}` : ''}`);
       }
     } catch (error) {
       console.error('Save error:', error);
@@ -524,7 +779,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         };
         savedWorkflows.push(workflowWithId);
         localStorage.setItem('saved_workflows', JSON.stringify(savedWorkflows));
-        showSnackbar('后端服务不可用，工作流已保存到本地', 'warning');
+        showSnackbar('后端不可用或连接失败，已暂存到本地', 'warning');
         onSave?.(workflowWithId);
         return workflowWithId.id as string;
       } catch (localError) {
@@ -552,6 +807,11 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const handleValidate = useCallback(async () => {
     try {
       setValidating(true);
+      const normalizeHandle2 = (h: any) => {
+        if (!h) return undefined;
+        if (typeof h === 'string' && (h.startsWith('output') || h.startsWith('input'))) return undefined;
+        return h;
+      };
       const payload = {
         name: workflowName,
         description: workflowDescription,
@@ -563,13 +823,17 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           config: (n as any).data?.config || {},
           position: n.position,
         })),
-        edges: edges.map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          source_output: (e as any).sourceHandle || 'output',
-          target_input: (e as any).targetHandle || 'input',
-        })),
+        edges: edges.map((e) => {
+          const sh = normalizeHandle2((e as any).sourceHandle);
+          const th = normalizeHandle2((e as any).targetHandle);
+          return {
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            ...(sh ? { source_output: sh } : {}),
+            ...(th ? { target_input: th } : {}),
+          };
+        }),
       };
 
       const res = await fetch('/api/v1/workflows/validate', {
@@ -590,6 +854,9 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         suggestions: data.suggestions || [],
       };
       setDataFlowValidation(result);
+      if (!result.isValid && result.errors.length) {
+        focusEdgeByError(String(result.errors[0]));
+      }
       showSnackbar(result.isValid ? '验证通过' : `发现 ${result.errors.length} 个错误、${result.warnings.length} 个警告`, result.isValid ? 'success' : 'warning');
     } catch (err) {
       console.error('Validate error:', err);
@@ -598,6 +865,37 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       setValidating(false);
     }
   }, [workflowName, workflowDescription, nodes, edges, showSnackbar]);
+
+  // 根据错误字符串尝试定位相关边
+  const focusEdgeByError = (text: string) => {
+    const outMatch = text.match(/节点\s+(\S+)\s+没有输出\s+(\S+)/);
+    if (outMatch) {
+      const srcId = outMatch[1];
+      const edge = edges.find(e => e.source === srcId);
+      if (edge) { selectAndFocusEdge(edge.id); }
+      return;
+    }
+    const inMatch = text.match(/节点\s+(\S+)\s+没有输入\s+(\S+)/);
+    if (inMatch) {
+      const tgtId = inMatch[1];
+      const edge = edges.find(e => e.target === tgtId);
+      if (edge) { selectAndFocusEdge(edge.id); }
+    }
+  };
+
+  const selectAndFocusEdge = (edgeId: string) => {
+    setEdges(eds => eds.map(e => ({ ...e, selected: e.id === edgeId })));
+    const edge = edges.find(e => e.id === edgeId);
+    if (!edge || !reactFlowInstance) return;
+    const sn = nodes.find(n => n.id === edge.source);
+    const tn = nodes.find(n => n.id === edge.target);
+    if (!sn || !tn) return;
+    const minX = Math.min(sn.position.x, tn.position.x) - 80;
+    const minY = Math.min(sn.position.y, tn.position.y) - 80;
+    const maxX = Math.max(sn.position.x, tn.position.x) + 200;
+    const maxY = Math.max(sn.position.y, tn.position.y) + 200;
+    reactFlowInstance.fitBounds({ x: minX, y: minY, width: maxX - minX, height: maxY - minY }, { padding: 0.2 });
+  };
 
   // 简易自动布局（分层排列）
   const handleAutoLayout = useCallback(() => {
@@ -828,35 +1126,31 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     <ReactFlowProvider>
       <Box sx={{ 
         display: 'flex',
-        height: '100vh',
+        height: '100%',
+        width: '100%',
         overflow: 'hidden',
-        maxWidth: '1400px',
-        margin: '0 auto',
-        '@media (max-width: 1600px)': {
-          maxWidth: '1200px',
-        },
-        '@media (max-width: 1200px)': {
-          maxWidth: '100%',
-        },
+        position: 'relative',
       }}>
-        {/* 侧边栏 */}
+        {/* 左侧组件库 */}
         <Drawer
           variant="persistent"
           anchor="left"
           open={drawerOpen}
           sx={{
-            width: drawerOpen ? 220 : 0,
+            width: drawerOpen ? 280 : 0, // 稍微增加宽度
             flexShrink: 0,
             transition: 'width 0.3s ease-in-out',
             '& .MuiDrawer-paper': {
-              width: 220,
+              width: 280,
               boxSizing: 'border-box',
               background: 'linear-gradient(180deg, #1a1f2e 0%, #0f1419 100%)',
               borderRight: '1px solid rgba(0, 212, 255, 0.2)',
               backdropFilter: 'blur(10px)',
               position: 'relative',
-              height: '100vh',
-              overflow: 'hidden',
+              height: '100%',
+              top: 0,
+              overflow: 'auto',
+              maxHeight: '100%',
             },
           }}
         >
@@ -996,7 +1290,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                       type: 'llm',
                       name: 'LLM',
                       description: '大语言模型',
-                      defaultConfig: { model: 'qwen-turbo', temperature: 0.7 }
+                      defaultConfig: { model: '', temperature: 0.7 }
                     }}
                     onDragStart={onDragStart}
                     onShowInfo={handleShowNodeInfo}
@@ -1353,15 +1647,11 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           flexGrow: 1, 
           display: 'flex', 
           flexDirection: 'column',
-          width: drawerOpen ? 'calc(100vw - 220px)' : '100vw',
-          height: '100vh',
+          width: drawerOpen ? 'calc(100% - 280px)' : '100%',
+          height: '100%',
+          overflow: 'hidden',
+          minHeight: 0,
           transition: 'width 0.3s ease-in-out',
-          '@media (max-width: 1200px)': {
-            width: drawerOpen ? 'calc(100vw - 220px)' : '100vw',
-          },
-          '@media (max-width: 768px)': {
-            width: '100vw',
-          },
         }}>
           {/* 顶部工具栏 */}
           <AppBar 
@@ -1373,9 +1663,18 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               borderBottom: '1px solid rgba(0, 212, 255, 0.3)',
               backdropFilter: 'blur(20px)',
               flexShrink: 0,
+              height: '56px', // 固定高度
             }}
           >
-            <Toolbar sx={{ minHeight: '28px !important', px: 0.75 }}>
+            <Toolbar sx={{ 
+              minHeight: '56px !important', 
+              height: '56px',
+              px: 1,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 0.5,
+              overflow: 'hidden',
+            }}>
               {!drawerOpen && (
                 <Tooltip title="打开组件库" arrow>
                   <IconButton
@@ -1399,332 +1698,367 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                 sx={{ 
                   flexGrow: 1,
                   fontWeight: 700,
-                  fontSize: '1rem',
+                  fontSize: '0.9rem',
                   background: 'linear-gradient(45deg, #00d4ff 30%, #ffffff 90%)',
                   backgroundClip: 'text',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  maxWidth: '200px',
                 }}
               >
                 {workflowName}
               </Typography>
 
-              <Button
-                startIcon={<SaveIcon />}
-                onClick={handleSave}
-                size="small"
-                sx={{ 
-                  mr: 1,
-                  borderRadius: '8px',
-                  textTransform: 'none',
-                  fontWeight: 600,
-                  fontSize: '0.75rem',
-                  px: 1.5,
-                  py: 0.5,
-                  border: '1px solid rgba(0, 212, 255, 0.3)',
-                  color: '#00d4ff',
-                  '&:hover': {
-                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                    borderColor: '#00d4ff',
-                    boxShadow: '0 4px 12px rgba(0, 212, 255, 0.2)',
-                  },
-                }}
-              >
-                保存
-              </Button>
-              
-              <Button
-                startIcon={<PlayIcon />}
-                onClick={handleExecute}
-                variant="contained"
-                size="small"
-                sx={{ 
-                  mr: 1,
-                  borderRadius: '8px',
-                  textTransform: 'none',
-                  fontWeight: 600,
-                  fontSize: '0.75rem',
-                  px: 1.5,
-                  py: 0.5,
-                  background: 'linear-gradient(45deg, #00d4ff 0%, #0099cc 100%)',
-                  boxShadow: '0 4px 15px rgba(0, 212, 255, 0.3)',
-                  '&:hover': {
-                    background: 'linear-gradient(45deg, #33e0ff 0%, #00b3e6 100%)',
-                    boxShadow: '0 6px 20px rgba(0, 212, 255, 0.4)',
-                    transform: 'translateY(-1px)',
-                  },
-                }}
-              >
-                执行
-              </Button>
-
-              {persistedWorkflowId && (
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexShrink: 0 }}>
                 <Button
-                  onClick={() => navigate(`/workflows/${persistedWorkflowId}/test`)}
-                  variant="outlined"
+                  startIcon={<SaveIcon />}
+                  onClick={handleSave}
                   size="small"
                   sx={{ 
-                    mr: 1,
-                    borderRadius: '8px',
+                    borderRadius: '6px',
                     textTransform: 'none',
                     fontWeight: 600,
-                    fontSize: '0.75rem',
-                    px: 1.5,
-                    py: 0.5,
+                    fontSize: '0.7rem',
+                    px: 1,
+                    py: 0.3,
+                    minWidth: '64px',
                     border: '1px solid rgba(0, 212, 255, 0.3)',
                     color: '#00d4ff',
-                    '&:hover': { backgroundColor: 'rgba(0, 212, 255, 0.1)', borderColor: '#00d4ff' },
-                  }}
-                >
-                  测试（聊天）
-                </Button>
-              )}
-
-              <IconButton 
-                onClick={() => setConfigDialogOpen(true)}
-                sx={{
-                  mr: 1,
-                  color: 'rgba(255, 255, 255, 0.7)',
-                  '&:hover': {
-                    color: '#00d4ff',
-                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                  },
-                }}
-              >
-                <SettingsIcon />
-              </IconButton>
-              
-              <IconButton 
-                onClick={() => setCodeEditorOpen(true)}
-                sx={{
-                  mr: 1,
-                  color: 'rgba(255, 255, 255, 0.7)',
-                  '&:hover': {
-                    color: '#00d4ff',
-                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                  },
-                }}
-              >
-                <CodeIcon />
-              </IconButton>
-              
-              <IconButton 
-                onClick={() => setDebuggerOpen(true)}
-                sx={{
-                  mr: 1,
-                  color: 'rgba(255, 255, 255, 0.7)',
-                  '&:hover': {
-                    color: '#ff9800',
-                    backgroundColor: 'rgba(255, 152, 0, 0.1)',
-                  },
-                }}
-              >
-                <BugReportIcon />
-              </IconButton>
-
-              <IconButton 
-                onClick={handleValidate}
-                disabled={validating}
-                sx={{
-                  mr: 1,
-                  color: dataFlowValidation?.isValid === false ? '#f44336' : 'rgba(255, 255, 255, 0.7)',
-                  '&:hover': {
-                    color: '#4caf50',
-                    backgroundColor: 'rgba(76, 175, 80, 0.12)',
-                  },
-                }}
-              >
-                <ValidateIcon />
-              </IconButton>
-
-              <IconButton 
-                onClick={handleAutoLayout}
-                sx={{
-                  mr: 1,
-                  color: 'rgba(255, 255, 255, 0.7)',
-                  '&:hover': {
-                    color: '#00d4ff',
-                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                  },
-                }}
-              >
-                <LayoutIcon />
-              </IconButton>
-              
-              <IconButton 
-                onClick={() => setDataFlowOpen(true)}
-                sx={{
-                  color: dataFlowValidation?.isValid === false ? '#f44336' : 'rgba(255, 255, 255, 0.7)',
-                  '&:hover': {
-                    color: '#00d4ff',
-                    backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                  },
-                }}
-              >
-                <DataFlowIcon />
-              </IconButton>
-            </Toolbar>
-          </AppBar>
-
-          {/* React Flow 编辑器 */}
-          <Box
-            ref={reactFlowWrapper}
-            sx={{ 
-              height: 'calc(100vh - 28px)',
-              width: '100%',
-              background: 'linear-gradient(135deg, #0a0e1a 0%, #1a1f2e 50%, #0f1419 100%)',
-              position: 'relative',
-              overflow: 'hidden',
-              '&::before': {
-                content: '""',
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                background: 'radial-gradient(circle at 25% 25%, rgba(0, 212, 255, 0.1) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(0, 153, 204, 0.05) 0%, transparent 50%)',
-                pointerEvents: 'none',
-                zIndex: 1,
-              },
-            }}
-          >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-              onNodeClick={onNodeClick}
-              onInit={setReactFlowInstance}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              connectionLineComponent={EnhancedConnectionLine}
-              connectionMode={ConnectionMode.Loose}
-              snapToGrid
-              snapGrid={[20, 20]}
-              fitView
-              className="custom-workflow-editor"
-              style={{ zIndex: 2 }}
-              defaultEdgeOptions={{
-                type: 'enhanced',
-                animated: true,
-                style: { strokeWidth: 2, stroke: '#00d4ff' },
-              }}
-            >
-              <Background 
-                variant="dots" 
-                gap={30} 
-                size={1.5}
-                color="rgba(0, 212, 255, 0.3)"
-                style={{ backgroundColor: 'transparent' }}
-              />
-              <Controls 
-                style={{ 
-                  backgroundColor: 'rgba(26, 31, 46, 0.9)',
-                  border: '1px solid rgba(0, 212, 255, 0.3)',
-                  borderRadius: '16px',
-                  backdropFilter: 'blur(15px)',
-                  padding: '8px',
-                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-                }}
-              />
-              <MiniMap 
-                style={{ 
-                  backgroundColor: 'rgba(26, 31, 46, 0.9)',
-                  border: '1px solid rgba(0, 212, 255, 0.3)',
-                  borderRadius: '16px',
-                  backdropFilter: 'blur(15px)',
-                  width: 200,
-                  height: 150,
-                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-                }}
-                maskColor="rgba(0, 0, 0, 0.1)"
-              />
-              
-              <Panel position="top-center">
-                <Alert 
-                  severity="info" 
-                  sx={{ 
-                    mb: 2,
-                    background: 'rgba(26, 31, 46, 0.9)',
-                    color: 'white',
-                    border: '1px solid rgba(0, 212, 255, 0.3)',
-                    borderRadius: '12px',
-                    backdropFilter: 'blur(10px)',
-                    '& .MuiAlert-icon': {
-                      color: '#00d4ff',
+                    '&:hover': {
+                      backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                      borderColor: '#00d4ff',
                     },
                   }}
                 >
-                  从左侧拖拽组件到画布，连接组件创建智能体工作流
-                </Alert>
-              </Panel>
-              
-              <Panel position="top-right">
-                <Box sx={{ 
-                  display: 'flex', 
-                  gap: 1, 
-                  alignItems: 'center',
-                  background: 'rgba(26, 31, 46, 0.9)',
-                  px: 2,
-                  py: 1,
-                  borderRadius: 2,
-                  border: '1px solid rgba(0, 212, 255, 0.3)',
-                  backdropFilter: 'blur(10px)'
-                }}>
-                  <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-                    组件: {nodes.length}
-                  </Typography>
-                  <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-                    连接: {edges.length}
-                  </Typography>
-                  {nodes.length > 0 && (
-                    <Chip 
-                      label="已构建"
+                  保存
+                </Button>
+                
+                <Button
+                  startIcon={<PlayIcon />}
+                  onClick={handleExecute}
+                  variant="contained"
+                  size="small"
+                  sx={{ 
+                    borderRadius: '6px',
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    fontSize: '0.7rem',
+                    px: 1,
+                    py: 0.3,
+                    minWidth: '64px',
+                    background: 'linear-gradient(45deg, #00d4ff 0%, #0099cc 100%)',
+                    '&:hover': {
+                      background: 'linear-gradient(45deg, #33e0ff 0%, #00b3e6 100%)',
+                    },
+                  }}
+                >
+                  执行
+                </Button>
+
+                {persistedWorkflowId && (
+                  <Button
+                    onClick={() => navigate(`/workflows/${persistedWorkflowId}/test`)}
+                    variant="outlined"
+                    size="small"
+                    sx={{ 
+                      borderRadius: '6px',
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      fontSize: '0.7rem',
+                      px: 1,
+                      py: 0.3,
+                      minWidth: '60px',
+                      border: '1px solid rgba(0, 212, 255, 0.3)',
+                      color: '#00d4ff',
+                      '&:hover': { backgroundColor: 'rgba(0, 212, 255, 0.1)', borderColor: '#00d4ff' },
+                    }}
+                  >
+                    测试
+                  </Button>
+                )}
+
+                <Box sx={{ display: 'flex', gap: 0.3 }}>
+                  <Tooltip title="工作流设置"><span>
+                    <IconButton 
+                      onClick={() => setConfigDialogOpen(true)}
                       size="small"
                       sx={{
-                        height: '20px',
-                        fontSize: '0.7rem',
-                        backgroundColor: 'rgba(76, 175, 80, 0.2)',
-                        color: '#4caf50',
+                        color: 'rgba(255, 255, 255, 0.7)',
+                        '&:hover': {
+                          color: '#00d4ff',
+                          backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        },
                       }}
-                    />
-                  )}
-                </Box>
-              </Panel>
-
-              <Panel position="bottom-left">
-                <Box sx={{ display: 'flex', gap: 1, p: 1, background: 'rgba(26, 31, 46, 0.9)', borderRadius: 2, border: '1px solid rgba(0, 212, 255, 0.3)' }}>
-                  <Tooltip title="保存 (⌘/Ctrl+S)"><span>
-                    <IconButton size="small" onClick={handleSave} sx={{ color: '#00d4ff' }}>
-                      <SaveIcon fontSize="small" />
+                    >
+                      <SettingsIcon fontSize="small" />
                     </IconButton>
                   </span></Tooltip>
-                  <Tooltip title="验证 (⌘/Ctrl+Shift+V)"><span>
-                    <IconButton size="small" onClick={handleValidate} disabled={validating} sx={{ color: '#4caf50' }}>
+                  
+                  <Tooltip title="代码编辑器"><span>
+                    <IconButton 
+                      onClick={() => setCodeEditorOpen(true)}
+                      size="small"
+                      sx={{
+                        color: 'rgba(255, 255, 255, 0.7)',
+                        '&:hover': {
+                          color: '#00d4ff',
+                          backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        },
+                      }}
+                    >
+                      <CodeIcon fontSize="small" />
+                    </IconButton>
+                  </span></Tooltip>
+                  
+                  <Tooltip title="调试器"><span>
+                    <IconButton 
+                      onClick={() => setDebuggerOpen(true)}
+                      size="small"
+                      sx={{
+                        color: 'rgba(255, 255, 255, 0.7)',
+                        '&:hover': {
+                          color: '#ff9800',
+                          backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                        },
+                      }}
+                    >
+                      <BugReportIcon fontSize="small" />
+                    </IconButton>
+                  </span></Tooltip>
+
+                  <Tooltip title="验证工作流"><span>
+                    <IconButton 
+                      onClick={handleValidate}
+                      disabled={validating}
+                      size="small"
+                      sx={{
+                        color: dataFlowValidation?.isValid === false ? '#f44336' : 'rgba(255, 255, 255, 0.7)',
+                        '&:hover': {
+                          color: '#4caf50',
+                          backgroundColor: 'rgba(76, 175, 80, 0.12)',
+                        },
+                      }}
+                    >
                       <ValidateIcon fontSize="small" />
                     </IconButton>
                   </span></Tooltip>
-                  <Tooltip title="自动布局 (L)"><span>
-                    <IconButton size="small" onClick={handleAutoLayout} sx={{ color: '#00d4ff' }}>
+
+                  <Tooltip title="自动布局"><span>
+                    <IconButton 
+                      onClick={handleAutoLayout}
+                      size="small"
+                      sx={{
+                        color: 'rgba(255, 255, 255, 0.7)',
+                        '&:hover': {
+                          color: '#00d4ff',
+                          backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        },
+                      }}
+                    >
                       <LayoutIcon fontSize="small" />
                     </IconButton>
                   </span></Tooltip>
-                  <Tooltip title="适配视图"><span>
-                    <IconButton size="small" onClick={handleFitView} sx={{ color: '#00d4ff' }}>
-                      <FitIcon fontSize="small" />
+
+                  <Tooltip title={`边标签：${edgeLabelMode === 'always' ? '常驻' : '悬停'}`}>
+                    <IconButton 
+                      onClick={toggleEdgeLabelMode}
+                      size="small"
+                      sx={{
+                        color: edgeLabelMode === 'always' ? '#4caf50' : 'rgba(255, 255, 255, 0.7)',
+                        '&:hover': {
+                          color: '#4caf50',
+                          backgroundColor: 'rgba(76, 175, 80, 0.12)',
+                        },
+                      }}
+                    >
+                      <DataFlowIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  
+                  <Tooltip title="数据流管理"><span>
+                    <IconButton 
+                      onClick={() => setDataFlowOpen(true)}
+                      size="small"
+                      sx={{
+                        color: dataFlowValidation?.isValid === false ? '#f44336' : 'rgba(255, 255, 255, 0.7)',
+                        '&:hover': {
+                          color: '#00d4ff',
+                          backgroundColor: 'rgba(0, 212, 255, 0.1)',
+                        },
+                      }}
+                    >
+                      <DataFlowIcon fontSize="small" />
                     </IconButton>
                   </span></Tooltip>
                 </Box>
-              </Panel>
-            </ReactFlow>
-          </Box>
-        </Box>
+              </Box>
+            </Toolbar>
+          </AppBar>
 
-        {/* 工作流配置对话框 */}
-        <Dialog
+        {/* React Flow 编辑器 */}
+        <Box
+          ref={reactFlowWrapper}
+          sx={{ 
+            flex: 1,
+            width: '100%',
+            height: 'calc(100% - 56px)', // 减去工具栏的高度
+            background: 'linear-gradient(135deg, #0a0e1a 0%, #1a1f2e 50%, #0f1419 100%)',
+            position: 'relative',
+            overflow: 'hidden',
+            minHeight: 0,
+            '&::before': {
+              content: '""',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'radial-gradient(circle at 25% 25%, rgba(0, 212, 255, 0.1) 0%, transparent 50%), radial-gradient(circle at 75% 75%, rgba(0, 153, 204, 0.05) 0%, transparent 50%)',
+              pointerEvents: 'none',
+              zIndex: 1,
+            },
+          }}
+        >
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onNodeClick={onNodeClick}
+            onInit={setReactFlowInstance}
+            nodeTypes={useMemo(() => nodeTypes, [])}
+            edgeTypes={useMemo(() => edgeTypes, [])}
+            connectionLineComponent={EnhancedConnectionLine}
+            connectionMode={ConnectionMode.Loose}
+            snapToGrid
+            snapGrid={[20, 20]}
+            fitView
+            className="custom-workflow-editor"
+            style={{ zIndex: 2 }}
+            defaultEdgeOptions={{
+              type: 'enhanced',
+              animated: true,
+              style: { strokeWidth: 2, stroke: '#00d4ff' },
+            }}
+          >
+            <Background 
+              variant="dots" 
+              gap={30} 
+              size={1.5}
+              color="rgba(0, 212, 255, 0.3)"
+              style={{ backgroundColor: 'transparent' }}
+            />
+            <Controls 
+              style={{ 
+                backgroundColor: 'rgba(26, 31, 46, 0.9)',
+                border: '1px solid rgba(0, 212, 255, 0.3)',
+                borderRadius: '16px',
+                backdropFilter: 'blur(15px)',
+                padding: '8px',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              }}
+            />
+            <MiniMap 
+              style={{ 
+                backgroundColor: 'rgba(26, 31, 46, 0.9)',
+                border: '1px solid rgba(0, 212, 255, 0.3)',
+                borderRadius: '16px',
+                backdropFilter: 'blur(15px)',
+                width: 200,
+                height: 150,
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
+              }}
+              maskColor="rgba(0, 0, 0, 0.1)"
+            />
+            
+            <Panel position="top-center">
+              <Alert 
+                severity="info" 
+                sx={{ 
+                  mb: 2,
+                  background: 'rgba(26, 31, 46, 0.9)',
+                  color: 'white',
+                  border: '1px solid rgba(0, 212, 255, 0.3)',
+                  borderRadius: '12px',
+                  backdropFilter: 'blur(10px)',
+                  '& .MuiAlert-icon': {
+                    color: '#00d4ff',
+                  },
+                }}
+              >
+                点击顶部"组件库"按钮添加组件，连接组件创建智能体工作流
+              </Alert>
+            </Panel>
+            
+            <Panel position="top-right">
+              <Box sx={{ 
+                display: 'flex', 
+                gap: 1, 
+                alignItems: 'center',
+                background: 'rgba(26, 31, 46, 0.9)',
+                px: 2,
+                py: 1,
+                borderRadius: 2,
+                border: '1px solid rgba(0, 212, 255, 0.3)',
+                backdropFilter: 'blur(10px)'
+              }}>
+                <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                  组件: {nodes.length}
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                  连接: {edges.length}
+                </Typography>
+                {nodes.length > 0 && (
+                  <Chip 
+                    label="已构建"
+                    size="small"
+                    sx={{
+                      height: '20px',
+                      fontSize: '0.7rem',
+                      backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                      color: '#4caf50',
+                    }}
+                  />
+                )}
+              </Box>
+            </Panel>
+
+            <Panel position="bottom-left">
+              <Box sx={{ display: 'flex', gap: 1, p: 1, background: 'rgba(26, 31, 46, 0.9)', borderRadius: 2, border: '1px solid rgba(0, 212, 255, 0.3)' }}>
+                <Tooltip title="保存 (⌘/Ctrl+S)"><span>
+                  <IconButton size="small" onClick={handleSave} sx={{ color: '#00d4ff' }}>
+                    <SaveIcon fontSize="small" />
+                  </IconButton>
+                </span></Tooltip>
+                <Tooltip title="验证 (⌘/Ctrl+Shift+V)"><span>
+                  <IconButton size="small" onClick={handleValidate} disabled={validating} sx={{ color: '#4caf50' }}>
+                    <ValidateIcon fontSize="small" />
+                  </IconButton>
+                </span></Tooltip>
+                <Tooltip title="自动布局 (L)"><span>
+                  <IconButton size="small" onClick={handleAutoLayout} sx={{ color: '#00d4ff' }}>
+                    <LayoutIcon fontSize="small" />
+                  </IconButton>
+                </span></Tooltip>
+                <Tooltip title="适配视图"><span>
+                  <IconButton size="small" onClick={handleFitView} sx={{ color: '#00d4ff' }}>
+                    <FitIcon fontSize="small" />
+                  </IconButton>
+                </span></Tooltip>
+              </Box>
+            </Panel>
+          </ReactFlow>
+        </Box>
+      </Box>
+
+      {/* 工作流配置对话框 */}
+      <Dialog
           open={configDialogOpen}
           onClose={() => setConfigDialogOpen(false)}
           maxWidth="sm"
@@ -1757,10 +2091,10 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               确定
             </Button>
           </DialogActions>
-        </Dialog>
+      </Dialog>
 
-        {/* 代码编辑器对话框 */}
-        <Dialog
+      {/* 代码编辑器对话框 */}
+      <Dialog
           open={codeEditorOpen}
           onClose={() => setCodeEditorOpen(false)}
           maxWidth={false}
@@ -1810,10 +2144,10 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               }}
             />
           </DialogContent>
-        </Dialog>
+      </Dialog>
 
-        {/* 调试器对话框 */}
-        <Dialog
+      {/* 调试器对话框 */}
+      <Dialog
           open={debuggerOpen}
           onClose={() => setDebuggerOpen(false)}
           maxWidth={false}
@@ -1935,6 +2269,8 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           key={selectedNode?.id || 'none'}
           open={nodeConfigOpen}
           node={selectedNode}
+          nodes={nodes as any}
+          edges={edges as any}
           onClose={() => setNodeConfigOpen(false)}
           onSave={(config) => {
             if (!selectedNode) return;
@@ -2013,7 +2349,6 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             />
           </DialogContent>
         </Dialog>
-      </Box>
       {/* 全局 Snackbar 提示 */}
       <Snackbar
         open={snackbar.open}
@@ -2029,6 +2364,15 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
           {snackbar.message}
         </Alert>
       </Snackbar>
+      {/* 仅在工作流编辑页显示聊天测试小窗 */}
+      <ChatTesterWidget 
+        workflowId={persistedWorkflowId}
+        onEnsureSaved={handleSave}
+        onProgress={updateRunProgress}
+        onComplete={handleRunComplete}
+        onError={handleRunError}
+      />
+    </Box>
     </ReactFlowProvider>
   );
 };

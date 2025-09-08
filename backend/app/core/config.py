@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = secrets.token_urlsafe(32)
     DEBUG: bool = False
+    
+    # 开发模式配置
+    DISABLE_AUTH: bool = False  # 开发模式下可以禁用认证
 
     # 数据库配置
     DATABASE_URL: str = "sqlite:///./ragj_platform.db"
@@ -39,6 +42,7 @@ class Settings(BaseSettings):
 
     # Elasticsearch配置
     ELASTICSEARCH_HOSTS: list[str] = ["http://localhost:9200"]
+    ENABLE_ELASTICSEARCH: bool = False
 
     # 对象存储配置
     MINIO_ENDPOINT: str = "localhost:9000"
@@ -53,7 +57,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
 
     # DeepSeek配置
-    DEEPSEEK_API_KEY: Optional[str] = "sk-5cf6176d48e248e9a58cebd792196add"
+    DEEPSEEK_API_KEY: Optional[str] = None
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
     DEEPSEEK_CHAT_MODEL: str = "deepseek-chat"
 

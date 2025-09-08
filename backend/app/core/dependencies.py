@@ -11,21 +11,71 @@ from app.db.database import get_db
 from app.db.models.user import User
 from app.db.models.permission import RolePermission, Permission
 from app.core.security import verify_token
+from app.core.config import settings
 
 # HTTP Bearer认证方案
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)  # 允许没有认证头
+
+
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db),
+) -> Optional[User]:
+    """获取当前用户 - 开发模式下可选"""
+    
+    # 开发模式下禁用认证
+    if settings.DISABLE_AUTH:
+        # 返回一个默认的开发用户
+        return User(
+            id=1,
+            username="dev_user",
+            email="dev@example.com",
+            full_name="Development User",
+            is_active=True,
+            role="user"
+        )
+    
+    if not credentials:
+        return None
+        
+    token = credentials.credentials
+    user_id = verify_token(token)
+
+    if user_id is None:
+        return None
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or not user.is_active:
+        return None
+
+    return user
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
     """获取当前用户"""
+    # 开发模式下禁用认证
+    if settings.DISABLE_AUTH:
+        # 返回一个默认的开发用户
+        return User(
+            id=1,
+            username="dev_user",
+            email="dev@example.com",
+            full_name="Development User",
+            is_active=True,
+            role="user"
+        )
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+    if not credentials:
+        raise credentials_exception
 
     token = credentials.credentials
     user_id = verify_token(token)
@@ -67,6 +117,9 @@ async def get_tenant_id(
     current_user: User = Depends(get_current_user),
 ) -> int:
     """获取当前用户的租户ID"""
+    # 开发模式下返回默认租户ID
+    if settings.DISABLE_AUTH:
+        return 1
     return current_user.tenant_id
 
 

@@ -165,6 +165,164 @@ class WorkflowExecutionEngine:
                 self.performance_monitor.clear_history()
         
         return context
+
+    async def retry_from_node(
+        self,
+        workflow_definition: WorkflowDefinition,
+        base_execution: WorkflowExecutionContext,
+        start_node_id: str,
+        debug: bool = False,
+    ) -> WorkflowExecutionContext:
+        """基于已有执行，从指定节点及其下游进行部分重试。
+
+        逻辑：
+        - 使用上一次执行的输出作为未受影响节点的输入缓存
+        - 只重跑 start_node 及其所有下游节点
+        - 保持与 execute_workflow 相同的步骤记录结构
+        """
+        import time as _time
+        import uuid as _uuid
+        
+        new_execution_id = f"exec_{_uuid.uuid4().hex[:8]}"
+        context = WorkflowExecutionContext(
+            execution_id=new_execution_id,
+            workflow_id=workflow_definition.id,
+            start_time=_time.time(),
+            input_data=base_execution.input_data.copy() if base_execution.input_data else {},
+            global_context=workflow_definition.global_config.copy(),
+        )
+
+        try:
+            # 验证工作流
+            validation = await self._validate_workflow(workflow_definition)
+            if not validation.is_valid:
+                raise ValueError(f"工作流验证失败: {validation.errors}")
+
+            # 构建执行图
+            graph = self._build_execution_graph(workflow_definition)
+
+            if start_node_id not in graph.nodes:
+                raise ValueError(f"起始节点不存在: {start_node_id}")
+
+            # 计算受影响节点集合（起始节点 + 所有下游）
+            affected = set()
+            try:
+                import networkx as _nx
+                affected = set(_nx.descendants(graph, start_node_id))
+            except Exception:
+                affected = set()
+            affected.add(start_node_id)
+
+            # 预填充节点输出（未受影响节点使用历史输出）
+            preserved_outputs: Dict[str, Dict[str, Any]] = {}
+            for step in base_execution.steps or []:
+                if step.node_id not in affected and isinstance(step.output_data, dict):
+                    preserved_outputs[step.node_id] = step.output_data
+
+            node_data: Dict[str, Dict[str, Any]] = {}
+            node_data.update(preserved_outputs)
+
+            # 使用拓扑顺序，只对受影响节点执行
+            execution_order = list(nx.topological_sort(graph))
+            for node_id in execution_order:
+                if node_id not in affected:
+                    # 未受影响节点跳过执行（使用保留的输出）
+                    continue
+
+                node: WorkflowNode = graph.nodes[node_id]['node']
+
+                # 收集输入（会从 node_data 中获取未受影响前驱的输出）
+                input_payload = await self._collect_node_input_data(
+                    node_id, graph, node_data, context
+                )
+
+                # 记录步骤
+                step = ExecutionStep(
+                    step_id=f"step_{len(context.steps)}",
+                    node_id=node_id,
+                    node_name=node.name,
+                    input_data=input_payload,
+                    start_time=_time.time(),
+                )
+                context.steps.append(step)
+
+                # 执行节点（带错误处理）
+                output_payload = await self._execute_node_with_error_handling(
+                    node, input_payload, context, step, debug
+                )
+
+                # 存储、缓存
+                node_data[node_id] = output_payload
+                cache_key = f"{node_id}_{context.execution_id}"
+                self.node_cache[cache_key] = output_payload
+
+                if debug:
+                    logger.info(
+                        "部分重试：节点执行完成",
+                        node_id=node_id,
+                        duration=step.duration,
+                        output_keys=list(output_payload.keys()),
+                    )
+
+            # 组装最终输出（优先输出节点，否则最后一个受影响节点）
+            output_nodes = [n for n in workflow_definition.nodes if n.type == 'output']
+            if output_nodes:
+                final_output: Dict[str, Any] = {}
+                for out_node in output_nodes:
+                    if out_node.id in node_data:
+                        final_output.update(node_data[out_node.id])
+                    elif out_node.id in preserved_outputs:
+                        final_output.update(preserved_outputs[out_node.id])
+                context.output_data = final_output
+            else:
+                # 回退：受影响节点的最后一个在拓扑序中的节点
+                last_affected = None
+                for nid in reversed(execution_order):
+                    if nid in affected:
+                        last_affected = nid
+                        break
+                if last_affected is not None:
+                    context.output_data = node_data.get(last_affected, {})
+                else:
+                    context.output_data = {}
+
+            context.status = "completed"
+            context.end_time = _time.time()
+
+            logger.info(
+                "部分重试完成",
+                execution_id=new_execution_id,
+                start_node=start_node_id,
+                duration=context.end_time - context.start_time,
+            )
+
+            if self.enable_performance_monitoring:
+                self.performance_monitor.record_workflow_execution(context)
+
+        except Exception as e:
+            context.status = "error"
+            context.error = str(e)
+            context.end_time = _time.time()
+            logger.error(
+                "部分重试失败",
+                execution_id=new_execution_id,
+                error=str(e),
+                exc_info=True,
+            )
+            if self.enable_performance_monitoring:
+                self.performance_monitor.record_workflow_execution(context)
+        finally:
+            if new_execution_id in self.active_executions:
+                del self.active_executions[new_execution_id]
+            # 清理缓存与计数器
+            self.clear_cache(new_execution_id)
+            self.error_handler.clear_retry_counts()
+            if self.enable_parallel_execution:
+                self.parallel_executor.reset_performance_cache()
+            if self.enable_performance_monitoring:
+                self.performance_monitor.clear_history()
+
+        return context
     
     async def _validate_workflow(self, workflow: WorkflowDefinition) -> DataFlowValidation:
         """验证工作流定义"""
@@ -208,16 +366,22 @@ class WorkflowExecutionEngine:
             target_node = node_map.get(edge.target)
             
             if source_node and target_node:
-                # 检查输出是否存在
+                # 检查输出是否存在（允许 'output' / 'output-0' 作为通用别名）
                 source_outputs = [out.name for out in source_node.function_signature.outputs]
-                if edge.source_output not in source_outputs:
+                if (
+                    edge.source_output not in source_outputs
+                    and edge.source_output not in ('output', 'output-0')
+                ):
                     errors.append(
                         f"节点 {edge.source} 没有输出 {edge.source_output}"
                     )
                 
-                # 检查输入是否存在
+                # 检查输入是否存在（允许 'input' / 'input-0' 作为通用别名）
                 target_inputs = [inp.name for inp in target_node.function_signature.inputs]
-                if edge.target_input not in target_inputs:
+                if (
+                    edge.target_input not in target_inputs
+                    and edge.target_input not in ('input', 'input-0')
+                ):
                     errors.append(
                         f"节点 {edge.target} 没有输入 {edge.target_input}"
                     )
@@ -343,32 +507,83 @@ class WorkflowExecutionEngine:
     ) -> Dict[str, Any]:
         """收集节点输入数据"""
         
-        input_data = {}
-        
+        input_data: Dict[str, Any] = {}
+
+        # 获取目标节点签名（用于解析别名）
+        target_node: WorkflowNode = graph.nodes[node_id]['node']
+        target_inputs = [inp.name for inp in target_node.function_signature.inputs]
+
+        def resolve_target_input(name: str) -> str:
+            # 允许前端默认句柄名 'input' 作别名
+            if name in target_inputs and name:
+                return name
+            # 常见优先级
+            priority = ['data', 'prompt', 'text']
+            for p in priority:
+                if p in target_inputs:
+                    return p
+            return target_inputs[0] if target_inputs else name
+
         # 从前驱节点收集数据
         for predecessor in graph.predecessors(node_id):
             edge_data = graph.edges[predecessor, node_id]['edge']
-            
+
             if predecessor in node_data:
-                source_data = node_data[predecessor]
-                source_output = edge_data.source_output
-                target_input = edge_data.target_input
-                
-                if source_output in source_data:
-                    value = source_data[source_output]
-                    
-                    # 应用数据转换
-                    if edge_data.transform:
-                        value = await self._apply_data_transform(
-                            value, edge_data.transform, context
-                        )
-                    
-                    input_data[target_input] = value
+                source_payload = node_data[predecessor]
+
+                # 解析源节点输出别名
+                source_node: WorkflowNode = graph.nodes[predecessor]['node']
+                source_outputs = [out.name for out in source_node.function_signature.outputs]
+                src_key = edge_data.source_output
+                if src_key not in source_payload:
+                    if src_key == 'output' or (isinstance(src_key, str) and src_key.startswith('output')):
+                        # 使用首选输出字段
+                        prefer = ['content', 'result', 'documents', 'data']
+                        chosen = next((k for k in prefer if k in source_payload), None)
+                        if not chosen and source_outputs:
+                            chosen = source_outputs[0]
+                        src_key = chosen or src_key
+
+                value = source_payload.get(src_key) if isinstance(source_payload, dict) else None
+                if value is None:
+                    # 回退到整体传递
+                    value = source_payload
+
+                # 应用数据转换
+                if edge_data.transform:
+                    value = await self._apply_data_transform(
+                        value, edge_data.transform, context
+                    )
+
+                # 解析目标输入别名
+                # 解析目标输入别名（input / input-0）
+                const_key = edge_data.target_input
+                if isinstance(const_key, str) and const_key.startswith('input'):
+                    const_key = 'input'
+                dst_key = resolve_target_input(const_key)
+
+                # 合并策略：若目标键为 'data' 且均为字典则合并
+                if dst_key == 'data' and isinstance(value, dict) and isinstance(input_data.get('data'), dict):
+                    input_data['data'] = {**input_data['data'], **value}
+                else:
+                    input_data[dst_key] = value
         
         # 如果没有输入数据，使用全局输入
         if not input_data:
             input_data = context.input_data.copy()
-        
+
+        # 覆写：如果节点配置里声明了 overrides，则为缺失字段填充静态值
+        try:
+            target = graph.nodes[node_id]['node']
+            cfg = getattr(target, 'config', {}) if hasattr(target, 'config') else {}
+            overrides = cfg.get('overrides', {}) if isinstance(cfg, dict) else {}
+            if isinstance(overrides, dict):
+                for k, v in overrides.items():
+                    if k and (k not in input_data or input_data[k] in (None, '')) and v not in (None, ''):
+                        input_data[k] = v
+        except Exception:
+            pass
+
         return input_data
     
     async def _apply_data_transform(
@@ -551,7 +766,35 @@ class WorkflowExecutionEngine:
         """执行LLM节点"""
         
         config = node.config
-        prompt = input_data.get('prompt', '')
+        
+        # 处理输入数据 - 更智能的数据提取
+        actual_data = input_data
+        
+        # 如果数据被多层包装，逐层解包
+        while 'data' in actual_data and isinstance(actual_data['data'], dict) and len(actual_data) == 1:
+            actual_data = actual_data['data']
+        
+        # 如果还有data键但不是唯一键，则优先使用data内的数据，但保持其他键
+        if 'data' in actual_data and isinstance(actual_data['data'], dict):
+            # 合并data内的数据和外层数据
+            merged_data = {**actual_data}
+            merged_data.update(actual_data['data'])
+            actual_data = merged_data
+        
+        # 尝试从多个可能的键中获取提示词
+        prompt = (
+            actual_data.get('prompt') or 
+            actual_data.get('text') or 
+            actual_data.get('input') or 
+            actual_data.get('query') or
+            actual_data.get('message') or
+            (str(actual_data) if isinstance(actual_data, str) else '')
+        )
+        
+        # 确保prompt是字符串
+        if not isinstance(prompt, str):
+            prompt = str(prompt) if prompt is not None else ''
+        
         system_prompt = config.get('system_prompt', '')
         
         # 构建完整提示
@@ -559,6 +802,11 @@ class WorkflowExecutionEngine:
             full_prompt = f"{system_prompt}\n\n{prompt}"
         else:
             full_prompt = prompt
+        
+        print(f"DEBUG: LLM node received input_data: {input_data}")
+        print(f"DEBUG: After processing, actual_data: {actual_data}")
+        print(f"DEBUG: Extracted prompt: '{prompt}'")
+        print(f"DEBUG: Full prompt: '{full_prompt}'")
         
         # 调用LLM服务
         response = await llm_service.chat(
@@ -751,9 +999,18 @@ class WorkflowExecutionEngine:
         context: WorkflowExecutionContext
     ) -> Dict[str, Any]:
         """执行输入节点"""
+        print(f"DEBUG: Input node received: {input_data}")
         
-        # 输入节点直接返回输入数据
-        return input_data
+        # 检查输入数据是否已经被包装在'data'中
+        if 'data' in input_data and isinstance(input_data['data'], dict):
+            # 如果已经包装，直接返回包装的数据
+            result = input_data['data']
+            print(f"DEBUG: Input node returning unwrapped data: {result}")
+            return result
+        else:
+            # 如果没有包装，返回完整的input_data
+            print(f"DEBUG: Input node returning original data: {input_data}")
+            return input_data
     
     async def _execute_output_node(
         self,
@@ -766,18 +1023,24 @@ class WorkflowExecutionEngine:
         config = node.config
         output_format = config.get('format', 'json')
         template = config.get('template', '')
-        
+
+        # 兼容 'data' 包装
+        payload = input_data.get('data', input_data)
+
         if template:
-            # 使用模板格式化输出
+            # 使用模板格式化输出，避免缺失键报错
             try:
-                formatted_output = template.format(**input_data)
-                return {'output': formatted_output}
+                class _SafeDict(dict):
+                    def __missing__(self, key):
+                        return ''
+                formatted_output = template.format_map(_SafeDict(payload if isinstance(payload, dict) else {}))
+                return {'result': formatted_output}
             except Exception as e:
                 logger.warning(f"模板格式化失败: {e}")
-                return input_data
+                return {'result': payload}
         else:
             # 直接返回输入数据
-            return input_data
+            return {'result': payload}
     
     async def _execute_data_transformer_node(
         self,

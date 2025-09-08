@@ -34,13 +34,15 @@ async def lifespan(app: FastAPI):
         logger.error("数据库初始化失败", error=str(e))
         raise
 
-    # 启动 Elasticsearch 服务
+    # 启动 Elasticsearch 服务（可禁用）
     try:
-        await startup_es_service()
-        logger.info("Elasticsearch 服务启动完成")
+        if settings.ENABLE_ELASTICSEARCH:
+            await startup_es_service()
+            logger.info("Elasticsearch 服务启动完成")
+        else:
+            logger.info("Elasticsearch 已禁用，跳过连接")
     except Exception as e:
         logger.error("Elasticsearch 服务启动失败", error=str(e))
-        # Decide if you want to raise or just log
 
     yield
 

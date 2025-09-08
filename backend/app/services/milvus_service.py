@@ -77,9 +77,9 @@ class MilvusService:
             except Exception as e:
                 logger.error(f"Failed to connect to Milvus: {e}", exc_info=True)
                 self.initialized = False
-                # Depending on the application's needs, you might want to raise the exception
-                # or handle it in a way that allows the app to run without Milvus.
-                raise
+                # Do not raise here to allow the app to run without Milvus.
+                # All operations will be no-op or return empty results when not initialized.
+                # This keeps non-RAG features usable even if vector DB is down.
 
     def list_collections(self) -> list[str]:
         """

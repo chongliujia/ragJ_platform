@@ -35,6 +35,10 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Tabs,
+  Tab,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
@@ -81,6 +85,8 @@ interface ExecutionResult {
     totalDuration?: number;
     memoryUsage?: number;
   };
+  // 后端返回的执行ID，用于后续单步重试
+  backendExecutionId?: string;
 }
 
 interface WorkflowExecutionProps {
@@ -100,8 +106,18 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
   const [debugMode, setDebugMode] = useState(false);
   const [inputDialogOpen, setInputDialogOpen] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
+  const [inputTab, setInputTab] = useState<'form' | 'json'>('form');
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [executionInput, setExecutionInput] = useState('{}');
+  // 表单模式字段
+  const [formPrompt, setFormPrompt] = useState('');
+  const [formSystemPrompt, setFormSystemPrompt] = useState('');
+  const [formKnowledgeBase, setFormKnowledgeBase] = useState('');
+  const [formTopK, setFormTopK] = useState<number | ''>('');
+  const [formTemperature, setFormTemperature] = useState<number | ''>('');
+  const [formMaxTokens, setFormMaxTokens] = useState<number | ''>('');
+  const [formEnableParallel, setFormEnableParallel] = useState(true);
+  const [customFields, setCustomFields] = useState<Array<{ key: string; type: 'string' | 'number' | 'boolean'; value: string }>>([]);
   const [currentExecution, setCurrentExecution] = useState<ExecutionResult | null>(null);
   const [executionHistory, setExecutionHistory] = useState<ExecutionResult[]>([]);
   const [workflowName, setWorkflowName] = useState('');
@@ -128,11 +144,14 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
   };
 
   const handleExecute = async () => {
-    if (!executionInput.trim()) {
-      setInputDialogOpen(true);
-      return;
+    // 若未配置输入，打开输入对话框
+    if (inputTab === 'json') {
+      if (!executionInput.trim()) { setInputDialogOpen(true); return; }
+      try { JSON.parse(executionInput); setInputError(null); } catch (e: any) { setInputError(e.message || 'JSON 解析错误'); setInputDialogOpen(true); return; }
+    } else {
+      // 表单模式无需 JSON 校验
+      setInputError(null);
     }
-    try { JSON.parse(executionInput); setInputError(null); } catch (e: any) { setInputError(e.message || 'JSON 解析错误'); setInputDialogOpen(true); return; }
 
     setIsExecuting(true);
     const executionId = `exec_${Date.now()}`;
@@ -153,13 +172,16 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
     setCurrentExecution(execution);
 
     try {
-      if (workflowId) {
-        // 使用后端API执行工作流
-        await executeWithBackend(workflowId, execution);
-      } else {
-        // 本地模拟执行
-        await executeLocally(execution);
+      if (!workflowId) {
+        // 不再本地模拟；提示需先保存并使用后端执行
+        execution.status = 'error';
+        execution.error = '请先保存工作流再执行（不提供本地模拟）';
+        execution.endTime = Date.now();
+        setCurrentExecution({ ...execution });
+        return;
       }
+      // 使用后端API执行工作流
+      await executeWithBackend(workflowId, execution);
     } catch (error) {
       console.error('Execution failed:', error);
       execution.status = 'error';
@@ -174,37 +196,75 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
 
   // 构建推荐输入（简单根据节点类型推断）
   const buildRecommendedInput = () => {
-    const recommended: any = {};
     const hasLLM = nodes.some((n: any) => (n.data?.type || n.type) === 'llm');
     const hasRetriever = nodes.some((n: any) => (n.data?.type || n.type) === 'rag_retriever');
     const hasInput = nodes.some((n: any) => (n.data?.type || n.type) === 'input');
-    if (hasLLM) {
-      recommended.prompt = recommended.prompt || '请用一句话介绍这个系统';
-      recommended.system_prompt = '';
+    if (inputTab === 'json') {
+      const recommended: any = {};
+      if (hasLLM) {
+        recommended.prompt = recommended.prompt || '请用一句话介绍这个系统';
+        recommended.system_prompt = '';
+        recommended.temperature = 0.7;
+      }
+      if (hasRetriever) {
+        recommended.query = recommended.query || '公司加班政策';
+        recommended.top_k = 5;
+      }
+      if (hasInput) {
+        recommended.text = recommended.text || '测试输入';
+      }
+      setExecutionInput(JSON.stringify(recommended, null, 2));
+    } else {
+      if (hasLLM) {
+        setFormPrompt((v) => v || '请用一句话介绍这个系统');
+        setFormTemperature((v) => v === '' ? 0.7 : v);
+      }
+      if (hasRetriever) {
+        setFormTopK((v) => v === '' ? 5 : v);
+      }
     }
-    if (hasRetriever) {
-      recommended.query = recommended.query || '公司加班政策';
-    }
-    if (hasInput) {
-      recommended.text = recommended.text || '测试输入';
-    }
-    setExecutionInput(JSON.stringify(recommended, null, 2));
+  };
+
+  const buildFormInputData = () => {
+    const data: any = {};
+    if (formPrompt) data.prompt = formPrompt;
+    if (formSystemPrompt) data.system_prompt = formSystemPrompt;
+    if (formKnowledgeBase) data.knowledge_base = formKnowledgeBase;
+    if (formTopK !== '') data.top_k = Number(formTopK);
+    if (formTemperature !== '') data.temperature = Number(formTemperature);
+    if (formMaxTokens !== '') data.max_tokens = Number(formMaxTokens);
+    // 若有检索节点但未显式提供 query，默认用 prompt 作为 query
+    const hasRetriever = nodes.some((n: any) => (n.data?.type || n.type) === 'rag_retriever');
+    if (hasRetriever && !data.query && data.prompt) data.query = data.prompt;
+    // 自定义字段
+    customFields.forEach((f) => {
+      if (!f.key) return;
+      if (f.type === 'number') data[f.key] = Number(f.value);
+      else if (f.type === 'boolean') data[f.key] = ['true', '1', 'yes', 'on'].includes(String(f.value).toLowerCase());
+      else data[f.key] = f.value;
+    });
+    return data;
   };
 
   const executeWithBackend = async (workflowId: string, execution: ExecutionResult) => {
     try {
-      let inputData;
-      try {
-        inputData = JSON.parse(executionInput);
-      } catch {
-        inputData = { input: executionInput };
+      let inputData: any;
+      if (inputTab === 'json') {
+        try {
+          inputData = JSON.parse(executionInput);
+        } catch {
+          inputData = { input: executionInput };
+        }
+      } else {
+        inputData = buildFormInputData();
       }
 
       await workflowApi.executeStream(
         workflowId,
         {
           input_data: inputData,
-          debug: debugMode
+          debug: debugMode,
+          enable_parallel: formEnableParallel,
         },
         // onProgress
         (progress) => {
@@ -246,6 +306,10 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
         (result) => {
           execution.status = 'completed';
           execution.result = result.result;
+          // 记录后端执行ID以便单步重试
+          try {
+            execution.backendExecutionId = result?.result?.execution_id;
+          } catch {}
           execution.endTime = Date.now();
           
           if (execution.metrics) {
@@ -254,6 +318,8 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
 
           setCurrentExecution({...execution});
           setExecutionHistory(prev => [execution, ...prev]);
+          // 拉取后端的执行历史，确保拿到真实 execution_id
+          loadExecutionHistory();
         }
       );
     } catch (error) {
@@ -417,6 +483,146 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
     }
   };
 
+  // 计算某节点的所有下游节点（用于前端模拟的单步重试）
+  const getDescendantNodeIds = (startNodeId: string): string[] => {
+    const visited = new Set<string>();
+    const queue: string[] = [startNodeId];
+    while (queue.length) {
+      const nid = queue.shift()!;
+      if (visited.has(nid)) continue;
+      visited.add(nid);
+      const children = edges.filter(e => e.source === nid).map(e => e.target);
+      children.forEach((c) => { if (!visited.has(c)) queue.push(c); });
+    }
+    // 移除起始节点本身仅在需要时处理；这里保留起始节点
+    return Array.from(visited);
+  };
+
+  // 前端模拟：重试指定步骤（重跑该步及其下游）
+  const retryStepLocal = async (stepId: string) => {
+    if (!currentExecution) return;
+    if (isExecuting) return; // 正在执行时不允许重试
+
+    const exec = { ...currentExecution } as ExecutionResult;
+    const step = exec.steps.find(s => s.id === stepId);
+    if (!step) return;
+
+    const affectedNodeIds = getDescendantNodeIds(step.nodeId);
+
+    // 将受影响步骤置为pending
+    exec.steps = exec.steps.map((s) => (
+      affectedNodeIds.includes(s.nodeId)
+        ? { ...s, status: 'pending', error: undefined, output: undefined, startTime: undefined, endTime: undefined, duration: undefined }
+        : s
+    ));
+    setCurrentExecution(exec);
+
+    // 顺序重跑：从当前步开始，按当前 steps 顺序依次执行受影响的节点
+    for (const s of exec.steps) {
+      if (!affectedNodeIds.includes(s.nodeId)) continue;
+      s.status = 'running';
+      s.startTime = Date.now();
+      setCurrentExecution({ ...exec });
+
+      // 模拟耗时
+      const executionTime = Math.random() * 1500 + 400;
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise(resolve => setTimeout(resolve, executionTime));
+
+      // 90% 成功率
+      const success = Math.random() > 0.1;
+      s.endTime = Date.now();
+      s.duration = s.endTime - s.startTime;
+      s.memory = Math.floor(Math.random() * 100) + 50;
+      if (success) {
+        const node = nodes.find(n => n.id === s.nodeId)!;
+        s.status = 'completed';
+        s.output = generateMockOutput(node);
+      } else {
+        s.status = 'error';
+        s.error = '模拟执行错误';
+        break;
+      }
+      // 更新指标
+      if (exec.metrics) {
+        exec.metrics.completedNodes = exec.steps.filter(ss => ss.status === 'completed').length;
+        exec.metrics.errorNodes = exec.steps.filter(ss => ss.status === 'error').length;
+      }
+      setCurrentExecution({ ...exec });
+    }
+  };
+
+  // 后端：重试指定节点（重跑该节点及其下游）
+  const retryStepBackend = async (nodeId: string) => {
+    if (!workflowId) {
+      alert('请先保存工作流再执行（不提供本地模拟）');
+      return;
+    }
+
+    // 优先从当前执行获取后端执行ID；否则尝试从历史记录获取最近一次
+    let baseExecutionId = currentExecution?.backendExecutionId;
+    if (!baseExecutionId) {
+      try {
+        const res = await workflowApi.getExecutionHistory(workflowId);
+        const list = res.data?.executions || [];
+        if (list.length > 0) baseExecutionId = list[0].execution_id;
+      } catch (e) {
+        console.error('加载执行历史失败:', e);
+      }
+    }
+
+    if (!baseExecutionId) {
+      alert('未找到可重试的后端执行ID，请先执行一次工作流');
+      return;
+    }
+
+    setIsExecuting(true);
+    try {
+      const response = await workflowApi.retryStep(workflowId, baseExecutionId, nodeId);
+      const data = response.data || response;
+
+      // 用返回结果构建新的当前执行视图
+      const newExec: ExecutionResult = {
+        id: `exec_${Date.now()}`,
+        status: data.status || 'completed',
+        startTime: Date.now(),
+        endTime: Date.now(),
+        steps: (data.steps || []).map((s: any) => ({
+          id: s.step_id,
+          nodeId: s.node_id,
+          nodeName: s.node_name,
+          status: s.status,
+          startTime: undefined,
+          endTime: undefined,
+          duration: s.duration,
+          input: s.input,
+          output: s.output,
+          error: s.error,
+          memory: undefined,
+        })),
+        metrics: {
+          totalNodes: nodes.length,
+          completedNodes: (data.steps || []).filter((s: any) => s.status === 'completed').length,
+          errorNodes: (data.steps || []).filter((s: any) => s.status === 'error').length,
+          totalDuration: undefined,
+          memoryUsage: undefined,
+        },
+        backendExecutionId: data.execution_id,
+        result: { output_data: data.output_data },
+        error: data.error,
+      };
+
+      setCurrentExecution(newExec);
+      // 刷新历史
+      await loadExecutionHistory();
+    } catch (e: any) {
+      console.error('单步重试失败:', e);
+      alert(`单步重试失败: ${e?.message || '未知错误'}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* 控制栏 */}
@@ -503,12 +709,14 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
                 }
               }}
             />
-            <Typography variant="body2" sx={{ color: 'white', mt: 1 }}>
-              执行进度: {currentExecution.metrics?.completedNodes || 0} / {currentExecution.metrics?.totalNodes || 0}
+            <Box sx={{ display: 'flex', alignItems: 'center', mt: 1 }}>
+              <Typography variant="body2" sx={{ color: 'white' }}>
+                执行进度: {currentExecution.metrics?.completedNodes || 0} / {currentExecution.metrics?.totalNodes || 0}
+              </Typography>
               {currentExecution.status === 'running' && (
                 <Chip label="执行中" size="small" sx={{ ml: 1, backgroundColor: 'rgba(76, 175, 80, 0.2)' }} />
               )}
-            </Typography>
+            </Box>
           </Box>
         )}
       </Paper>
@@ -600,7 +808,13 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
                           </Alert>
                         )}
                         <Box sx={{ display: 'flex', gap: 1, mt: 1 }}>
-                          <Button size="small" variant="outlined" onClick={() => alert('单步重试：当前为前端模拟，后端逐步重试接口待对接')}>重试该步</Button>
+                          <Button 
+                            size="small" 
+                            variant="outlined" 
+                            onClick={() => retryStepBackend(step.nodeId)}
+                          >
+                            重试该步
+                          </Button>
                         </Box>
                       </Box>
                     </StepContent>
@@ -677,27 +891,76 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
       <Dialog open={inputDialogOpen} onClose={() => setInputDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>执行输入参数</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" sx={{ mb: 1, color: 'text.secondary' }}>
-            使用 JSON 格式填写工作流执行的 input_data。你也可以点击“填充建议”快速生成示例。
-          </Typography>
-          <TextField
-            fullWidth
-            multiline
-            minRows={10}
-            label="输入数据 (JSON)"
-            value={executionInput}
-            onChange={(e) => setExecutionInput(e.target.value)}
-            placeholder='例如: {"prompt": "你好", "system_prompt": "你是助手"}'
-            sx={{ mt: 1, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
-          />
-          {inputError && <Alert severity="error" sx={{ mt: 1 }}>{inputError}</Alert>}
+          <Tabs value={inputTab} onChange={(_, v) => setInputTab(v)} sx={{ mb: 1 }}>
+            <Tab label="表单" value="form" />
+            <Tab label="JSON" value="json" />
+          </Tabs>
+          {inputTab === 'form' ? (
+            <>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
+                <TextField label="Prompt" value={formPrompt} onChange={(e) => setFormPrompt(e.target.value)} fullWidth />
+                <TextField label="System Prompt" value={formSystemPrompt} onChange={(e) => setFormSystemPrompt(e.target.value)} fullWidth />
+                <TextField label="知识库(可选)" value={formKnowledgeBase} onChange={(e) => setFormKnowledgeBase(e.target.value)} fullWidth />
+                <TextField label="Top K" type="number" value={formTopK} onChange={(e) => setFormTopK(e.target.value === '' ? '' : Number(e.target.value))} fullWidth />
+                <TextField label="Temperature" type="number" value={formTemperature} onChange={(e) => setFormTemperature(e.target.value === '' ? '' : Number(e.target.value))} fullWidth />
+                <TextField label="Max Tokens" type="number" value={formMaxTokens} onChange={(e) => setFormMaxTokens(e.target.value === '' ? '' : Number(e.target.value))} fullWidth />
+              </Box>
+              <Box sx={{ mt: 1 }}>
+                <FormControlLabel control={<Switch checked={formEnableParallel} onChange={(e) => setFormEnableParallel(e.target.checked)} />} label="并行执行" />
+                <FormControlLabel control={<Switch checked={debugMode} onChange={(e) => setDebugMode(e.target.checked)} />} label="调试模式" />
+              </Box>
+
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>自定义字段</Typography>
+                {customFields.map((f, idx) => (
+                  <Box key={idx} sx={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr auto', gap: 1, mb: 1 }}>
+                    <TextField placeholder="key" value={f.key} onChange={(e) => {
+                      const copy = customFields.slice(); copy[idx].key = e.target.value; setCustomFields(copy);
+                    }} />
+                    <TextField select value={f.type} onChange={(e) => {
+                      const copy = customFields.slice(); copy[idx].type = (e.target.value as any); setCustomFields(copy);
+                    }}>
+                      <MenuItem value="string">string</MenuItem>
+                      <MenuItem value="number">number</MenuItem>
+                      <MenuItem value="boolean">boolean</MenuItem>
+                    </TextField>
+                    <TextField placeholder="value" value={f.value} onChange={(e) => {
+                      const copy = customFields.slice(); copy[idx].value = e.target.value; setCustomFields(copy);
+                    }} />
+                    <Button size="small" onClick={() => setCustomFields(customFields.filter((_, i) => i !== idx))}>删除</Button>
+                  </Box>
+                ))}
+                <Button size="small" onClick={() => setCustomFields([...customFields, { key: '', type: 'string', value: '' }])}>添加字段</Button>
+              </Box>
+            </>
+          ) : (
+            <>
+              <Typography variant="body2" sx={{ mb: 1, color: 'text.secondary' }}>
+                使用 JSON 格式填写工作流执行的 input_data。你也可以点击“填充建议”快速生成示例。
+              </Typography>
+              <TextField
+                fullWidth
+                multiline
+                minRows={10}
+                label="输入数据 (JSON)"
+                value={executionInput}
+                onChange={(e) => setExecutionInput(e.target.value)}
+                placeholder='例如: {"prompt": "你好", "system_prompt": "你是助手"}'
+                sx={{ mt: 1, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+              />
+              {inputError && <Alert severity="error" sx={{ mt: 1 }}>{inputError}</Alert>}
+            </>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setInputDialogOpen(false)}>取消</Button>
           <Button onClick={buildRecommendedInput}>填充建议</Button>
           <Button 
             onClick={() => {
-              try { JSON.parse(executionInput); setInputError(null); setInputDialogOpen(false); } catch (e: any) { setInputError(e.message || 'JSON 解析错误'); return; }
+              if (inputTab === 'json') {
+                try { JSON.parse(executionInput); setInputError(null); } catch (e: any) { setInputError(e.message || 'JSON 解析错误'); return; }
+              }
+              setInputDialogOpen(false);
               handleExecute();
             }} 
             variant="contained"

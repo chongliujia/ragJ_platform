@@ -28,6 +28,7 @@ langchain-openai
 qdrant-client
 pymilvus
 elasticsearch>=8.11.0,<9.0.0
+networkx
 
 # 通义千问SDK
 dashscope

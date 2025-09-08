@@ -59,6 +59,7 @@ interface InputOutputNodeData {
 const InputOutputNode: React.FC<NodeProps<InputOutputNodeData>> = ({ data, selected }) => {
   const [configOpen, setConfigOpen] = useState(false);
   const [config, setConfig] = useState(data.config || {});
+  const status = (data as any).status as 'idle' | 'running' | 'success' | 'error' | undefined;
 
   const getNodeIcon = () => {
     switch (data.type) {
@@ -360,16 +361,30 @@ const InputOutputNode: React.FC<NodeProps<InputOutputNodeData>> = ({ data, selec
       <Box
         sx={{
           background: getNodeColor(),
-          border: selected ? '2px solid #00d4ff' : '1px solid rgba(255, 255, 255, 0.2)',
+          border: selected
+            ? '2px solid #00d4ff'
+            : status === 'running'
+              ? '2px solid #00d4ff'
+              : status === 'success'
+                ? '2px solid #4caf50'
+                : status === 'error'
+                  ? '2px solid #f44336'
+                  : '1px solid rgba(255, 255, 255, 0.2)',
           borderRadius: 3,
           padding: 2,
           minWidth: 140,
           maxWidth: 200,
           color: 'white',
           position: 'relative',
-          boxShadow: selected 
-            ? '0 8px 32px rgba(0, 212, 255, 0.4)' 
-            : '0 4px 20px rgba(0, 0, 0, 0.3)',
+          boxShadow: selected
+            ? '0 8px 32px rgba(0, 212, 255, 0.4)'
+            : status === 'running'
+              ? '0 8px 28px rgba(0, 212, 255, 0.35)'
+              : status === 'success'
+                ? '0 8px 28px rgba(76, 175, 80, 0.35)'
+                : status === 'error'
+                  ? '0 8px 28px rgba(244, 67, 54, 0.35)'
+                  : '0 4px 20px rgba(0, 0, 0, 0.3)',
           transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           cursor: 'pointer',
           backdropFilter: 'blur(10px)',
@@ -385,6 +400,7 @@ const InputOutputNode: React.FC<NodeProps<InputOutputNodeData>> = ({ data, selec
           <Handle
             type="target"
             position={Position.Left}
+            id={data.type === 'output' ? 'data' : 'input'}
             style={{
               background: 'linear-gradient(45deg, #ffffff 0%, #84fab0 100%)',
               border: '2px solid #4caf50',
@@ -459,6 +475,7 @@ const InputOutputNode: React.FC<NodeProps<InputOutputNodeData>> = ({ data, selec
           <Handle
             type="source"
             position={Position.Right}
+            id={data.type === 'input' ? 'data' : 'result'}
             style={{
               background: 'linear-gradient(45deg, #84fab0 0%, #ffffff 100%)',
               border: '2px solid #4caf50',

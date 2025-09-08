@@ -19,6 +19,7 @@ from .workflow import (
     WorkflowStatus,
     ExecutionStatus
 )
+from .api_key import ApiKey
 
 __all__ = [
     "Base",
@@ -43,4 +44,5 @@ __all__ = [
     "WorkflowSchedule",
     "WorkflowStatus",
     "ExecutionStatus",
+    "ApiKey",
 ]

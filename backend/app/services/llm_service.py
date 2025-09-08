@@ -853,18 +853,45 @@ class LLMService:
         """
         # Use configured provider and model if not specified
         if model is None:
-            # 优先使用前端配置的模型设置
+            # 优先使用模型配置服务（含API Key与Base URL）
             try:
                 from app.services.model_config_service import (
                     model_config_service,
                     ModelType,
                 )
-                
+
                 chat_config = model_config_service.get_active_model(ModelType.CHAT)
                 logger.info(f"DEBUG: Got chat config from service: {chat_config}")
                 if chat_config:
                     provider = chat_config.provider.value
                     model = chat_config.model_name
+
+                    # 将保存的密钥与base url注入到对应服务
+                    if provider == "deepseek":
+                        if chat_config.api_key:
+                            self.deepseek.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.deepseek.base_url = chat_config.api_base
+                        # DeepSeek服务内部使用 self.model
+                        self.deepseek.model = model
+                    elif provider == "qwen":
+                        if chat_config.api_key:
+                            self.qwen.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.qwen.base_url = chat_config.api_base
+                        self.qwen.model = model
+                    elif provider == "openai":
+                        if chat_config.api_key:
+                            self.openai.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.openai.base_url = chat_config.api_base
+
+                    # 使用用户保存的默认推理参数（如有）
+                    if chat_config.temperature is not None:
+                        temperature = chat_config.temperature
+                    if chat_config.max_tokens is not None:
+                        max_tokens = chat_config.max_tokens
+
                     logger.info(f"Using model config service chat model: {provider}/{model}")
                 else:
                     # 回退到环境变量配置
@@ -877,15 +904,65 @@ class LLMService:
                 model = settings.CHAT_MODEL_NAME
                 logger.info(f"Exception fallback chat model: {provider}/{model}")
         else:
-            # Determine provider from model name
+            # 当指定了具体模型时，根据模型名称确定提供商，但需要加载API密钥配置
+            logger.info(f"Using specified model: {model}")
             if model.startswith("deepseek"):
                 provider = "deepseek"
             elif model.startswith("qwen"):
-                provider = "qwen"
+                provider = "qwen" 
             elif model.startswith("gpt"):
                 provider = "openai"
             else:
-                provider = settings.CHAT_MODEL_PROVIDER
+                # 对于未知模型，尝试从配置服务获取默认提供商
+                try:
+                    from app.services.model_config_service import (
+                        model_config_service,
+                        ModelType,
+                    )
+                    chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                    if chat_config:
+                        provider = chat_config.provider.value
+                        logger.info(f"Unknown model '{model}', using default provider: {provider}")
+                    else:
+                        provider = settings.CHAT_MODEL_PROVIDER
+                        logger.info(f"Unknown model '{model}', fallback to settings provider: {provider}")
+                except Exception:
+                    provider = settings.CHAT_MODEL_PROVIDER
+                    logger.info(f"Unknown model '{model}', fallback to settings provider: {provider}")
+            
+            # 为指定的模型加载API密钥配置，但不覆盖模型名称
+            try:
+                from app.services.model_config_service import (
+                    model_config_service,
+                    ModelType,
+                )
+                chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                if chat_config and chat_config.provider.value == provider:
+                    # 只有当配置服务的提供商与推断的提供商一致时，才使用其API密钥
+                    if provider == "deepseek":
+                        if chat_config.api_key:
+                            self.deepseek.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.deepseek.base_url = chat_config.api_base
+                        # 设置指定的模型名称而不是配置服务的默认模型
+                        self.deepseek.model = model
+                    elif provider == "qwen":
+                        if chat_config.api_key:
+                            self.qwen.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.qwen.base_url = chat_config.api_base
+                        # 设置指定的模型名称而不是配置服务的默认模型
+                        self.qwen.model = model
+                    elif provider == "openai":
+                        if chat_config.api_key:
+                            self.openai.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.openai.base_url = chat_config.api_base
+                    logger.info(f"Loaded API keys for provider '{provider}' with specified model '{model}'")
+                else:
+                    logger.warning(f"No matching API config found for provider '{provider}', using environment variables")
+            except Exception as e:
+                logger.warning(f"Failed to load API keys for specified model: {e}")
 
         logger.info(f"Using chat provider: {provider}, model: {model}")
 
@@ -934,21 +1011,45 @@ class LLMService:
         # Use configured provider and model if not specified
         logger.info(f"STREAM_DEBUG: Starting model selection for streaming, model={model}")
         if model is None:
-            # 优先使用前端配置的模型设置
+            # 优先使用配置文件中的密钥与基础URL
             try:
                 from app.services.model_config_service import (
                     model_config_service,
                     ModelType,
                 )
-                
+
                 chat_config = model_config_service.get_active_model(ModelType.CHAT)
                 logger.info(f"DEBUG: Got chat config from service: {chat_config}")
                 if chat_config:
                     provider = chat_config.provider.value
                     model = chat_config.model_name
+
+                    if provider == "deepseek":
+                        if chat_config.api_key:
+                            self.deepseek.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.deepseek.base_url = chat_config.api_base
+                        self.deepseek.model = model
+                    elif provider == "qwen":
+                        if chat_config.api_key:
+                            self.qwen.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.qwen.base_url = chat_config.api_base
+                        self.qwen.model = model
+                    elif provider == "openai":
+                        if chat_config.api_key:
+                            self.openai.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.openai.base_url = chat_config.api_base
+
+                    # 使用用户保存的默认推理参数（如有）
+                    if chat_config.temperature is not None:
+                        temperature = chat_config.temperature
+                    if chat_config.max_tokens is not None:
+                        max_tokens = chat_config.max_tokens
+
                     logger.info(f"Using model config service chat model for streaming: {provider}/{model}")
                 else:
-                    # 回退到环境变量配置
                     provider = settings.CHAT_MODEL_PROVIDER
                     model = settings.CHAT_MODEL_NAME
                     logger.info(f"No config service data, using settings chat model for streaming: {provider}/{model}")
@@ -1094,8 +1195,26 @@ class LLMService:
         """
         # Use configured provider and model if not specified
         if model is None:
-            provider = settings.RERANK_MODEL_PROVIDER
-            model = settings.RERANK_MODEL_NAME
+            # 优先从模型配置服务读取（允许不同提供商）
+            try:
+                from app.services.model_config_service import (
+                    model_config_service,
+                    ModelType,
+                )
+                rerank_config = model_config_service.get_active_model(ModelType.RERANKING)
+                if rerank_config:
+                    provider = rerank_config.provider.value
+                    model = rerank_config.model_name
+                    if provider == "qwen" and rerank_config.api_key:
+                        self.qwen.api_key = rerank_config.api_key
+                        if rerank_config.api_base:
+                            self.qwen.base_url = rerank_config.api_base
+                else:
+                    provider = settings.RERANK_MODEL_PROVIDER
+                    model = settings.RERANK_MODEL_NAME
+            except Exception:
+                provider = settings.RERANK_MODEL_PROVIDER
+                model = settings.RERANK_MODEL_NAME
         else:
             # Determine provider from model name
             if "qwen" in model or "gte-rerank" in model:
@@ -1107,6 +1226,7 @@ class LLMService:
 
         try:
             if provider == "qwen":
+                # 若Qwen服务支持选择模型，可在服务内读取 settings 或扩展函数参数
                 return await self.qwen.rerank(query, documents, top_n)
             else:
                 logger.warning(

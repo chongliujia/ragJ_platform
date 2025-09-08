@@ -64,7 +64,8 @@ class ModelConfigService:
     """模型配置管理服务"""
 
     def __init__(self):
-        self.config_file = "model_configs.json"
+        # 允许通过环境变量自定义保存路径，便于生产环境将密钥存储到挂载卷
+        self.config_file = os.getenv("MODEL_CONFIG_FILE", "model_configs.json")
         self.providers: Dict[ProviderType, ProviderConfig] = {}
         self.active_models: Dict[ModelType, ModelConfig] = {}
         self._load_default_providers()

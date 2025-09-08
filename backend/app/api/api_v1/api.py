@@ -17,6 +17,8 @@ from app.api.api_v1.endpoints import (
     admin,
     teams,
     workflows,
+    public,
+    api_keys,
 )
 
 api_router = APIRouter()
@@ -56,4 +58,14 @@ api_router.include_router(
 # Add workflow management endpoints
 api_router.include_router(
     workflows.router, prefix="/workflows", tags=["Workflow Management"]
+)
+
+# Public API (x-api-key) for embedding/integration
+api_router.include_router(
+    public.router, prefix="/public", tags=["Public API"]
+)
+
+# Admin: API keys management
+api_router.include_router(
+    api_keys.router, prefix="/admin", tags=["Admin"]
 )

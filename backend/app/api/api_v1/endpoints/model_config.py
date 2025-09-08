@@ -422,3 +422,66 @@ async def get_model_presets():
     }
 
     return {"presets": presets}
+
+
+@router.get("/available-chat-models")
+async def get_available_chat_models():
+    """获取可用的聊天模型列表（只返回已配置API密钥的模型）"""
+    try:
+        available_models = []
+        
+        # 直接检查当前活跃的聊天模型配置
+        chat_config = model_config_service.get_active_model(ModelType.CHAT)
+        logger.info(f"DEBUG: Current chat config: {chat_config}")
+        
+        if chat_config and chat_config.api_key:
+            # 如果有活跃的聊天模型配置，返回该配置
+            available_models.append({
+                "model_name": chat_config.model_name,
+                "provider": chat_config.provider.value,
+                "provider_display_name": model_config_service.get_provider(chat_config.provider).display_name if model_config_service.get_provider(chat_config.provider) else chat_config.provider.value,
+                "model_display_name": f"{model_config_service.get_provider(chat_config.provider).display_name if model_config_service.get_provider(chat_config.provider) else chat_config.provider.value} - {chat_config.model_name}"
+            })
+            
+            # 获取同一提供商的其他可用模型
+            provider_config = model_config_service.get_provider(chat_config.provider)
+            if provider_config:
+                chat_models = provider_config.models.get(ModelType.CHAT, [])
+                logger.info(f"DEBUG: Provider {chat_config.provider.value} has models: {chat_models}")
+                
+                for model_name in chat_models:
+                    # 避免重复添加已经添加的当前活跃模型
+                    if model_name != chat_config.model_name:
+                        available_models.append({
+                            "model_name": model_name,
+                            "provider": chat_config.provider.value,
+                            "provider_display_name": provider_config.display_name,
+                            "model_display_name": f"{provider_config.display_name} - {model_name}"
+                        })
+        else:
+            # 如果没有活跃配置，检查所有有API密钥的提供商
+            providers = model_config_service.get_providers()
+            logger.info(f"DEBUG: No active chat config, checking {len(providers)} providers")
+            
+            for provider_type, provider_config in providers.items():
+                logger.info(f"DEBUG: Provider {provider_type.value}: api_key={bool(provider_config.api_key)}, enabled={provider_config.enabled}")
+                
+                if provider_config.api_key and provider_config.enabled:
+                    chat_models = provider_config.models.get(ModelType.CHAT, [])
+                    logger.info(f"DEBUG: Provider {provider_type.value} has {len(chat_models)} chat models: {chat_models}")
+                    
+                    for model_name in chat_models:
+                        available_models.append({
+                            "model_name": model_name,
+                            "provider": provider_type.value,
+                            "provider_display_name": provider_config.display_name,
+                            "model_display_name": f"{provider_config.display_name} - {model_name}"
+                        })
+        
+        logger.info(f"Found {len(available_models)} available chat models: {[m['model_name'] for m in available_models]}")
+        return {"models": available_models}
+        
+    except Exception as e:
+        logger.error(f"Failed to get available chat models: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get available chat models")
+

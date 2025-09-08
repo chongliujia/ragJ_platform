@@ -91,6 +91,8 @@ const WorkflowManagement: React.FC = () => {
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [currentWorkflowId, setCurrentWorkflowId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   // 模拟数据，当后端接口不可用时使用
   const mockWorkflows: Workflow[] = [
@@ -151,6 +153,15 @@ const WorkflowManagement: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    try {
+      const id = localStorage.getItem('current_workflow_id');
+      if (id) setCurrentWorkflowId(id);
+      const onStorage = (e: StorageEvent) => {
+        if (e.key === 'current_workflow_id') setCurrentWorkflowId(e.newValue);
+      };
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    } catch {}
   }, []);
 
   const loadData = async () => {
@@ -235,21 +246,31 @@ const WorkflowManagement: React.FC = () => {
     try {
       if (selectedTab === 'workflows') {
         await workflowApi.delete(selectedItem.id);
+        // 本地状态立即移除
+        setWorkflows((prev) => prev.filter(w => w.id !== (selectedItem as Workflow).id));
+        try {
+          const cur = localStorage.getItem('current_workflow_id');
+          if (cur && cur === (selectedItem as Workflow).id) {
+            localStorage.removeItem('current_workflow_id');
+            setCurrentWorkflowId(null);
+          }
+        } catch {}
       } else {
         await agentApi.delete(selectedItem.id);
+        setAgents((prev) => prev.filter(a => a.id !== (selectedItem as Agent).id));
       }
       
       setDeleteDialogOpen(false);
       setSelectedItem(null);
-      loadData();
+      // 不强制 reload，避免闪烁
     } catch (error) {
       console.error('Failed to delete item:', error);
       
       // 即使删除失败，也关闭对话框并重新加载数据
       setDeleteDialogOpen(false);
       setSelectedItem(null);
-      // 显示错误提示但不阻止用户继续操作
-      alert('删除失败，可能是后端接口不可用');
+      // 回退：后端不可用情况下就从本地列表移除（前面已移除）
+      // 可以在此处追加提示
     }
   };
 
@@ -259,8 +280,8 @@ const WorkflowManagement: React.FC = () => {
   };
 
   const handleMenuClose = () => {
+    // 仅关闭菜单，不清空选中项，以便后续操作（删除）可以读取 selectedItem
     setMenuAnchor(null);
-    setSelectedItem(null);
   };
 
   const formatDate = (dateString: string) => {
@@ -288,7 +309,7 @@ const WorkflowManagement: React.FC = () => {
       sx={{
         height: '100%',
         background: 'linear-gradient(135deg, rgba(26, 31, 46, 0.8) 0%, rgba(15, 20, 25, 0.8) 100%)',
-        border: '1px solid rgba(0, 212, 255, 0.2)',
+        border: `1px solid ${currentWorkflowId === workflow.id ? 'rgba(102,187,106,0.8)' : 'rgba(0, 212, 255, 0.2)'}`,
         borderRadius: 3,
         transition: 'all 0.3s ease',
         '&:hover': {
@@ -317,6 +338,9 @@ const WorkflowManagement: React.FC = () => {
                   mt: 0.5
                 }}
               />
+              {currentWorkflowId === workflow.id && (
+                <Chip label="当前" size="small" sx={{ ml: 1, backgroundColor: 'rgba(102,187,106,0.2)', color: '#66bb6a' }} />
+              )}
             </Box>
           </Box>
           <IconButton
@@ -335,17 +359,17 @@ const WorkflowManagement: React.FC = () => {
         <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-              节点: {workflow.nodes?.length || 0}
+              节点: { (workflow as any).node_count ?? (workflow.nodes?.length || 0) }
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-              连接: {workflow.edges?.length || 0}
+              连接: { (workflow as any).edge_count ?? (workflow.edges?.length || 0) }
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center' }}>
             <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-              执行: {workflow.executions_count || 0}
+              执行: { (workflow as any).execution_count ?? workflow.executions_count ?? 0 }
             </Typography>
           </Box>
         </Box>
@@ -376,6 +400,21 @@ const WorkflowManagement: React.FC = () => {
           }}
         >
           执行
+        </Button>
+        <Button
+          startIcon={<ViewIcon />}
+          size="small"
+          sx={{ color: currentWorkflowId === workflow.id ? '#66bb6a' : '#00d4ff' }}
+          onClick={() => {
+            try {
+              localStorage.setItem('current_workflow_id', workflow.id);
+              setCurrentWorkflowId(workflow.id);
+              setNotice(`已设为当前工作流：${workflow.name}`);
+              setTimeout(() => setNotice(null), 2000);
+            } catch {}
+          }}
+        >
+          设为当前
         </Button>
       </CardActions>
     </Card>
@@ -472,9 +511,13 @@ const WorkflowManagement: React.FC = () => {
 
   return (
     <Box sx={{ 
-      minHeight: '100vh',
+      height: '100%',
+      maxHeight: '100%',
       background: 'linear-gradient(135deg, #0a0e1a 0%, #1a1f2e 50%, #0f1419 100%)',
-      p: 3
+      p: 3,
+      overflow: 'auto',
+      display: 'flex',
+      flexDirection: 'column'
     }}>
       {/* 头部 */}
       <Box sx={{ mb: 4 }}>
@@ -547,51 +590,53 @@ const WorkflowManagement: React.FC = () => {
       </Alert>
 
       {/* 内容区域 */}
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <Typography sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-            加载中...
-          </Typography>
-        </Box>
-      ) : (
-        <Grid container spacing={3}>
-          {selectedTab === 'workflows' ? (
-            workflows.length > 0 ? (
-              workflows.map(renderWorkflowCard)
+      <Box sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
+            <Typography sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+              加载中...
+            </Typography>
+          </Box>
+        ) : (
+          <Grid container spacing={3}>
+            {selectedTab === 'workflows' ? (
+              workflows.length > 0 ? (
+                workflows.map(renderWorkflowCard)
+              ) : (
+                <Grid item xs={12}>
+                  <Alert 
+                    severity="info" 
+                    sx={{ 
+                      backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                      color: '#2196f3',
+                      border: '1px solid rgba(33, 150, 243, 0.2)'
+                    }}
+                  >
+                    暂无工作流，点击右下角按钮创建您的第一个工作流
+                  </Alert>
+                </Grid>
+              )
             ) : (
-              <Grid item xs={12}>
-                <Alert 
-                  severity="info" 
-                  sx={{ 
-                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                    color: '#2196f3',
-                    border: '1px solid rgba(33, 150, 243, 0.2)'
-                  }}
-                >
-                  暂无工作流，点击右下角按钮创建您的第一个工作流
-                </Alert>
-              </Grid>
-            )
-          ) : (
-            agents.length > 0 ? (
-              agents.map(renderAgentCard)
-            ) : (
-              <Grid item xs={12}>
-                <Alert 
-                  severity="info"
-                  sx={{ 
-                    backgroundColor: 'rgba(156, 39, 176, 0.1)',
-                    color: '#9c27b0',
-                    border: '1px solid rgba(156, 39, 176, 0.2)'
-                  }}
-                >
-                  暂无智能体，创建工作流后可以基于工作流创建智能体
-                </Alert>
-              </Grid>
-            )
-          )}
-        </Grid>
-      )}
+              agents.length > 0 ? (
+                agents.map(renderAgentCard)
+              ) : (
+                <Grid item xs={12}>
+                  <Alert 
+                    severity="info"
+                    sx={{ 
+                      backgroundColor: 'rgba(156, 39, 176, 0.1)',
+                      color: '#9c27b0',
+                      border: '1px solid rgba(156, 39, 176, 0.2)'
+                    }}
+                  >
+                    暂无智能体，创建工作流后可以基于工作流创建智能体
+                  </Alert>
+                </Grid>
+              )
+            )}
+          </Grid>
+        )}
+      </Box>
 
       {/* 浮动操作按钮 */}
       <Tooltip title={selectedTab === 'workflows' ? '创建工作流' : '创建智能体'}>
@@ -627,6 +672,20 @@ const WorkflowManagement: React.FC = () => {
         open={Boolean(menuAnchor)}
         onClose={handleMenuClose}
       >
+        {selectedItem && (selectedTab === 'workflows') && (
+          <MenuItem onClick={() => { 
+            handleMenuClose(); 
+            try {
+              localStorage.setItem('current_workflow_id', (selectedItem as Workflow).id);
+              setCurrentWorkflowId((selectedItem as Workflow).id);
+              setNotice(`已设为当前工作流：${(selectedItem as Workflow).name}`);
+              setTimeout(() => setNotice(null), 2000);
+            } catch {}
+          }}>
+            <ListItemIcon><ViewIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>设为当前</ListItemText>
+          </MenuItem>
+        )}
         <MenuItem onClick={() => { handleMenuClose(); setEditDialogOpen(true); }}>
           <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
           <ListItemText>编辑</ListItemText>
@@ -645,6 +704,11 @@ const WorkflowManagement: React.FC = () => {
           <ListItemText sx={{ color: '#f44336' }}>删除</ListItemText>
         </MenuItem>
       </Menu>
+      {notice && (
+        <Box sx={{ position: 'fixed', bottom: 90, right: 24 }}>
+          <Alert severity="success" onClose={() => setNotice(null)}>{notice}</Alert>
+        </Box>
+      )}
 
       {/* 创建工作流对话框 */}
       <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)}>
