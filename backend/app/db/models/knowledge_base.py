@@ -53,7 +53,7 @@ class KnowledgeBase(Base):
     milvus_collection_name = Column(String(100), unique=True, nullable=False)
 
     # 自定义设置
-    settings = Column(JSON, default={})
+    settings = Column(JSON, default=dict)
 
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())

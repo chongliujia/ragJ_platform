@@ -48,7 +48,7 @@ class Tenant(Base):
     storage_quota_mb = Column(Integer, default=1024)  # 存储配额(MB)
 
     # 自定义配置
-    settings = Column(JSON, default={})
+    settings = Column(JSON, default=dict)
 
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())

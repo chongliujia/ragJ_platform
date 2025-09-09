@@ -290,76 +290,128 @@ class ChatService:
                 if tenant_id is None or user_id is None:
                     raise ValueError("tenant_id and user_id are required for RAG stream chat.")
                 logger.info(f"Streaming RAG chat with knowledge base: {request.knowledge_base_id}")
-                
-                # Perform RAG retrieval first
+
                 query_text = request.message
-                
-                # 1. Retrieve documents from multiple sources
-                logger.info("Retrieving documents from multiple sources...")
-                
-                # Get documents from Elasticsearch
-                # Add tenant prefix to knowledge base ID for proper indexing
-                es_index_name = f"tenant_{tenant_id}_{request.knowledge_base_id}"
-                es_results = await self.elasticsearch_service.search(
-                    index_name=es_index_name,
-                    query=query_text,
-                    top_k=5,
-                    filter_query={"tenant_id": tenant_id}
-                )
-                
-                # Get documents from vector database (first need to get query embedding)
-                # For now, skip vector search if we can't get embeddings easily
-                vector_results = []
-                
-                # 2. Fuse results from multiple sources
-                unified_docs = []
-                
-                # Process Elasticsearch results
-                if es_results:
-                    unified_docs.extend([
-                        {"text": doc["text"], "source": "elasticsearch", "score": doc.get("score", 0)}
-                        for doc in es_results
-                    ])
-                
-                # Process vector database results (currently empty)
-                if vector_results:
-                    unified_docs.extend([
-                        {"text": doc["text"], "source": "vector", "score": doc.get("score", 0)}
-                        for doc in vector_results
-                    ])
-                
-                if unified_docs:
-                    # 3. Rerank the fused results
-                    logger.info(f"Reranking {len(unified_docs)} fused documents...")
-                    reranked_docs = await reranking_service.rerank_documents(
-                        query=query_text,
-                        documents=unified_docs,
-                        provider=RerankingProvider.QWEN,
-                        top_k=3,
-                    )
-                    
-                    final_docs = [doc["text"] for doc in reranked_docs]
-                    context = "\n\n---\n\n".join(final_docs)
-                    
-                    # Use RAG prompt with context
-                    rag_prompt = self._construct_rag_prompt(query_text, context)
-                    
-                    # Stream the RAG response
-                    async for chunk in llm_service.stream_chat(
-                        message=rag_prompt, model=request.model
-                    ):
-                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-                    
-                    # Add source references
-                    sources = [f"📄 {doc['source']}" for doc in reranked_docs[:3]]
-                    source_info = {"success": True, "sources": sources, "type": "sources"}
-                    yield f"data: {json.dumps(source_info, ensure_ascii=False)}\n\n"
-                else:
-                    logger.warning("No documents found. Falling back to standard chat.")
+
+                # 1) Generate embedding for vector search
+                emb_resp = await llm_service.get_embeddings(texts=[query_text])
+                if not emb_resp.get("success") or not emb_resp.get("embeddings"):
+                    logger.warning("Embedding failed for stream; fallback to standard chat")
                     async for chunk in llm_service.stream_chat(
                         message=request.message, model=request.model
                     ):
                         yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                else:
+                    query_vector = emb_resp["embeddings"][0]
+
+                    # 2) Parallel hybrid retrieval (Milvus + Elasticsearch)
+                    tenant_collection = f"tenant_{tenant_id}_{request.knowledge_base_id}"
+                    tenant_index = tenant_collection
+
+                    async def safe_vector_search():
+                        try:
+                            return await milvus_service.search(
+                                collection_name=tenant_collection,
+                                query_vector=query_vector,
+                                top_k=5,
+                            )
+                        except Exception as e:
+                            if (
+                                'dimension mismatch' in str(e).lower()
+                                or 'vector dimension' in str(e).lower()
+                                or 'should divide the dim' in str(e).lower()
+                            ):
+                                try:
+                                    milvus_service.recreate_collection_with_new_dimension(
+                                        tenant_collection, len(query_vector)
+                                    )
+                                    return await milvus_service.search(
+                                        collection_name=tenant_collection,
+                                        query_vector=query_vector,
+                                        top_k=5,
+                                    )
+                                except Exception:
+                                    return []
+                            return []
+
+                    vector_task = asyncio.create_task(safe_vector_search())
+
+                    keyword_task = None
+                    try:
+                        es_service = await get_elasticsearch_service()
+                        if es_service is not None:
+                            keyword_task = asyncio.create_task(
+                                es_service.search(
+                                    index_name=tenant_index,
+                                    query=query_text,
+                                    top_k=5,
+                                    filter_query={"tenant_id": tenant_id},
+                                )
+                            )
+                    except Exception:
+                        keyword_task = None
+
+                    if keyword_task:
+                        vector_results, keyword_results = await asyncio.gather(
+                            vector_task, keyword_task, return_exceptions=True
+                        )
+                    else:
+                        vector_results = await vector_task
+                        keyword_results = []
+
+                    if isinstance(vector_results, Exception):
+                        vector_results = []
+                    if isinstance(keyword_results, Exception):
+                        keyword_results = []
+
+                    # 3) Fuse results
+                    unified_docs = []
+                    for res in vector_results or []:
+                        unified_docs.append(
+                            {
+                                "text": res.get("text", ""),
+                                "score": 1.0 / (1.0 + res.get("distance", 0)),
+                                "source": "vector",
+                            }
+                        )
+                    existing = {d["text"] for d in unified_docs}
+                    for res in keyword_results or []:
+                        text = res.get("text", "")
+                        if text and text not in existing:
+                            unified_docs.append(
+                                {
+                                    "text": text,
+                                    "score": res.get("score", 0),
+                                    "source": "keyword",
+                                }
+                            )
+
+                    # 4) Rerank
+                    if unified_docs:
+                        reranked_docs = await reranking_service.rerank_documents(
+                            query=query_text,
+                            documents=unified_docs,
+                            provider=RerankingProvider.BGE,
+                            top_k=3,
+                        )
+                        context = "\n\n---\n\n".join([d["text"] for d in reranked_docs])
+
+                        rag_prompt = self._construct_rag_prompt(query_text, context)
+                        async for chunk in llm_service.stream_chat(
+                            message=rag_prompt, model=request.model
+                        ):
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+                        # Output simple source hints
+                        sources = [f"📄 {doc['source']}" for doc in reranked_docs[:3]]
+                        source_info = {"success": True, "sources": sources, "type": "sources"}
+                        yield f"data: {json.dumps(source_info, ensure_ascii=False)}\n\n"
+                    else:
+                        logger.warning("No documents found. Falling back to standard chat.")
+                        async for chunk in llm_service.stream_chat(
+                            message=request.message, model=request.model
+                        ):
+                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
             else:
                 # Standard non-RAG streaming chat
                 async for chunk in llm_service.stream_chat(

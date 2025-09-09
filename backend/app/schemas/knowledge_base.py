@@ -34,9 +34,9 @@ class KnowledgeBase(KnowledgeBaseBase):
     """Schema for representing a knowledge base in API responses."""
 
     id: str = Field(..., description="The unique identifier of the knowledge base.")
-    document_count: int = Field(
-        default=0, description="Number of documents in the knowledge base."
-    )
+    document_count: int = Field(default=0, description="Number of documents in the knowledge base.")
+    total_chunks: int = Field(default=0, description="Total number of chunks across all documents.")
+    total_size_bytes: int = Field(default=0, description="Total size in bytes of all documents.")
     created_at: datetime = Field(
         ..., description="When the knowledge base was created."
     )

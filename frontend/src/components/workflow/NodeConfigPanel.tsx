@@ -89,8 +89,11 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
         // 使用第一个可用的聊天模型作为默认值
         const defaultModel = availableChatModels.length > 0 ? availableChatModels[0].model_name : 'deepseek-chat';
         Object.assign(defaults, { model: defaultModel, temperature: 0.7, max_tokens: 1000, system_prompt: '' });
-      } else if (type === 'rag_retriever') {
+      } else if (type === 'rag_retriever' || type === 'hybrid_retriever' || type === 'retriever') {
         Object.assign(defaults, { knowledge_base: '', top_k: 5, score_threshold: 0.7, rerank: true });
+        if (type === 'retriever') Object.assign(defaults, { mode: 'hybrid' });
+      } else if (type === 'reranker') {
+        Object.assign(defaults, { provider: 'bge', top_k: 5 });
       } else if (type === 'input') {
         Object.assign(defaults, { input_type: 'text', required: true });
       }
@@ -146,7 +149,7 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
         setError('LLM max_tokens 必须为正数');
         return; 
       }
-    } else if (type === 'rag_retriever') {
+    } else if (type === 'rag_retriever' || type === 'hybrid_retriever' || type === 'retriever') {
       const tk = Number(localConfig.top_k);
       if (Number.isNaN(tk) || tk <= 0) {
         setError('top_k 必须为正数');
@@ -155,6 +158,25 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
       const st = Number(localConfig.score_threshold);
       if (Number.isNaN(st) || st < 0 || st > 1) {
         setError('score_threshold 必须在 0-1 之间');
+        return; 
+      }
+      if (type === 'retriever') {
+        const mode = String(localConfig.mode || 'hybrid');
+        if (!['vector','keyword','hybrid'].includes(mode)) {
+          setError('retriever 模式取值无效');
+          return;
+        }
+      }
+    } else if (type === 'reranker') {
+      const tk = Number(localConfig.top_k);
+      if (Number.isNaN(tk) || tk <= 0) {
+        setError('top_k 必须为正数');
+        return; 
+      }
+      const provider = String(localConfig.provider || 'bge');
+      const allowed = ['bge','qwen','cohere','local','none'];
+      if (!allowed.includes(provider)) {
+        setError('provider 取值无效');
         return; 
       }
     }
@@ -173,7 +195,9 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
       const cfg = (node as any).data?.config || {};
       const defaults: Record<string, any> = {};
       if (type === 'llm') Object.assign(defaults, { model: 'qwen-turbo', temperature: 0.7, max_tokens: 1000, system_prompt: '' });
-      else if (type === 'rag_retriever') Object.assign(defaults, { knowledge_base: '', top_k: 5, score_threshold: 0.7, rerank: true });
+      else if (type === 'rag_retriever' || type === 'hybrid_retriever' || type === 'retriever') Object.assign(defaults, { knowledge_base: '', top_k: 5, score_threshold: 0.7, rerank: true });
+      if (type === 'retriever') Object.assign(defaults, { mode: 'hybrid' });
+      else if (type === 'reranker') Object.assign(defaults, { provider: 'bge', top_k: 5 });
       else if (type === 'input') Object.assign(defaults, { input_type: 'text', required: true });
       setLocalConfig({ ...defaults, ...cfg });
     }

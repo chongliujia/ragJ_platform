@@ -86,7 +86,7 @@ class UserConfig(Base):
     language = Column(String(10), default="zh")  # zh, en
 
     # 自定义配置 (JSON格式存储额外配置)
-    custom_settings = Column(JSON, default={})
+    custom_settings = Column(JSON, default=dict)
 
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,23 +1,32 @@
 """
-应用配置管理
-使用 Pydantic Settings 管理环境变量配置
+应用配置管理（Pydantic v2）
+ - 统一处理环境变量与 .env 文件加载（多候选路径）
+ - 提供更安全的默认值与便捷的解析工具
 """
 
 from typing import Optional, List
-from pydantic_settings import BaseSettings
-from pydantic import validator
-import secrets
+from pathlib import Path
+from pydantic_settings import BaseSettings, SettingsConfigDict
+import os
 
 
 class Settings(BaseSettings):
     """应用配置类"""
 
+    # Pydantic v2 配置
+    model_config = SettingsConfigDict(case_sensitive=True)
+
     # 基础配置
     PROJECT_NAME: str = "RAG Platform"
     API_V1_STR: str = "/api/v1"
-    SECRET_KEY: str = secrets.token_urlsafe(32)
+    # 生产环境必须显式设置，开发环境会在启动时回落到安全的固定值
+    SECRET_KEY: Optional[str] = None
     DEBUG: bool = False
-    
+
+    # CORS 白名单（逗号分隔），例如：
+    # http://localhost:5173,https://your-domain.com
+    ALLOWED_ORIGINS: Optional[str] = None
+
     # 开发模式配置
     DISABLE_AUTH: bool = False  # 开发模式下可以禁用认证
 
@@ -118,10 +127,35 @@ class Settings(BaseSettings):
         """Get supported file types as a list"""
         return [ext.strip() for ext in self.SUPPORTED_FILE_TYPES.split(",")]
 
-    class Config:
-        env_file = "../../../.env"  # 指向项目根目录的.env文件
-        case_sensitive = True
+    def get_allowed_origins(self) -> List[str]:
+        """解析 CORS 允许的来源列表（支持逗号分隔或空）"""
+        if not self.ALLOWED_ORIGINS:
+            return []
+        # 支持逗号分隔，去除空白
+        parts = [p.strip() for p in self.ALLOWED_ORIGINS.split(",")]
+        return [p for p in parts if p]
 
 
-# 全局配置实例
-settings = Settings()
+def _detect_env_files() -> List[Path]:
+    """按优先级寻找可能的 .env 文件路径。
+
+    优先级：
+    1. backend/.env
+    2. 项目根目录 /.env
+    3. backend/.env.dev（仅作为兜底）
+    """
+    here = Path(__file__).resolve()
+    backend_dir = here.parents[2]  # backend/
+    project_root = here.parents[3]  # 仓库根目录
+
+    candidates = [
+        backend_dir / ".env",
+        project_root / ".env",
+        backend_dir / ".env.dev",
+    ]
+    return [p for p in candidates if p.exists()]
+
+
+# 全局配置实例（支持多候选 .env）
+_env_files = _detect_env_files()
+settings = Settings(_env_file=_env_files or None)

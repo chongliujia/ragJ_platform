@@ -32,11 +32,12 @@ import type { NodeProps } from 'reactflow';
 
 interface DataNodeData {
   name: string;
-  type: 'rag_retriever' | 'parser' | 'database' | 'embeddings' | 'reranker' | 'data_transformer';
+  type: 'rag_retriever' | 'hybrid_retriever' | 'retriever' | 'parser' | 'database' | 'embeddings' | 'reranker' | 'data_transformer';
   config: {
     knowledge_base?: string;
     top_k?: number;
     score_threshold?: number;
+    mode?: 'vector' | 'keyword' | 'hybrid';
     file_types?: string[];
     extract_images?: boolean;
     connection?: string;
@@ -60,6 +61,8 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
   const getNodeIcon = () => {
     switch (data.type) {
       case 'rag_retriever':
+      case 'hybrid_retriever':
+      case 'retriever':
         return <SearchIcon sx={{ color: '#fff' }} />;
       case 'parser':
         return <DocIcon sx={{ color: '#fff' }} />;
@@ -75,6 +78,8 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
   const getNodeColor = () => {
     switch (data.type) {
       case 'rag_retriever':
+      case 'hybrid_retriever':
+      case 'retriever':
         return 'linear-gradient(45deg, #4facfe 0%, #00f2fe 100%)';
       case 'parser':
         return 'linear-gradient(45deg, #43e97b 0%, #38f9d7 100%)';
@@ -99,8 +104,24 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
   const renderConfigFields = () => {
     switch (data.type) {
       case 'rag_retriever':
+      case 'hybrid_retriever':
+      case 'retriever':
         return (
           <>
+            {data.type === 'retriever' && (
+              <FormControl fullWidth sx={{ mb: 2, mt: 1 }}>
+                <InputLabel>检索模式</InputLabel>
+                <Select
+                  value={(config as any).mode || 'hybrid'}
+                  label="检索模式"
+                  onChange={(e) => setConfig({ ...config, mode: e.target.value })}
+                >
+                  <MenuItem value="vector">向量</MenuItem>
+                  <MenuItem value="keyword">关键词</MenuItem>
+                  <MenuItem value="hybrid">混合</MenuItem>
+                </Select>
+              </FormControl>
+            )}
             <TextField
               fullWidth
               label="知识库"
@@ -219,12 +240,26 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
       case 'reranker':
         return (
           <>
+            <FormControl fullWidth sx={{ mb: 2, mt: 1 }}>
+              <InputLabel>重排提供商</InputLabel>
+              <Select
+                value={(config as any).provider || 'bge'}
+                label="重排提供商"
+                onChange={(e) => setConfig({ ...config, provider: e.target.value })}
+              >
+                <MenuItem value="bge">BGE</MenuItem>
+                <MenuItem value="qwen">Qwen</MenuItem>
+                <MenuItem value="cohere">Cohere</MenuItem>
+                <MenuItem value="local">Local</MenuItem>
+                <MenuItem value="none">None</MenuItem>
+              </Select>
+            </FormControl>
             <TextField
               fullWidth
               type="number"
               label="重排Top K"
-              value={config.rerank_top_k || 5}
-              onChange={(e) => setConfig({ ...config, rerank_top_k: parseInt(e.target.value) })}
+              value={(config as any).top_k || 5}
+              onChange={(e) => setConfig({ ...config, top_k: parseInt(e.target.value) })}
               sx={{ mb: 2, mt: 1 }}
             />
             <Alert severity="info">输入：query + documents，输出：reranked_documents</Alert>
@@ -325,7 +360,7 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
           type="target"
           position={Position.Left}
           id={
-            data.type === 'rag_retriever' ? 'query' :
+            (data.type === 'rag_retriever' || data.type === 'hybrid_retriever' || data.type === 'retriever') ? 'query' :
             data.type === 'parser' ? 'text' :
             data.type === 'embeddings' ? 'text' :
             data.type === 'reranker' ? 'query' :
@@ -366,9 +401,9 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
               mb: 0.5,
             }}
           />
-          {data.type === 'rag_retriever' && (
+          {(data.type === 'rag_retriever' || data.type === 'hybrid_retriever' || data.type === 'retriever') && (
             <Typography variant="body2" sx={{ opacity: 0.9, fontSize: '0.7rem' }}>
-              检索: {config.top_k || 5} 条
+              检索: {config.top_k || 5} 条{data.type === 'retriever' ? `（模式：${(config as any).mode || 'hybrid'}）` : ''}
             </Typography>
           )}
           {data.type === 'parser' && (
@@ -393,7 +428,7 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
           type="source"
           position={Position.Right}
           id={
-            data.type === 'rag_retriever' ? 'documents' :
+            (data.type === 'rag_retriever' || data.type === 'hybrid_retriever' || data.type === 'retriever') ? 'documents' :
             data.type === 'parser' ? 'parsed_data' :
             data.type === 'embeddings' ? 'embedding' :
             data.type === 'reranker' ? 'reranked_documents' :

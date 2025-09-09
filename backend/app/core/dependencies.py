@@ -120,7 +120,26 @@ async def get_tenant_id(
     # 开发模式下返回默认租户ID
     if settings.DISABLE_AUTH:
         return 1
-    return current_user.tenant_id
+    # 容错：若用户记录缺少租户ID，回退到默认租户
+    if current_user.tenant_id is not None:
+        return current_user.tenant_id
+    try:
+        from app.db.models.tenant import Tenant
+        from app.db.database import SessionLocal
+        db = SessionLocal()
+        try:
+            default = db.query(Tenant).filter(Tenant.slug == "default").first()
+            if default:
+                return default.id
+            any_tenant = db.query(Tenant).first()
+            if any_tenant:
+                return any_tenant.id
+        finally:
+            db.close()
+    except Exception:
+        pass
+    # 最终退回 1（可能无效，但不致使调用方崩溃）
+    return 1
 
 
 def require_permission(permission_name: str):

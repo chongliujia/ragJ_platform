@@ -115,6 +115,35 @@ const WorkflowDataFlowManager: React.FC<WorkflowDataFlowManagerProps> = ({
           score_threshold: { type: 'number', default: 0.7 }
         }
       },
+      hybrid_retriever: {
+        inputs: {
+          query: { type: 'string', required: true, description: '检索查询' },
+          knowledge_base: { type: 'string', required: false, description: '知识库名称' }
+        },
+        outputs: {
+          documents: { type: 'array', description: '检索到的文档（融合）' },
+          scores: { type: 'array', description: '分数' }
+        },
+        config: {
+          top_k: { type: 'number', default: 5 },
+          score_threshold: { type: 'number', default: 0.7 }
+        }
+      },
+      retriever: {
+        inputs: {
+          query: { type: 'string', required: true, description: '检索查询' },
+          knowledge_base: { type: 'string', required: false, description: '知识库名称' }
+        },
+        outputs: {
+          documents: { type: 'array', description: '检索到的文档（根据模式）' },
+          scores: { type: 'array', description: '分数' }
+        },
+        config: {
+          mode: { type: 'string', default: 'hybrid' },
+          top_k: { type: 'number', default: 5 },
+          score_threshold: { type: 'number', default: 0.7 }
+        }
+      },
       classifier: {
         inputs: {
           text: { type: 'string', required: true, description: '待分类文本' }
@@ -127,6 +156,20 @@ const WorkflowDataFlowManager: React.FC<WorkflowDataFlowManagerProps> = ({
         config: {
           classes: { type: 'array', default: [] }
         }
+      },
+      reranker: {
+        inputs: {
+          query: { type: 'string', required: true, description: '检索查询' },
+          documents: { type: 'array', required: true, description: '待重排文档' },
+        },
+        outputs: {
+          reranked_documents: { type: 'array', description: '重排后的文档' },
+          documents: { type: 'array', description: '兼容键：同重排结果' },
+        },
+        config: {
+          provider: { type: 'string', default: 'bge' },
+          top_k: { type: 'number', default: 5 },
+        },
       },
       condition: {
         inputs: {

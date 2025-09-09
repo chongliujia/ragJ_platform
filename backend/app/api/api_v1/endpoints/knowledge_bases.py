@@ -7,6 +7,7 @@ import re
 from typing import List
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Depends
+from sqlalchemy.orm import Session
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import (
     ElasticsearchService,
@@ -17,7 +18,10 @@ from app.schemas.knowledge_base import (
     KnowledgeBaseCreate,
     KnowledgeBaseCreateResponse,
 )
-from app.core.dependencies import get_tenant_id
+from app.core.dependencies import get_tenant_id, get_current_user
+from app.db.database import get_db
+from app.db.models.knowledge_base import KnowledgeBase as KBModel
+from app.db.models.user import User
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -44,6 +48,8 @@ async def create_knowledge_base(
     kb_create: KnowledgeBaseCreate,
     tenant_id: int = Depends(get_tenant_id),
     es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new Knowledge Base.
@@ -88,6 +94,40 @@ async def create_knowledge_base(
                 detail=f"Failed to create Elasticsearch index: {es_err}",
             )
 
+        # Persist Knowledge Base in DB (upsert by name+tenant)
+        try:
+            existing = (
+                db.query(KBModel)
+                .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id)
+                .first()
+            )
+            if existing is None:
+                kb_row = KBModel(
+                    name=kb_name,
+                    description=kb_create.description or "",
+                    owner_id=current_user.id,
+                    tenant_id=tenant_id,
+                    is_active=True,
+                    is_public=False,
+                    embedding_model="text-embedding-v2",
+                    chunk_size=1000,
+                    chunk_overlap=200,
+                    document_count=0,
+                    total_chunks=0,
+                    total_size_bytes=0,
+                    milvus_collection_name=tenant_collection_name,
+                    settings={},
+                )
+                db.add(kb_row)
+                db.commit()
+            else:
+                # 更新集合名（避免漂移）
+                existing.milvus_collection_name = tenant_collection_name
+                db.add(existing)
+                db.commit()
+        except Exception as dbe:
+            logger.error(f"Failed to persist KB in DB: {dbe}")
+
         # Create knowledge base object for response
         kb = KnowledgeBase(
             id=kb_name,
@@ -113,7 +153,10 @@ async def create_knowledge_base(
 
 
 @router.get("/", response_model=List[KnowledgeBase])
-async def list_knowledge_bases(tenant_id: int = Depends(get_tenant_id)):
+async def list_knowledge_bases(
+    tenant_id: int = Depends(get_tenant_id),
+    db: Session = Depends(get_db),
+):
     """
     List all available Knowledge Bases for the current tenant.
     This corresponds to listing all collections in Milvus that belong to the tenant.
@@ -129,11 +172,27 @@ async def list_knowledge_bases(tenant_id: int = Depends(get_tenant_id)):
                 # Extract the original KB name by removing the tenant prefix
                 kb_name = name[len(tenant_prefix):]
                 
-                # Get document count from Milvus collection
+                # Get metrics from DB documents table
                 try:
-                    count = milvus_service.get_collection_count(name)
+                    from app.db.models.document import Document
+                    count = db.query(Document).filter(
+                        Document.knowledge_base_name == kb_name,
+                        Document.tenant_id == tenant_id,
+                    ).count()
+                    from sqlalchemy import func as sa_func
+                    totals = db.query(
+                        sa_func.coalesce(sa_func.sum(Document.total_chunks), 0),
+                        sa_func.coalesce(sa_func.sum(Document.file_size), 0),
+                    ).filter(
+                        Document.knowledge_base_name == kb_name,
+                        Document.tenant_id == tenant_id,
+                    ).first()
+                    total_chunks = int(totals[0] or 0)
+                    total_size_bytes = int(totals[1] or 0)
                 except Exception:
                     count = 0
+                    total_chunks = 0
+                    total_size_bytes = 0
 
                 # Create knowledge base object with original name
                 kb = KnowledgeBase(
@@ -141,6 +200,8 @@ async def list_knowledge_bases(tenant_id: int = Depends(get_tenant_id)):
                     name=kb_name,
                     description=f"Knowledge base: {kb_name}",
                     document_count=count,
+                    total_chunks=total_chunks,
+                    total_size_bytes=total_size_bytes,
                     created_at=datetime.now(),  # In a real app, this would be stored in DB
                     status="active",
                 )
@@ -156,7 +217,11 @@ async def list_knowledge_bases(tenant_id: int = Depends(get_tenant_id)):
 
 
 @router.get("/{kb_name}", response_model=KnowledgeBase)
-async def get_knowledge_base(kb_name: str, tenant_id: int = Depends(get_tenant_id)):
+async def get_knowledge_base(
+    kb_name: str,
+    tenant_id: int = Depends(get_tenant_id),
+    db: Session = Depends(get_db),
+):
     """
     Get details of a specific Knowledge Base.
     """
@@ -169,11 +234,27 @@ async def get_knowledge_base(kb_name: str, tenant_id: int = Depends(get_tenant_i
                 detail=f"Knowledge base '{kb_name}' not found.",
             )
 
-        # Get document count from Milvus collection
+        # Get metrics from DB
         try:
-            count = milvus_service.get_collection_count(tenant_collection_name)
+            from app.db.models.document import Document
+            from sqlalchemy import func as sa_func
+            count = db.query(Document).filter(
+                Document.knowledge_base_name == kb_name,
+                Document.tenant_id == tenant_id,
+            ).count()
+            totals = db.query(
+                sa_func.coalesce(sa_func.sum(Document.total_chunks), 0),
+                sa_func.coalesce(sa_func.sum(Document.file_size), 0),
+            ).filter(
+                Document.knowledge_base_name == kb_name,
+                Document.tenant_id == tenant_id,
+            ).first()
+            total_chunks = int(totals[0] or 0)
+            total_size_bytes = int(totals[1] or 0)
         except Exception:
             count = 0
+            total_chunks = 0
+            total_size_bytes = 0
 
         # Create knowledge base object
         kb = KnowledgeBase(
@@ -181,6 +262,8 @@ async def get_knowledge_base(kb_name: str, tenant_id: int = Depends(get_tenant_i
             name=kb_name,
             description=f"Knowledge base: {kb_name}",
             document_count=count,
+            total_chunks=total_chunks,
+            total_size_bytes=total_size_bytes,
             created_at=datetime.now(),  # In a real app, this would be stored in DB
             status="active",
         )
@@ -200,7 +283,9 @@ async def get_knowledge_base(kb_name: str, tenant_id: int = Depends(get_tenant_i
 async def delete_knowledge_base(
     kb_name: str, 
     tenant_id: int = Depends(get_tenant_id),
-    es_service: ElasticsearchService = Depends(get_elasticsearch_service)
+    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Delete a Knowledge Base.
@@ -225,6 +310,30 @@ async def delete_knowledge_base(
 
         if es_exists:
             await es_service.delete_index(tenant_collection_name)
+
+        # Delete documents rows in DB (best-effort)
+        try:
+            from app.db.models.document import Document
+            db.query(Document).filter(
+                Document.knowledge_base_name == kb_name,
+                Document.tenant_id == tenant_id,
+            ).delete()
+            db.commit()
+        except Exception as dbe:
+            logger.warning(f"Failed to delete KB documents from DB: {dbe}")
+
+        # Delete from DB if exists (by name + tenant)
+        try:
+            kb_row = (
+                db.query(KBModel)
+                .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id)
+                .first()
+            )
+            if kb_row:
+                db.delete(kb_row)
+                db.commit()
+        except Exception as dbe:
+            logger.warning(f"Failed to delete KB row from DB: {dbe}")
 
         return
     except Exception as e:

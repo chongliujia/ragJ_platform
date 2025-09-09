@@ -56,6 +56,8 @@ const MobileWorkflowEditor: React.FC<MobileWorkflowEditorProps> = ({
   const quickAddNodes = [
     { type: 'llm', label: 'AI助手', icon: <AIIcon />, color: '#00d4ff' },
     { type: 'rag_retriever', label: '检索', icon: <SearchIcon />, color: '#4caf50' },
+    { type: 'hybrid_retriever', label: '混合检索', icon: <SearchIcon />, color: '#2e7d32' },
+    { type: 'retriever', label: '统一检索', icon: <SearchIcon />, color: '#1b5e20' },
     { type: 'code_executor', label: '代码', icon: <CodeIcon />, color: '#ff9800' },
     { type: 'input', label: '输入', icon: <InputIcon />, color: '#2196f3' },
     { type: 'output', label: '输出', icon: <OutputIcon />, color: '#f44336' },

@@ -54,6 +54,17 @@ const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
       },
     },
     {
+      type: 'reranker',
+      name: '结果重排',
+      description: '对检索结果进行重排序',
+      icon: <SettingsIcon />,
+      color: '#f6d365',
+      defaultConfig: {
+        provider: 'bge',
+        top_k: 3,
+      },
+    },
+    {
       type: 'rag_retriever',
       name: '知识检索',
       description: '从知识库检索相关信息',
@@ -64,6 +75,32 @@ const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
         top_k: 5,
         score_threshold: 0.7,
         rerank: true,
+      },
+    },
+    {
+      type: 'hybrid_retriever',
+      name: '混合检索',
+      description: '向量+关键词融合检索',
+      icon: <SearchIcon />,
+      color: '#2e7d32',
+      defaultConfig: {
+        knowledge_base: '',
+        top_k: 5,
+        score_threshold: 0.7,
+        rerank: true,
+      },
+    },
+    {
+      type: 'retriever',
+      name: '统一检索',
+      description: '向量/关键词/混合可选',
+      icon: <SearchIcon />,
+      color: '#1b5e20',
+      defaultConfig: {
+        knowledge_base: '',
+        top_k: 5,
+        score_threshold: 0.7,
+        mode: 'hybrid',
       },
     },
     {

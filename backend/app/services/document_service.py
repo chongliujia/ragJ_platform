@@ -18,6 +18,7 @@ from app.services import parser_service
 from app.core.config import settings
 from app.db.database import SessionLocal
 from app.db.models.document import Document, DocumentStatus
+from app.db.models.knowledge_base import KnowledgeBase as KBModel
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,36 @@ class DocumentService:
         title: Optional[str] = None
     ) -> Document:
         """Create and save document record to database."""
+        # Ensure KB record exists, get its id
+        kb = (
+            db.query(KBModel)
+            .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id)
+            .first()
+        )
+        if kb is None:
+            try:
+                kb = KBModel(
+                    name=kb_name,
+                    description=f"Knowledge base: {kb_name}",
+                    owner_id=user_id,
+                    tenant_id=tenant_id,
+                    is_active=True,
+                    is_public=False,
+                    embedding_model="text-embedding-v2",
+                    chunk_size=1000,
+                    chunk_overlap=200,
+                    document_count=0,
+                    total_chunks=0,
+                    total_size_bytes=0,
+                    milvus_collection_name=f"tenant_{tenant_id}_{kb_name}",
+                    settings={},
+                )
+                db.add(kb)
+                db.commit()
+                db.refresh(kb)
+            except Exception as e:
+                logger.warning(f"Auto-create KB record failed: {e}")
+                kb = None
         document = Document(
             filename=filename,
             original_filename=filename,
@@ -48,6 +79,7 @@ class DocumentService:
             file_size=file_size,
             file_path=file_path,
             knowledge_base_name=kb_name,
+            knowledge_base_id=(kb.id if kb else None),
             tenant_id=tenant_id,
             uploaded_by=user_id,
             status=DocumentStatus.PENDING.value,
@@ -81,6 +113,23 @@ class DocumentService:
                 document.vector_ids = vector_ids
             if status == DocumentStatus.COMPLETED:
                 document.processed_at = datetime.utcnow()
+                # update KB counters best-effort
+                try:
+                    kb = (
+                        db.query(KBModel)
+                        .filter(
+                            KBModel.name == document.knowledge_base_name,
+                            KBModel.tenant_id == document.tenant_id,
+                        )
+                        .first()
+                    )
+                    if kb:
+                        kb.document_count = (kb.document_count or 0) + 1
+                        kb.total_chunks = (kb.total_chunks or 0) + (total_chunks or 0)
+                        kb.total_size_bytes = (kb.total_size_bytes or 0) + (document.file_size or 0)
+                        db.add(kb)
+                except Exception as e:
+                    logger.warning(f"update KB counters failed: {e}")
             db.commit()
 
     async def process_document(

@@ -103,6 +103,47 @@ class ElasticsearchService:
             logger.error(f"Failed to delete index '{index_name}': {e}", exc_info=True)
             raise
 
+    async def delete_by_query(
+        self,
+        index_name: str,
+        term_filters: Dict[str, Any],
+    ) -> int:
+        """Delete documents in an index by exact-match filters.
+
+        Args:
+            index_name: Target index
+            term_filters: Dict of field -> value to match (term queries)
+
+        Returns:
+            Number of deleted documents (best-effort from ES response)
+        """
+        if not await self.index_exists(index_name):
+            logger.warning(f"Index '{index_name}' does not exist; skip delete_by_query.")
+            return 0
+
+        body = {
+            "query": {
+                "bool": {
+                    "filter": [{"term": {k: v}} for k, v in term_filters.items()]
+                }
+            }
+        }
+
+        try:
+            resp = await self.client.delete_by_query(
+                index=index_name, body=body, conflicts="proceed", refresh=True
+            )
+            deleted = int(resp.get("deleted", 0))
+            logger.info(
+                f"Deleted {deleted} docs from '{index_name}' by filters: {term_filters}"
+            )
+            return deleted
+        except Exception as e:
+            logger.error(
+                f"Failed delete_by_query on '{index_name}': {e}", exc_info=True
+            )
+            return 0
+
     async def bulk_index_documents(
         self, index_name: str, documents: List[Dict[str, Any]]
     ):

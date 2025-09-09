@@ -302,8 +302,56 @@ class MilvusService:
                 )
                 raise
 
+    def delete_vectors(self, collection_name: str, ids: list[int]) -> int:
+        """
+        Delete vectors by primary key IDs from a collection.
+
+        Args:
+            collection_name: Target collection name
+            ids: List of primary key IDs to delete
+
+        Returns:
+            Number of deleted entities (best-effort based on Milvus response)
+        """
+        if not self.initialized:
+            logger.error("Milvus connection not initialized. Cannot delete vectors.")
+            return 0
+
+        if not ids:
+            return 0
+
+        if not self.has_collection(collection_name):
+            logger.warning(
+                f"Collection '{collection_name}' does not exist. Skip deleting vectors."
+            )
+            return 0
+
+        try:
+            collection = Collection(name=collection_name, using=self.alias)
+            expr_ids = ",".join(str(i) for i in ids)
+            expr = f"pk in [{expr_ids}]"
+            res = collection.delete(expr)
+            collection.flush()
+            # Milvus doesn't return exact count reliably; try to infer
+            deleted = getattr(res, "delete_count", None)
+            if deleted is None:
+                deleted = len(ids)
+            logger.info(
+                f"Deleted ~{deleted} vectors from '{collection_name}' with expr: {expr}"
+            )
+            return int(deleted)
+        except Exception as e:
+            logger.error(
+                f"Failed to delete vectors from '{collection_name}': {e}", exc_info=True
+            )
+            return 0
+
     async def search(
-        self, collection_name: str, query_vector: list[float], top_k: int = 5
+        self,
+        collection_name: str,
+        query_vector: list[float],
+        top_k: int = 5,
+        filter_expr: str | None = None,
     ) -> list[dict]:
         """
         Searches for similar vectors in a collection.
@@ -341,6 +389,7 @@ class MilvusService:
                 anns_field="vector",
                 param=search_params,
                 limit=top_k,
+                expr=filter_expr,
                 output_fields=["text", "tenant_id", "user_id", "document_name", "knowledge_base"],  # Retrieve metadata fields
             )
 

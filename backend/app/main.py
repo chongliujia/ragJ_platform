@@ -26,6 +26,24 @@ async def lifespan(app: FastAPI):
     # 启动时执行
     logger.info("启动 RAG Platform...")
 
+    # 安全检查：SECRET_KEY 与 CORS 配置
+    if not settings.DEBUG:
+        if not settings.SECRET_KEY:
+            logger.error("生产环境必须设置 SECRET_KEY 环境变量")
+            raise RuntimeError("SECRET_KEY is required in production")
+        allowed = settings.get_allowed_origins()
+        if (not allowed) or ("*" in allowed):
+            logger.error(
+                "生产环境必须显式配置 ALLOWED_ORIGINS（逗号分隔），且不得包含 *"
+            )
+            raise RuntimeError(
+                "In production, ALLOWED_ORIGINS must be set to a comma-separated whitelist without *"
+            )
+    else:
+        # 开发环境采用固定的非机密密钥，避免重启导致 token 失效
+        if not settings.SECRET_KEY:
+            settings.SECRET_KEY = "dev-insecure-secret-key"
+
     # 初始化数据库
     try:
         await init_db()
@@ -65,9 +83,14 @@ def create_application() -> FastAPI:
     )
 
     # CORS中间件
+    if settings.DEBUG:
+        allow_origins = ["*"]
+    else:
+        allow_origins = settings.get_allowed_origins()
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # 生产环境应该限制具体域名
+        allow_origins=allow_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

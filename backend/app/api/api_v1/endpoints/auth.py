@@ -192,10 +192,17 @@ async def get_current_user_info(
     """
     获取当前用户信息
     """
-    # 获取租户信息
-    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    # 获取租户信息（容错：当前用户缺少租户ID时回退默认租户）
+    tenant_id = current_user.tenant_id
+    tenant = None
+    if tenant_id is not None:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    else:
+        tenant = db.query(Tenant).filter(Tenant.slug == "default").first() or db.query(Tenant).first()
+        tenant_id = tenant.id if tenant else 0
+
     tenant_name = tenant.name if tenant else "Unknown Tenant"
-    
+
     return UserResponse(
         id=current_user.id,
         username=current_user.username,
@@ -203,7 +210,7 @@ async def get_current_user_info(
         full_name=current_user.full_name or "",
         role=current_user.role,
         is_active=current_user.is_active,
-        tenant_id=current_user.tenant_id,
+        tenant_id=tenant_id,
         tenant_name=tenant_name,
         created_at=current_user.created_at.isoformat() if current_user.created_at else "",
     )

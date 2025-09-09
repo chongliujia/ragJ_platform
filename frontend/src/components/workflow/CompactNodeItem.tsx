@@ -37,6 +37,8 @@ const CompactNodeItem: React.FC<CompactNodeItemProps> = ({
     const colorMap: { [key: string]: string } = {
       'llm': '#00d4ff',
       'rag_retriever': '#4caf50',
+      'retriever': '#1b5e20',
+      'hybrid_retriever': '#2e7d32',
       'condition': '#ff9800',
       'process': '#9c27b0',
       'input': '#2196f3',
@@ -51,6 +53,8 @@ const CompactNodeItem: React.FC<CompactNodeItemProps> = ({
     const iconMap: { [key: string]: string } = {
       'llm': '🧠',
       'rag_retriever': '🔍',
+      'retriever': '🔍',
+      'hybrid_retriever': '🔍',
       'condition': '🔀',
       'process': '⚙️',
       'input': '📥',

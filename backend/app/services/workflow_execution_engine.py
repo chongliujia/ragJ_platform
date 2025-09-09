@@ -25,6 +25,7 @@ from app.schemas.workflow import (
 from app.services.llm_service import llm_service
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import get_elasticsearch_service
+from app.services.reranking_service import reranking_service, RerankingProvider
 from app.services.workflow_error_handler import workflow_error_handler, WorkflowError, ErrorType
 from app.services.workflow_parallel_executor import workflow_parallel_executor
 from app.services.workflow_performance_monitor import workflow_performance_monitor
@@ -52,6 +53,8 @@ class WorkflowExecutionEngine:
         return {
             'llm': self._execute_llm_node,
             'rag_retriever': self._execute_rag_retriever_node,
+            'hybrid_retriever': self._execute_hybrid_retriever_node,
+            'retriever': self._execute_retriever_node,
             'classifier': self._execute_classifier_node,
             'parser': self._execute_parser_node,
             'condition': self._execute_condition_node,
@@ -877,6 +880,189 @@ class WorkflowExecutionEngine:
             'query': query,
             'total_results': len(results)
         }
+
+    async def _execute_hybrid_retriever_node(
+        self,
+        node: WorkflowNode,
+        input_data: Dict[str, Any],
+        context: WorkflowExecutionContext
+    ) -> Dict[str, Any]:
+        """执行混合检索节点（向量 + 关键词）"""
+
+        config = node.config or {}
+        query = (
+            input_data.get('query')
+            or input_data.get('text')
+            or input_data.get('prompt')
+            or ''
+        )
+        knowledge_base = config.get('knowledge_base', '')
+        top_k = int(config.get('top_k', 5))
+
+        if not query:
+            return {'documents': [], 'query': '', 'total_results': 0}
+
+        # 生成查询向量
+        embedding_response = await llm_service.get_embeddings(texts=[query])
+        if not embedding_response.get('success'):
+            raise RuntimeError("向量生成失败")
+        query_vector = embedding_response['embeddings'][0]
+
+        # 获取租户ID
+        tenant_id = (
+            (context.global_context or {}).get('tenant_id')
+            or (context.input_data or {}).get('tenant_id')
+        )
+        if tenant_id is None:
+            raise RuntimeError("缺少租户ID，无法执行混合检索")
+
+        tenant_collection_name = f"tenant_{tenant_id}_{knowledge_base}"
+        tenant_index_name = tenant_collection_name
+
+        # 向量检索
+        async def safe_vector_search():
+            try:
+                return await milvus_service.search(
+                    collection_name=tenant_collection_name,
+                    query_vector=query_vector,
+                    top_k=top_k
+                )
+            except Exception as e:
+                # 尝试维度自修复
+                if (
+                    'dimension mismatch' in str(e).lower()
+                    or 'vector dimension' in str(e).lower()
+                    or 'should divide the dim' in str(e).lower()
+                ):
+                    try:
+                        milvus_service.recreate_collection_with_new_dimension(
+                            tenant_collection_name, len(query_vector)
+                        )
+                        return await milvus_service.search(
+                            collection_name=tenant_collection_name,
+                            query_vector=query_vector,
+                            top_k=top_k
+                        )
+                    except Exception:
+                        return []
+                return []
+
+        vector_task = asyncio.create_task(safe_vector_search())
+
+        # 关键词检索（ES 可选）
+        keyword_task = None
+        try:
+            es_service = await get_elasticsearch_service()
+            if es_service is not None:
+                keyword_task = asyncio.create_task(
+                    es_service.search(
+                        index_name=tenant_index_name,
+                        query=query,
+                        top_k=top_k,
+                        filter_query={"tenant_id": tenant_id}
+                    )
+                )
+        except Exception:
+            keyword_task = None
+
+        if keyword_task:
+            vector_results, keyword_results = await asyncio.gather(
+                vector_task, keyword_task, return_exceptions=True
+            )
+        else:
+            vector_results = await vector_task
+            keyword_results = []
+
+        if isinstance(vector_results, Exception):
+            vector_results = []
+        if isinstance(keyword_results, Exception):
+            keyword_results = []
+
+        unified_docs = []
+        for res in vector_results or []:
+            unified_docs.append({
+                'text': res.get('text', ''),
+                'score': 1.0 / (1.0 + res.get('distance', 0)),
+                'source': 'vector',
+                'metadata': {
+                    'document_name': res.get('document_name', ''),
+                    'knowledge_base': res.get('knowledge_base', knowledge_base)
+                }
+            })
+
+        existing_texts = {d['text'] for d in unified_docs}
+        for res in keyword_results or []:
+            text = res.get('text', '')
+            if text and text not in existing_texts:
+                unified_docs.append({
+                    'text': text,
+                    'score': res.get('score', 0),
+                    'source': 'keyword',
+                    'metadata': {
+                        'document_name': res.get('document_name', ''),
+                        'knowledge_base': knowledge_base
+                    }
+                })
+
+        return {
+            'documents': unified_docs,
+            'query': query,
+            'total_results': len(unified_docs)
+        }
+
+    async def _execute_retriever_node(
+        self,
+        node: WorkflowNode,
+        input_data: Dict[str, Any],
+        context: WorkflowExecutionContext
+    ) -> Dict[str, Any]:
+        """统一检索节点：支持 vector / keyword / hybrid 模式"""
+        cfg = node.config or {}
+        mode = str(cfg.get('mode', 'hybrid')).lower()
+        knowledge_base = cfg.get('knowledge_base', '')
+        top_k = int(cfg.get('top_k', 5))
+
+        if mode == 'vector':
+            return await self._execute_rag_retriever_node(node, input_data, context)
+        if mode == 'hybrid':
+            return await self._execute_hybrid_retriever_node(node, input_data, context)
+
+        # keyword 模式
+        query = input_data.get('query') or input_data.get('text') or input_data.get('prompt') or ''
+        if not query:
+            return {'documents': [], 'query': '', 'total_results': 0}
+
+        tenant_id = (
+            (context.global_context or {}).get('tenant_id')
+            or (context.input_data or {}).get('tenant_id')
+        )
+        if tenant_id is None:
+            raise RuntimeError('缺少租户ID，无法执行关键词检索')
+
+        index_name = f"tenant_{tenant_id}_{knowledge_base}"
+        try:
+            es_service = await get_elasticsearch_service()
+            results = []
+            if es_service is not None:
+                results = await es_service.search(
+                    index_name=index_name,
+                    query=query,
+                    top_k=top_k,
+                    filter_query={'tenant_id': tenant_id}
+                )
+            docs = [
+                {
+                    'text': r.get('text', ''),
+                    'score': r.get('score', 0),
+                    'source': 'keyword',
+                    'metadata': {'knowledge_base': knowledge_base}
+                }
+                for r in results or []
+            ]
+            return {'documents': docs, 'query': query, 'total_results': len(docs)}
+        except Exception as e:
+            logger.warning('Keyword retriever failed', error=str(e))
+            return {'documents': [], 'query': query, 'total_results': 0}
     
     async def _execute_classifier_node(
         self,
@@ -1154,24 +1340,36 @@ class WorkflowExecutionEngine:
         input_data: Dict[str, Any],
         context: WorkflowExecutionContext
     ) -> Dict[str, Any]:
-        """执行重排序节点"""
+        """执行重排序节点（接入 reranking_service）"""
         
-        config = node.config
+        config = node.config or {}
         query = input_data.get('query', '')
         documents = input_data.get('documents', [])
-        top_k = config.get('top_k', 5)
-        
-        # 简单的重排序实现（基于文本相似度）
-        ranked_docs = sorted(
-            documents,
-            key=lambda doc: self._calculate_similarity(query, doc.get('text', '')),
-            reverse=True
-        )[:top_k]
-        
+        top_k = int(config.get('top_k', 5))
+
+        provider_str = str(config.get('provider', 'bge')).lower()
+        provider_map = {
+            'bge': RerankingProvider.BGE,
+            'qwen': RerankingProvider.QWEN,
+            'cohere': RerankingProvider.COHERE,
+            'local': RerankingProvider.LOCAL,
+            'none': RerankingProvider.NONE,
+        }
+        provider = provider_map.get(provider_str, RerankingProvider.BGE)
+
+        reranked_docs = await reranking_service.rerank_documents(
+            query=query,
+            documents=documents,
+            provider=provider,
+            top_k=top_k
+        )
+
+        # 提供两个键位以兼容不同工作流配置
         return {
-            'reranked_documents': ranked_docs,
+            'documents': reranked_docs,
+            'reranked_documents': reranked_docs,
             'query': query,
-            'total_results': len(ranked_docs)
+            'total_results': len(reranked_docs)
         }
     
     def _calculate_similarity(self, query: str, text: str) -> float:

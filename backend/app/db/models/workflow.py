@@ -62,10 +62,10 @@ class WorkflowDefinition(Base):
     # 工作流定义
     nodes = Column(JSON, nullable=False)  # 节点列表
     edges = Column(JSON, nullable=False)  # 边列表
-    global_config = Column(JSON, default={})  # 全局配置
+    global_config = Column(JSON, default=dict)  # 全局配置
     # 注意：SQLAlchemy Declarative API 中 "metadata" 是保留名。
     # 使用属性名 workflow_metadata，数据库列名仍为 "metadata" 以保持兼容。
-    workflow_metadata = Column("metadata", JSON, default={})  # 元数据
+    workflow_metadata = Column("metadata", JSON, default=dict)  # 元数据
     
     # 统计信息
     execution_count = Column(Integer, default=0)
@@ -104,12 +104,12 @@ class WorkflowExecution(Base):
     error_message = Column(Text)
     
     # 执行数据
-    input_data = Column(JSON, default={})
-    output_data = Column(JSON, default={})
-    global_context = Column(JSON, default={})
+    input_data = Column(JSON, default=dict)
+    output_data = Column(JSON, default=dict)
+    global_context = Column(JSON, default=dict)
     
     # 执行配置
-    config = Column(JSON, default={})
+    config = Column(JSON, default=dict)
     debug = Column(Boolean, default=False)
     enable_parallel = Column(Boolean, default=True)
     
@@ -124,10 +124,10 @@ class WorkflowExecution(Base):
     # 性能指标
     cpu_usage = Column(Float)
     memory_usage = Column(Float)
-    metrics = Column(JSON, default={})
+    metrics = Column(JSON, default=dict)
     
     # 检查点数据
-    checkpoints = Column(JSON, default=[])
+    checkpoints = Column(JSON, default=list)
     
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -163,8 +163,8 @@ class WorkflowExecutionStep(Base):
     retry_count = Column(Integer, default=0)
     
     # 执行数据
-    input_data = Column(JSON, default={})
-    output_data = Column(JSON, default={})
+    input_data = Column(JSON, default=dict)
+    output_data = Column(JSON, default=dict)
     
     # 执行时间
     start_time = Column(DateTime(timezone=True))
@@ -174,7 +174,7 @@ class WorkflowExecutionStep(Base):
     # 性能指标
     memory_usage = Column(Float)
     cpu_usage = Column(Float)
-    step_metrics = Column(JSON, default={})
+    step_metrics = Column(JSON, default=dict)
     
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -199,13 +199,13 @@ class WorkflowTemplate(Base):
     # 分类信息
     category = Column(String(100), nullable=False)
     subcategory = Column(String(100))
-    tags = Column(JSON, default=[])
+    tags = Column(JSON, default=list)
     
     # 模板属性
     difficulty = Column(String(50), default="intermediate")
     estimated_time = Column(String(100))
-    use_cases = Column(JSON, default=[])
-    requirements = Column(JSON, default=[])
+    use_cases = Column(JSON, default=list)
+    requirements = Column(JSON, default=list)
     
     # 租户和作者
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
@@ -220,11 +220,11 @@ class WorkflowTemplate(Base):
     # 模板定义
     nodes = Column(JSON, nullable=False)
     edges = Column(JSON, nullable=False)
-    global_config = Column(JSON, default={})
+    global_config = Column(JSON, default=dict)
     
     # 示例数据
-    example_inputs = Column(JSON, default={})
-    example_outputs = Column(JSON, default={})
+    example_inputs = Column(JSON, default=dict)
+    example_outputs = Column(JSON, default=dict)
     
     # 统计信息
     downloads = Column(Integer, default=0)
@@ -271,8 +271,8 @@ class WorkflowSchedule(Base):
     is_active = Column(Boolean, default=True)
     
     # 执行配置
-    input_data = Column(JSON, default={})
-    config = Column(JSON, default={})
+    input_data = Column(JSON, default=dict)
+    config = Column(JSON, default=dict)
     
     # 统计信息
     total_runs = Column(Integer, default=0)

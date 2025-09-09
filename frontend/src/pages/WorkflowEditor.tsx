@@ -153,6 +153,8 @@ const nodeTypes = {
   condition: ConditionNode,
   // 数据节点类型
   rag_retriever: DataNode,
+  retriever: DataNode,
+  hybrid_retriever: DataNode,
   parser: DataNode,
   database: DataNode,
   embeddings: DataNode,
@@ -241,7 +243,29 @@ const nodeTemplates = [
       {
         type: 'rag_retriever',
         name: 'RAG检索',
-        description: '从知识库检索相关文档',
+        description: '向量检索（Milvus）',
+        defaultConfig: {
+          knowledge_base: '',
+          top_k: 5,
+          score_threshold: 0.7,
+          rerank: true,
+        },
+      },
+      {
+        type: 'retriever',
+        name: '统一检索',
+        description: '向量/关键词/混合可选',
+        defaultConfig: {
+          knowledge_base: '',
+          top_k: 5,
+          score_threshold: 0.7,
+          mode: 'hybrid',
+        },
+      },
+      {
+        type: 'hybrid_retriever',
+        name: '混合检索',
+        description: '向量+关键词融合检索',
         defaultConfig: {
           knowledge_base: '',
           top_k: 5,
@@ -399,10 +423,10 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   if (side === 'src' && a.startsWith('output')) return 'content';
                   if (side === 'tgt' && a.startsWith('input')) return 'prompt';
                 }
-                if (type === 'rag_retriever') {
-                  if (side === 'src' && a.startsWith('output')) return 'documents';
-                  if (side === 'tgt' && a.startsWith('input')) return 'query';
-                }
+              if (type === 'rag_retriever' || type === 'hybrid_retriever' || type === 'retriever') {
+                if (side === 'src' && a.startsWith('output')) return 'documents';
+                if (side === 'tgt' && a.startsWith('input')) return 'query';
+              }
                 if (type === 'embeddings') {
                   if (side === 'src' && a.startsWith('output')) return 'embedding';
                   if (side === 'tgt' && a.startsWith('input')) return 'text';
@@ -525,7 +549,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       const tgtType = (tgt as any)?.data?.type || tgt?.type;
       const sh = (e as any).sourceHandle || (
         srcType === 'input' ? 'data' :
-        srcType === 'rag_retriever' ? 'documents' :
+        (srcType === 'rag_retriever' || srcType === 'hybrid_retriever' || srcType === 'retriever') ? 'documents' :
         srcType === 'parser' ? 'parsed_data' :
         srcType === 'embeddings' ? 'embedding' :
         srcType === 'llm' ? 'content' : undefined
@@ -533,7 +557,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       const th = (e as any).targetHandle || (
         tgtType === 'llm' ? 'prompt' :
         tgtType === 'output' ? 'data' :
-        tgtType === 'rag_retriever' ? 'query' :
+        (tgtType === 'rag_retriever' || tgtType === 'hybrid_retriever' || tgtType === 'retriever') ? 'query' :
         (tgtType === 'embeddings' || tgtType === 'parser') ? 'text' : undefined
       );
       if (sh === (e as any).sourceHandle && th === (e as any).targetHandle) return e;
@@ -571,7 +595,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       const tgtType = (tgt as any)?.data?.type || tgt?.type;
       if (!p.sourceHandle) {
         if (srcType === 'input') p.sourceHandle = 'data';
-        if (srcType === 'rag_retriever') p.sourceHandle = 'documents';
+        if (srcType === 'rag_retriever' || srcType === 'hybrid_retriever' || srcType === 'retriever') p.sourceHandle = 'documents';
         if (srcType === 'parser') p.sourceHandle = 'parsed_data';
         if (srcType === 'embeddings') p.sourceHandle = 'embedding';
         if (srcType === 'llm') p.sourceHandle = 'content';
@@ -579,7 +603,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
       if (!p.targetHandle) {
         if (tgtType === 'llm') p.targetHandle = 'prompt';
         if (tgtType === 'output') p.targetHandle = 'data';
-        if (tgtType === 'rag_retriever') p.targetHandle = 'query';
+        if (tgtType === 'rag_retriever' || tgtType === 'hybrid_retriever' || tgtType === 'retriever') p.targetHandle = 'query';
         if (tgtType === 'embeddings' || tgtType === 'parser') p.targetHandle = 'text';
       }
       setEdges((eds) => addEdge(p, eds));

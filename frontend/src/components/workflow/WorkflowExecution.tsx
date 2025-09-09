@@ -197,7 +197,7 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
   // 构建推荐输入（简单根据节点类型推断）
   const buildRecommendedInput = () => {
     const hasLLM = nodes.some((n: any) => (n.data?.type || n.type) === 'llm');
-    const hasRetriever = nodes.some((n: any) => (n.data?.type || n.type) === 'rag_retriever');
+    const hasRetriever = nodes.some((n: any) => ['rag_retriever','hybrid_retriever','retriever'].includes((n.data?.type || n.type)));
     const hasInput = nodes.some((n: any) => (n.data?.type || n.type) === 'input');
     if (inputTab === 'json') {
       const recommended: any = {};
@@ -234,7 +234,7 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
     if (formTemperature !== '') data.temperature = Number(formTemperature);
     if (formMaxTokens !== '') data.max_tokens = Number(formMaxTokens);
     // 若有检索节点但未显式提供 query，默认用 prompt 作为 query
-    const hasRetriever = nodes.some((n: any) => (n.data?.type || n.type) === 'rag_retriever');
+    const hasRetriever = nodes.some((n: any) => ['rag_retriever','hybrid_retriever','retriever'].includes((n.data?.type || n.type)));
     if (hasRetriever && !data.query && data.prompt) data.query = data.prompt;
     // 自定义字段
     customFields.forEach((f) => {
@@ -415,6 +415,8 @@ const WorkflowExecution: React.FC<WorkflowExecutionProps> = ({
       case 'llm':
         return { response: 'LLM生成的回复', tokens: 150, model: node.data.config?.model || 'qwen-turbo' };
       case 'rag_retriever':
+      case 'retriever':
+      case 'hybrid_retriever':
         return { documents: ['文档1', '文档2', '文档3'], scores: [0.95, 0.87, 0.76] };
       case 'classifier':
         return { class: '正面', confidence: 0.92, all_classes: node.data.config?.classes || [] };

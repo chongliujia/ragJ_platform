@@ -60,10 +60,10 @@ class Document(Base):
     total_chunks = Column(Integer, default=0)  # 分块数量
 
     # 元数据
-    doc_metadata = Column(JSON, default={})  # 存储文档的额外元数据
+    doc_metadata = Column(JSON, default=dict)  # 存储文档的额外元数据
 
     # 向量化信息
-    vector_ids = Column(JSON, default=[])  # Milvus中向量的ID列表
+    vector_ids = Column(JSON, default=list)  # Milvus中向量的ID列表
 
     # 时间戳
     created_at = Column(DateTime(timezone=True), server_default=func.now())

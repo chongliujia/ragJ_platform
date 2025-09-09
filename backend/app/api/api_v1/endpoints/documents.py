@@ -214,6 +214,23 @@ async def delete_document(
                 milvus_service.delete_vectors(tenant_collection_name, document.vector_ids)
             except Exception as e:
                 logger.warning(f"Failed to delete vectors for document {document_id}: {e}")
+
+        # Remove from Elasticsearch
+        try:
+            from app.services.elasticsearch_service import get_elasticsearch_service
+            es_service = await get_elasticsearch_service()
+            if es_service is not None:
+                tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+                await es_service.delete_by_query(
+                    index_name=tenant_index_name,
+                    term_filters={
+                        "tenant_id": tenant_id,
+                        "document_name": document.filename,
+                        "knowledge_base": kb_name,
+                    },
+                )
+        except Exception as e:
+            logger.warning(f"Failed to delete Elasticsearch docs for document {document_id}: {e}")
         
         # Remove file if it exists
         if document.file_path:

@@ -123,6 +123,8 @@ export interface KnowledgeBase {
   name: string;
   description: string;
   document_count: number;
+  total_chunks?: number;
+  total_size_bytes?: number;
   created_at: string;
   status: 'active' | 'processing' | 'error';
 }
