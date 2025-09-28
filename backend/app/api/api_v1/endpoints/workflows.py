@@ -32,6 +32,10 @@ from app.services.workflow_performance_monitor import workflow_performance_monit
 from app.services.workflow_persistence_service import workflow_persistence_service
 from app.core.dependencies import get_tenant_id, get_current_user
 from app.db.models.user import User
+from app.services.llm_service import llm_service
+from app.services.milvus_service import milvus_service
+from app.services.elasticsearch_service import get_elasticsearch_service
+from app.services.reranking_service import reranking_service, RerankingProvider
 
 logger = structlog.get_logger(__name__)
 
@@ -681,6 +685,91 @@ async def generate_workflow_code(request: WorkflowCreateRequest):
     except Exception as e:
         logger.error("代码生成失败", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/test/retrieve")
+async def test_retrieve(
+    payload: Dict[str, Any],
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """预览检索结果（不进行 LLM 生成）。
+
+    请求体：
+      - knowledge_base: str
+      - query: str
+      - top_k: int (默认 5)
+      - score_threshold: float (可选)
+      - rerank: bool (默认 True)
+    """
+    kb = (payload.get("knowledge_base") or payload.get("kb") or "").strip()
+    query = (payload.get("query") or "").strip()
+    if not kb:
+        raise HTTPException(status_code=400, detail="knowledge_base is required")
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    top_k = int(payload.get("top_k") or 5)
+    if top_k <= 0:
+        top_k = 5
+    use_rerank = bool(payload.get("rerank", True))
+
+    # 1) 生成查询向量
+    emb = await llm_service.get_embeddings([query])
+    if not emb.get("success") or not emb.get("embeddings"):
+        raise HTTPException(status_code=500, detail=f"Failed to embed query: {emb.get('error')}")
+    query_vec = emb["embeddings"][0]
+
+    # 2) Milvus 向量检索
+    collection = f"tenant_{tenant_id}_{kb}"
+    try:
+        vec_results = await milvus_service.search(
+            collection_name=collection,
+            query_vector=query_vec,
+            top_k=top_k * 2,
+        )
+    except Exception:
+        vec_results = []
+
+    # 3) ES 关键词检索（如果可用）
+    kw_results = []
+    es = await get_elasticsearch_service()
+    if es is not None:
+        try:
+            kw_results = await es.search(
+                index_name=collection,
+                query=query,
+                top_k=top_k * 2,
+                filter_query={"tenant_id": tenant_id},
+            )
+        except Exception:
+            kw_results = []
+
+    # 4) 融合 + （可选）重排
+    docs = []
+    for r in vec_results:
+        docs.append({"text": r.get("text", ""), "score": 1.0 / (1.0 + r.get("distance", 0)), "source": "vector"})
+    existing = {d["text"] for d in docs}
+    for r in kw_results:
+        t = r.get("text")
+        if t and t not in existing:
+            docs.append({"text": t, "score": r.get("score", 0), "source": "keyword"})
+
+    if not docs:
+        return {"results": []}
+
+    if use_rerank:
+        reranked = await reranking_service.rerank_documents(
+            query=query,
+            documents=docs,
+            provider=RerankingProvider.BGE,
+            top_k=top_k,
+        )
+        out = reranked
+    else:
+        out = sorted(docs, key=lambda x: x.get("score", 0), reverse=True)[:top_k]
+
+    return {"results": out}
 
 
 @router.get("/workflows/templates", response_model=List[Dict[str, Any]])

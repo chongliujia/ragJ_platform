@@ -20,6 +20,11 @@ import {
 import { ContentCopy as CopyIcon, RestartAlt as ResetIcon, Info as InfoIcon, Code as CodeIcon } from '@mui/icons-material';
 import type { Node, Edge } from 'reactflow';
 import { modelConfigApi } from '../../services/modelConfigApi';
+import { knowledgeBaseApi } from '../../services/api';
+import { FormControl, InputLabel, Select, Slider, MenuItem as MItem } from '@mui/material';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import InputAdornment from '@mui/material/InputAdornment';
+import Icon from '@mui/material/Icon';
 
 interface Props {
   open: boolean;
@@ -80,6 +85,21 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
     return availableChatModels.map(model => model.model_name);
   }, [availableChatModels]);
 
+  // 知识库列表（用于检索类节点选择）
+  const [kbOptions, setKbOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [loadingKBs, setLoadingKBs] = useState(false);
+  const loadKBs = async () => {
+    try {
+      setLoadingKBs(true);
+      const res = await knowledgeBaseApi.getList();
+      setKbOptions(Array.isArray(res.data) ? res.data : []);
+    } catch (e) {
+      // 忽略错误
+    } finally {
+      setLoadingKBs(false);
+    }
+  };
+
   useEffect(() => {
     if (node) {
       const cfg = (node as any).data?.config || {};
@@ -104,6 +124,15 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
       setLocalConfig({});
     }
   }, [node, type, availableChatModels]);
+
+  // 打开时按需加载 KB 列表
+  useEffect(() => {
+    if (!open) return;
+    if (type === 'rag_retriever' || type === 'hybrid_retriever' || type === 'retriever') {
+      loadKBs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, type]);
 
   const handleSave = () => {
     // 运行时字段校验（必填、简单数值范围）
@@ -150,6 +179,10 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
         return; 
       }
     } else if (type === 'rag_retriever' || type === 'hybrid_retriever' || type === 'retriever') {
+      if (!localConfig.knowledge_base) {
+        setError('请先选择知识库');
+        return;
+      }
       const tk = Number(localConfig.top_k);
       if (Number.isNaN(tk) || tk <= 0) {
         setError('top_k 必须为正数');
@@ -569,6 +602,126 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
                 </Box>
               </Box>
             )}
+            {(type === 'rag_retriever' || type === 'hybrid_retriever' || type === 'retriever') && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" sx={{ mb: 2 }}>检索配置</Typography>
+                {type === 'retriever' && (
+                  <TextField
+                    select
+                    fullWidth
+                    label="检索模式"
+                    value={localConfig.mode || 'hybrid'}
+                    onChange={(e) => setLocalConfig((c: any) => ({ ...c, mode: e.target.value }))}
+                    sx={{ mb: 2 }}
+                  >
+                    <MenuItem value="vector">向量</MenuItem>
+                    <MenuItem value="keyword">关键词</MenuItem>
+                    <MenuItem value="hybrid">混合</MenuItem>
+                  </TextField>
+                )}
+                <FormControl fullWidth sx={{ mb: 2 }}>
+                  <InputLabel>知识库</InputLabel>
+                  <Select
+                    value={localConfig.knowledge_base || ''}
+                    label="知识库"
+                    onChange={(e) => setLocalConfig((c: any) => ({ ...c, knowledge_base: e.target.value }))}
+                    endAdornment={
+                      <InputAdornment position="end">
+                        <IconButton size="small" onClick={loadKBs} disabled={loadingKBs}>
+                          <RefreshIcon fontSize="small" />
+                        </IconButton>
+                      </InputAdornment>
+                    }
+                  >
+                    {kbOptions.map((kb) => (
+                      <MItem key={kb.id} value={kb.id}>{kb.name}</MItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>检索数量 (top_k): {localConfig.top_k || 5}</Typography>
+                  <Slider min={1} max={50} step={1} value={localConfig.top_k || 5} onChange={(_, v) => setLocalConfig((c: any) => ({ ...c, top_k: Number(v) }))} />
+                </Box>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>相似度阈值: {(localConfig.score_threshold ?? 0.7).toFixed(2)}</Typography>
+                  <Slider min={0} max={1} step={0.05} value={localConfig.score_threshold ?? 0.7} onChange={(_, v) => setLocalConfig((c: any) => ({ ...c, score_threshold: Number(v) }))} />
+                </Box>
+            {type !== 'retriever' && (
+              <FormControlLabel control={<Switch checked={Boolean(localConfig.rerank)} onChange={(e) => setLocalConfig((c: any) => ({ ...c, rerank: e.target.checked }))} />} label="启用重排" />
+            )}
+
+            {/* 预览检索 */}
+            <Divider sx={{ my: 2 }} />
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>测试检索</Typography>
+            <Grid container spacing={1}>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="测试查询"
+                  value={(localConfig as any)._test_query || ''}
+                  onChange={(e) => setLocalConfig((c: any) => ({ ...c, _test_query: e.target.value }))}
+                  placeholder="输入测试查询，如：公司报销制度"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <Button
+                  variant="outlined"
+                  onClick={async () => {
+                    try {
+                      setError(null);
+                      const q = (localConfig as any)._test_query || '';
+                      if (!q) { setError('请输入测试查询'); return; }
+                      if (!localConfig.knowledge_base) { setError('请先选择知识库'); return; }
+                      const body: any = {
+                        knowledge_base: localConfig.knowledge_base,
+                        query: q,
+                        top_k: localConfig.top_k || 5,
+                        rerank: localConfig.rerank !== false,
+                      };
+                      const resp = await fetch('/api/v1/workflows/test/retrieve', {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+                        },
+                        body: JSON.stringify(body),
+                      });
+                      if (!resp.ok) {
+                        const txt = await resp.text().catch(() => '');
+                        setError(`测试检索失败：HTTP ${resp.status}${txt ? ' ' + txt : ''}`);
+                        return;
+                      }
+                      const data = await resp.json();
+                      setLocalConfig((c: any) => ({ ...c, _test_results: data?.results || [] }));
+                    } catch (e: any) {
+                      setError(`测试检索异常：${e?.message || e}`);
+                    }
+                  }}
+                >
+                  运行测试
+                </Button>
+              </Grid>
+              <Grid item xs={12}>
+                {Array.isArray((localConfig as any)._test_results) && (localConfig as any)._test_results.length > 0 ? (
+                  <Box sx={{ maxHeight: 200, overflow: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1 }}>
+                    {(localConfig as any)._test_results.map((r: any, idx: number) => (
+                      <Box key={idx} sx={{ mb: 1 }}>
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          [{r.source || 'mixed'}] score: {typeof r.score === 'number' ? r.score.toFixed(3) : r.score}
+                        </Typography>
+                        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                          {String(r.text || '').slice(0, 240)}{String(r.text || '').length > 240 ? '…' : ''}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                ) : (
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>无结果</Typography>
+                )}
+              </Grid>
+            </Grid>
+          </Box>
+        )}
           </>
         )}
         {tab === 1 && (DocBlock || <Typography variant="body2" sx={{ color: 'text.secondary' }}>暂无说明</Typography>)}

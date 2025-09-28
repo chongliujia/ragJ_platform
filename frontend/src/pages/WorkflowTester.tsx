@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert } from '@mui/material';
-import { ArrowBack as BackIcon, Send as SendIcon, PlayArrow as PlayIcon } from '@mui/icons-material';
+import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert, Stack, LinearProgress } from '@mui/material';
+import { ArrowBack as BackIcon, Send as SendIcon, PlayArrow as PlayIcon, Stop as StopIcon } from '@mui/icons-material';
 import { workflowApi } from '../services/api';
 
 interface ChatMsg {
@@ -18,6 +18,8 @@ const WorkflowTester: React.FC = () => {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const cancelRef = useRef<null | (() => void)>(null);
+  const [progress, setProgress] = useState<any[]>([]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -27,6 +29,7 @@ const WorkflowTester: React.FC = () => {
     if (!id) return;
     setRunning(true);
     setError(null);
+    setProgress([]);
 
     // 将用户输入映射到常见字段，便于多种工作流直接复用
     const payload = {
@@ -39,22 +42,19 @@ const WorkflowTester: React.FC = () => {
     };
 
     try {
-      await workflowApi.executeStream(
+      const { cancel, promise } = workflowApi.executeStreamCancelable(
         id,
         payload,
-        // onProgress: 暂不做细粒度展示，只保留最终结果
-        () => {},
-        // onError
+        (evt) => {
+          setProgress((prev) => prev.concat(evt));
+        },
         (err) => {
           setError(err?.message || '执行失败');
           setRunning(false);
         },
-        // onComplete
         (result) => {
           try {
-            // 后端 complete 事件结构：{ type: 'complete', result: { output_data, status, ... } }
             const out = (result && result.result && result.result.output_data) || result.output_data || result;
-            // 尝试从常见字段抽取文本
             const textOut = typeof out === 'string' ? out : (out?.content || out?.text || JSON.stringify(out));
             setMessages((msgs) => msgs.concat([{ role: 'assistant', content: textOut, timestamp: Date.now() }]));
           } finally {
@@ -62,6 +62,9 @@ const WorkflowTester: React.FC = () => {
           }
         }
       );
+      cancelRef.current = cancel;
+      await promise;
+      cancelRef.current = null;
     } catch (e: any) {
       setError(e?.message || '执行异常');
       setRunning(false);
@@ -84,26 +87,48 @@ const WorkflowTester: React.FC = () => {
         </IconButton>
         <Typography variant="h6" sx={{ flex: 1 }}>工作流测试（聊天）</Typography>
         {id && <Chip label={`ID: ${id}`} size="small" />}
+        <Stack direction="row" spacing={1}>
+          <Button size="small" variant="outlined" startIcon={<StopIcon />} disabled={!running} onClick={() => { const c = cancelRef.current; if (c) { try { c(); } catch {} } }}>
+            停止
+          </Button>
+        </Stack>
       </Paper>
       <Divider />
 
-      <Box ref={listRef} sx={{ flex: 1, overflow: 'auto', p: 2, background: (t) => t.palette.mode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa' }}>
+      <Box ref={listRef} sx={{ flex: 1, overflow: 'auto', p: 2, background: (t) => t.palette.mode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa', display: 'grid', gridTemplateColumns: '1fr 340px', gap: 2 }}>
         {messages.length === 0 && (
           <Alert severity="info">输入内容并发送，系统将使用当前工作流执行并返回结果。</Alert>
         )}
-        {messages.map((m, idx) => (
-          <Box key={idx} sx={{ display: 'flex', mb: 2, justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-            <Box sx={{ maxWidth: '70%', px: 1.5, py: 1, borderRadius: 2, background: m.role === 'user' ? '#1976d2' : 'rgba(0,0,0,0.1)', color: m.role === 'user' ? '#fff' : 'inherit' }}>
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{m.content}</Typography>
+        <Box>
+          {messages.map((m, idx) => (
+            <Box key={idx} sx={{ display: 'flex', mb: 2, justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+              <Box sx={{ maxWidth: '70%', px: 1.5, py: 1, borderRadius: 2, background: m.role === 'user' ? '#1976d2' : 'rgba(0,0,0,0.1)', color: m.role === 'user' ? '#fff' : 'inherit' }}>
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{m.content}</Typography>
+              </Box>
             </Box>
-          </Box>
-        ))}
-        {running && (
-          <Box sx={{ color: 'text.secondary' }}>执行中...</Box>
-        )}
-        {error && (
-          <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>
-        )}
+          ))}
+          {running && (
+            <Box sx={{ color: 'text.secondary' }}>执行中...</Box>
+          )}
+          {error && (
+            <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>
+          )}
+        </Box>
+        {/* 侧边进度面板 */}
+        <Box sx={{ position: 'sticky', top: 0, height: 'fit-content' }}>
+          <Paper variant="outlined" sx={{ p: 1.5 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>执行进度</Typography>
+            {progress.length === 0 && (
+              <Typography variant="caption" color="text.secondary">暂无进度</Typography>
+            )}
+            {progress.map((p, i) => (
+              <Box key={i} sx={{ mb: 1 }}>
+                <Typography variant="caption" color="text.secondary">{p?.node_id || p?.step || `步骤 ${i+1}`}</Typography>
+                <LinearProgress variant="determinate" value={p?.percent || 0} sx={{ height: 6, borderRadius: 3 }} />
+              </Box>
+            ))}
+          </Paper>
+        </Box>
       </Box>
 
       <Divider />
@@ -118,4 +143,3 @@ const WorkflowTester: React.FC = () => {
 };
 
 export default WorkflowTester;
-

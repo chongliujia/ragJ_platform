@@ -4,6 +4,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, Box, Typography } from '@mui/material';
 import './i18n';
 import TopBar from './components/TopBar';
+import { SnackbarProvider } from './components/SnackbarProvider';
 import AuthGuard from './components/AuthGuard';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -440,6 +441,7 @@ function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
+      <SnackbarProvider>
       <Router>
         <Routes>
           {/* 登录路由 */}
@@ -539,6 +541,7 @@ function App() {
           />
         </Routes>
       </Router>
+      </SnackbarProvider>
     </ThemeProvider>
   );
 }

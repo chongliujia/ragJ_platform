@@ -39,6 +39,7 @@ import {
 } from '@mui/icons-material';
 import { documentApi } from '../services/api';
 import type { ChunkingStrategyConfig, ChunkingStrategy } from '../types/models';
+import { useSnackbar } from './SnackbarProvider';
 
 interface DocumentUploadProps {
   open: boolean;
@@ -54,6 +55,10 @@ interface FileUploadStatus {
   error?: string;
 }
 
+const ALLOWED_EXTS = ['pdf','docx','txt','md','html'];
+const MAX_SIZE_MB = Number((import.meta as any).env?.VITE_MAX_UPLOAD_MB || 100);
+const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+
 const DocumentUpload: React.FC<DocumentUploadProps> = ({
   open,
   onClose,
@@ -66,12 +71,14 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadControllersRef = useRef<Map<number, AbortController>>(new Map());
   
   // 分片策略相关状态
   const [strategies, setStrategies] = useState<ChunkingStrategyConfig[]>([]);
   const [selectedStrategy, setSelectedStrategy] = useState<ChunkingStrategy>('recursive');
   const [strategyParams, setStrategyParams] = useState<Record<string, any>>({});
   const [loadingStrategies, setLoadingStrategies] = useState(true);
+  const { enqueueSnackbar } = useSnackbar();
 
   // 获取分片策略列表
   useEffect(() => {
@@ -127,11 +134,16 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     e.preventDefault();
     const droppedFiles = Array.from(e.dataTransfer.files || []);
     if (droppedFiles.length > 0) {
-      const newFiles: FileUploadStatus[] = droppedFiles.map(file => ({
-        file,
-        status: 'pending',
-        progress: 0,
-      }));
+      const newFiles: FileUploadStatus[] = droppedFiles.map(file => {
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        if (!ALLOWED_EXTS.includes(ext)) {
+          return { file, status: 'error', progress: 0, error: `不支持的文件类型 .${ext}` };
+        }
+        if (file.size > MAX_SIZE_BYTES) {
+          return { file, status: 'error', progress: 0, error: `文件超过大小限制（≤ ${MAX_SIZE_MB} MB）` };
+        }
+        return { file, status: 'pending', progress: 0 };
+      });
       setFiles(prev => [...prev, ...newFiles]);
       setError(null);
     }
@@ -153,11 +165,16 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(event.target.files || []);
     if (selectedFiles.length > 0) {
-      const newFiles: FileUploadStatus[] = selectedFiles.map(file => ({
-        file,
-        status: 'pending',
-        progress: 0,
-      }));
+      const newFiles: FileUploadStatus[] = selectedFiles.map(file => {
+        const ext = file.name.split('.').pop()?.toLowerCase() || '';
+        if (!ALLOWED_EXTS.includes(ext)) {
+          return { file, status: 'error', progress: 0, error: `不支持的文件类型 .${ext}` };
+        }
+        if (file.size > MAX_SIZE_BYTES) {
+          return { file, status: 'error', progress: 0, error: `文件超过大小限制（≤ ${MAX_SIZE_MB} MB）` };
+        }
+        return { file, status: 'pending', progress: 0 };
+      });
       setFiles(prev => [...prev, ...newFiles]);
       setError(null);
     }
@@ -165,6 +182,12 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
 
   // 删除文件
   const handleRemoveFile = (index: number) => {
+    // 若正在上传，先取消
+    const controller = uploadControllersRef.current.get(index);
+    if (controller) {
+      try { controller.abort(); } catch {}
+      uploadControllersRef.current.delete(index);
+    }
     setFiles(prev => prev.filter((_, i) => i !== index));
   };
 
@@ -186,6 +209,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
       // 逐个上传文件
       for (let i = 0; i < files.length; i++) {
         const fileStatus = files[i];
+        if (fileStatus.status === 'error') continue;
         
         // 更新文件状态为上传中
         setFiles(prev => prev.map((f, idx) => 
@@ -197,13 +221,15 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
           formData.append('file', fileStatus.file);
           formData.append('chunking_strategy', selectedStrategy);
           formData.append('chunking_params', JSON.stringify(strategyParams));
-
-          await documentApi.upload(knowledgeBaseId, formData);
+          const controller = new AbortController();
+          uploadControllersRef.current.set(i, controller);
+          await documentApi.upload(knowledgeBaseId, formData, controller.signal);
           
           // 上传成功
           setFiles(prev => prev.map((f, idx) => 
             idx === i ? { ...f, status: 'success', progress: 100 } : f
           ));
+          uploadControllersRef.current.delete(i);
           
           completedFiles++;
           setUploadProgress((completedFiles / totalFiles) * 100);
@@ -217,9 +243,12 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
               ...f, 
               status: 'error', 
               progress: 0,
-              error: error.response?.data?.detail || t('document.upload.error')
+              error: (error?.name === 'CanceledError' || error?.message === 'canceled' || error?.message?.includes('aborted')) 
+                ? '已取消'
+                : (error?.response?.data?.detail || t('document.upload.error'))
             } : f
           ));
+          uploadControllersRef.current.delete(i);
         }
       }
 
@@ -227,6 +256,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
       const successfulUploads = files.filter(f => f.status === 'success').length;
       if (successfulUploads > 0) {
         onUploadSuccess();
+        enqueueSnackbar('上传已接收，后台处理中', 'success');
       }
       
       // 如果全部成功，关闭对话框
@@ -238,6 +268,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     } catch (error: any) {
       console.error('Upload process failed:', error);
       setError(error.message || t('document.upload.error'));
+      enqueueSnackbar('上传失败', 'error');
     } finally {
       setUploading(false);
     }
@@ -337,7 +368,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
         >
           <input
             type="file"
-            accept=".pdf,.docx,.txt,.md,.html,.csv,.json,.xml,.rtf,.epub,.odt,.ods,.odp,.xlsx,.xls,.pptx,.ppt"
+            accept={ALLOWED_EXTS.map(ext => `.${ext}`).join(',')}
             onChange={handleFileChange}
             multiple
             style={{ display: 'none' }}
@@ -352,7 +383,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
                 : t('document.upload.file.select')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              {t('document.upload.file.supportedFormats')}
+              支持：{ALLOWED_EXTS.map(ext => `.${ext}`).join(', ')} · 最大 {MAX_SIZE_MB} MB
             </Typography>
             <Button
               variant="outlined"
@@ -402,6 +433,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
                         )}
                       </Box>
                     }
+                    secondaryTypographyProps={{ component: 'div' }}
                   />
                   <ListItemSecondaryAction>
                     <Chip
@@ -419,14 +451,28 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
                       size="small"
                       sx={{ mr: 1 }}
                     />
-                    <IconButton
-                      edge="end"
-                      onClick={() => handleRemoveFile(index)}
-                      disabled={fileStatus.status === 'uploading'}
-                      size="small"
-                    >
-                      <DeleteIcon />
-                    </IconButton>
+                    {fileStatus.status === 'uploading' ? (
+                      <IconButton
+                        edge="end"
+                        onClick={() => {
+                          const c = uploadControllersRef.current.get(index);
+                          if (c) {
+                            try { c.abort(); } catch {}
+                          }
+                        }}
+                        size="small"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    ) : (
+                      <IconButton
+                        edge="end"
+                        onClick={() => handleRemoveFile(index)}
+                        size="small"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    )}
                   </ListItemSecondaryAction>
                 </ListItem>
               ))}

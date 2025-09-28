@@ -70,6 +70,7 @@ export class AuthManager {
   private static instance: AuthManager;
   private token: string | null = null;
   private user: UserInfo | null = null;
+  private permissions: Set<string> = new Set();
 
   private constructor() {
     // 从localStorage恢复token
@@ -102,6 +103,7 @@ export class AuthManager {
     
     // 获取用户信息
     await this.loadUserInfo();
+    await this.loadPermissions();
     
     return response;
   }
@@ -115,6 +117,7 @@ export class AuthManager {
     
     // 获取用户信息
     await this.loadUserInfo();
+    await this.loadPermissions();
     
     return response;
   }
@@ -139,11 +142,24 @@ export class AuthManager {
     
     try {
       this.user = await authApi.getCurrentUser();
+      // 尝试同步刷新权限
+      await this.loadPermissions();
       return this.user;
     } catch (error) {
       console.error('Failed to load user info:', error);
       this.logout(); // 清除无效token
       return null;
+    }
+  }
+
+  // 加载权限
+  private async loadPermissions(): Promise<void> {
+    try {
+      const res = await authApi.getUserPermissions();
+      this.permissions = new Set((res.permissions || []).map((p) => p.name));
+    } catch (e) {
+      console.warn('Failed to load user permissions:', e);
+      this.permissions = new Set();
     }
   }
 
@@ -160,12 +176,10 @@ export class AuthManager {
   // 检查用户权限
   hasPermission(permission: string): boolean {
     if (!this.user) return false;
-    
     // 超级管理员拥有所有权限
     if (this.user.role === 'super_admin') return true;
-    
-    // TODO: 实现具体的权限检查逻辑
-    return true;
+    // 若权限尚未加载，保守返回 false
+    return this.permissions.has(permission);
   }
 
   // 检查用户角色

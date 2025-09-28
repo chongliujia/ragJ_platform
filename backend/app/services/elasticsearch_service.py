@@ -68,7 +68,13 @@ class ElasticsearchService:
             return False
 
     async def create_index(self, index_name: str):
-        """Creates a new index with a specific mapping for text."""
+        """Creates a new index with mappings for hybrid search fields.
+
+        Mappings:
+        - text: full-text search (text)
+        - tenant_id/user_id: exact-match filtering (integer)
+        - document_name/knowledge_base: exact-match filtering and aggregations (keyword)
+        """
         if await self.index_exists(index_name):
             logger.warning(f"Index '{index_name}' already exists.")
             return
@@ -77,6 +83,10 @@ class ElasticsearchService:
             "mappings": {
                 "properties": {
                     "text": {"type": "text", "analyzer": "standard"},
+                    "tenant_id": {"type": "integer"},
+                    "user_id": {"type": "integer"},
+                    "document_name": {"type": "keyword"},
+                    "knowledge_base": {"type": "keyword"},
                 }
             }
         }

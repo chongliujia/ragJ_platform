@@ -141,6 +141,7 @@ class DocumentService:
         user_id: int,
         chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE,
         chunking_params: dict = None,
+        file_system_path: Optional[str] = None,
     ):
         """
         Process an uploaded document with proper status tracking.
@@ -154,14 +155,16 @@ class DocumentService:
             file_type = filename.split('.')[-1].lower() if '.' in filename else 'unknown'
             file_size = len(content)
             
-            # Create temporary file path (in production, save to proper storage)
-            upload_dir = os.path.join(settings.UPLOAD_DIR or "/tmp/uploads", str(tenant_id))
-            os.makedirs(upload_dir, exist_ok=True)
-            file_path = os.path.join(upload_dir, filename)
-            
-            # Save file to disk
-            with open(file_path, 'wb') as f:
-                f.write(content)
+            # Create or reuse file path (in production, save to proper storage)
+            if file_system_path:
+                file_path = file_system_path
+            else:
+                upload_dir = os.path.join(settings.UPLOAD_DIR or "/tmp/uploads", str(tenant_id))
+                os.makedirs(upload_dir, exist_ok=True)
+                file_path = os.path.join(upload_dir, filename)
+                # Save file to disk
+                with open(file_path, 'wb') as f:
+                    f.write(content)
             
             # Parse content to extract title and preview
             document_text = parser_service.parse_document(content, filename)
@@ -234,9 +237,15 @@ class DocumentService:
             tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
 
             # Insert into Milvus (synchronous call)
-            vector_ids = milvus_service.insert(
-                collection_name=tenant_collection_name, entities=entities
-            )
+            try:
+                vector_ids = milvus_service.insert(
+                    collection_name=tenant_collection_name, entities=entities
+                )
+            except Exception as milvus_err:
+                error_msg = f"Milvus insert failed: {milvus_err}"
+                self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
+                logger.error(error_msg)
+                return
 
             # Index documents in Elasticsearch with tenant isolation
             tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
@@ -250,18 +259,36 @@ class DocumentService:
                 }
                 for chunk in chunks
             ]
-            await es_service.bulk_index_documents(
-                index_name=tenant_index_name, documents=es_docs
-            )
+            # Index in Elasticsearch if available; otherwise continue without failing
+            try:
+                if es_service is not None:
+                    await es_service.bulk_index_documents(
+                        index_name=tenant_index_name, documents=es_docs
+                    )
+                else:
+                    logger.warning("Elasticsearch service not available; skipping ES indexing for document chunks")
+            except Exception as es_err:
+                # Log but do not fail the whole pipeline after vectors are stored
+                logger.error(f"Elasticsearch indexing failed: {es_err}")
 
-            # Update status to COMPLETED
-            self._update_document_status(
-                db, 
-                document_record.id, 
-                DocumentStatus.COMPLETED,
-                total_chunks=len(chunks),
-                vector_ids=vector_ids
-            )
+            # Update status to COMPLETED (use actual inserted vector count)
+            try:
+                self._update_document_status(
+                    db,
+                    document_record.id,
+                    DocumentStatus.COMPLETED,
+                    total_chunks=len(vector_ids) if isinstance(vector_ids, list) else 0,
+                    vector_ids=vector_ids,
+                )
+            except Exception as db_err:
+                # Attempt rollback and mark failed with reason
+                logger.error(f"Failed to finalize document status: {db_err}")
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+                error_msg = f"Finalize status failed: {db_err}"
+                self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
             
             logger.info(f"Successfully processed and indexed document {filename}")
 
@@ -270,6 +297,10 @@ class DocumentService:
             logger.error(error_msg, exc_info=True)
             
             if document_record:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
         finally:
             db.close()

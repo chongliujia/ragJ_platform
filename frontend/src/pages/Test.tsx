@@ -156,14 +156,14 @@ const Test: React.FC = () => {
             sx={{ wordBreak: 'break-all' }}
           >
             {result.status === 'success' ? (
-              <Typography variant="body2">
+              <Typography component="div" variant="body2">
                 <strong>成功:</strong><br />
                 <pre style={{ margin: 0, fontSize: '12px' }}>
                   {JSON.stringify(result.data, null, 2)}
                 </pre>
               </Typography>
             ) : (
-              <Typography variant="body2">
+              <Typography component="div" variant="body2">
                 <strong>错误:</strong><br />
                 <pre style={{ margin: 0, fontSize: '12px' }}>
                   {JSON.stringify(result.error, null, 2)}

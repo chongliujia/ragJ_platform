@@ -2,7 +2,7 @@
  * 数据节点组件 - 数据处理和检索节点
  */
 
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useState } from 'react';
 import {
   Box,
   Typography,
@@ -20,6 +20,9 @@ import {
   Chip,
   Switch,
   FormControlLabel,
+  Slider,
+  InputAdornment,
+  Tooltip,
 } from '@mui/material';
 import {
   Storage as DataIcon,
@@ -29,6 +32,8 @@ import {
 } from '@mui/icons-material';
 import { Handle, Position } from 'reactflow';
 import type { NodeProps } from 'reactflow';
+import { knowledgeBaseApi } from '../../services/api';
+import RefreshIcon from '@mui/icons-material/Refresh';
 
 interface DataNodeData {
   name: string;
@@ -57,6 +62,8 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
   const [configOpen, setConfigOpen] = useState(false);
   const [config, setConfig] = useState(data.config || {});
   const status = (data as any).status as 'idle' | 'running' | 'success' | 'error' | undefined;
+  const [kbOptions, setKbOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [loadingKBs, setLoadingKBs] = useState(false);
 
   const getNodeIcon = () => {
     switch (data.type) {
@@ -72,6 +79,21 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
         return <DataIcon sx={{ color: '#fff' }} />;
       default:
         return <DataIcon sx={{ color: '#fff' }} />;
+    }
+  };
+
+  const isConfigMissing = () => {
+    switch (data.type) {
+      case 'rag_retriever':
+      case 'hybrid_retriever':
+      case 'retriever':
+        return !config.knowledge_base;
+      case 'embeddings':
+        return !config.model || !config.dimensions;
+      case 'database':
+        return !config.connection;
+      default:
+        return false;
     }
   };
 
@@ -101,6 +123,25 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
     setConfigOpen(false);
   };
 
+  const loadKnowledgeBases = async () => {
+    try {
+      setLoadingKBs(true);
+      const res = await knowledgeBaseApi.getList();
+      setKbOptions(Array.isArray(res.data) ? res.data : []);
+    } catch (e) {
+      // 忽略错误，保持已有下拉
+    } finally {
+      setLoadingKBs(false);
+    }
+  };
+
+  useEffect(() => {
+    if (configOpen) {
+      loadKnowledgeBases();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configOpen]);
+
   const renderConfigFields = () => {
     switch (data.type) {
       case 'rag_retriever':
@@ -122,38 +163,61 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
                 </Select>
               </FormControl>
             )}
-            <TextField
-              fullWidth
-              label="知识库"
-              value={config.knowledge_base || ''}
-              onChange={(e) =>
-                setConfig({ ...config, knowledge_base: e.target.value })
-              }
-              sx={{ mb: 2, mt: 1 }}
-            />
-            <TextField
-              fullWidth
-              type="number"
-              label="检索数量 (top_k)"
-              value={config.top_k || 5}
-              onChange={(e) =>
-                setConfig({ ...config, top_k: parseInt(e.target.value) })
-              }
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              fullWidth
-              type="number"
-              label="相似度阈值"
-              value={config.score_threshold || 0.7}
-              onChange={(e) =>
-                setConfig({
-                  ...config,
-                  score_threshold: parseFloat(e.target.value),
-                })
-              }
-              inputProps={{ step: 0.1, min: 0, max: 1 }}
-            />
+            <FormControl fullWidth sx={{ mb: 2, mt: 1 }}>
+              <InputLabel>知识库</InputLabel>
+              <Select
+                value={config.knowledge_base || ''}
+                label="知识库"
+                onChange={(e) => setConfig({ ...config, knowledge_base: e.target.value })}
+                endAdornment={
+                  <InputAdornment position="end">
+                    <Tooltip title="刷新">
+                      <IconButton size="small" onClick={loadKnowledgeBases} disabled={loadingKBs}>
+                        <RefreshIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                  </InputAdornment>
+                }
+              >
+                {kbOptions.map(kb => (
+                  <MenuItem key={kb.id} value={kb.id}>{kb.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <Box sx={{ mb: 2 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>检索数量 (top_k): {config.top_k || 5}</Typography>
+              <Slider
+                min={1}
+                max={50}
+                step={1}
+                value={config.top_k || 5}
+                onChange={(_, v) => setConfig({ ...config, top_k: Number(v) })}
+              />
+            </Box>
+
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="caption" sx={{ color: 'text.secondary' }}>相似度阈值: {(config.score_threshold ?? 0.7).toFixed(2)}</Typography>
+              <Slider
+                min={0}
+                max={1}
+                step={0.05}
+                value={config.score_threshold ?? 0.7}
+                onChange={(_, v) => setConfig({ ...config, score_threshold: Number(v) })}
+              />
+            </Box>
+
+            {data.type !== 'retriever' && (
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={Boolean((config as any).rerank)}
+                    onChange={(e) => setConfig({ ...config, rerank: e.target.checked })}
+                  />
+                }
+                label="启用重排"
+              />
+            )}
           </>
         );
       case 'parser':
@@ -381,6 +445,9 @@ const DataNode: React.FC<NodeProps<DataNodeData>> = ({ data, selected }) => {
           <Typography variant="h6" sx={{ flexGrow: 1, fontSize: '0.8rem', ml: 1 }}>
             {data.name || '数据节点'}
           </Typography>
+          {isConfigMissing() && (
+            <Chip label="未配置" color="error" size="small" sx={{ mr: 0.5 }} />
+          )}
           <IconButton
             size="small"
             onClick={() => setConfigOpen(true)}

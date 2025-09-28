@@ -392,6 +392,7 @@ const PermissionManagement: React.FC = () => {
               <Box sx={{ mb: 2 }}>
                 <Typography variant="body2" color="text.secondary">
                   正在配置角色: <Chip 
+                    component="span"
                     label={getSelectedRole()?.label} 
                     color={getSelectedRole()?.color as any} 
                     size="small" 

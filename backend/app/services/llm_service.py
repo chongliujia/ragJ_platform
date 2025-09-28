@@ -170,6 +170,63 @@ class OpenAIAPIService:
             logger.error("OpenAI chat completion failed", error=str(e))
             return {"success": False, "error": str(e)}
 
+    async def stream_chat_completion(
+        self,
+        message: str,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream chat completion using OpenAI-compatible SSE."""
+        if not self.api_key:
+            yield {"success": False, "error": "OPENAI_API_KEY not configured"}
+            return
+
+        try:
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": message}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "stream": True,
+                    },
+                    timeout=60.0,
+                ) as response:
+                    if response.status_code != 200:
+                        body = await response.aread()
+                        yield {
+                            "success": False,
+                            "error": f"API error {response.status_code}",
+                            "details": body.decode(errors="ignore"),
+                        }
+                        return
+
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data = line[6:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(data)
+                            delta = obj.get("choices", [{}])[0].get("delta", {})
+                            if "content" in delta and delta["content"]:
+                                yield {"success": True, "content": delta["content"]}
+                        except Exception:
+                            continue
+        except Exception as e:
+            logger.error("OpenAI streaming failed", error=str(e))
+            yield {"success": False, "error": str(e)}
+
 
 class DeepSeekAPIService:
     """Service for DeepSeek API integration"""
@@ -723,42 +780,62 @@ class SiliconFlowAPIService:
                 "message": "Please set SILICONFLOW_API_KEY in environment variables",
             }
 
+    async def stream_chat_completion(
+        self,
+        message: str,
+        model: str = "deepseek-ai/DeepSeek-V2.5",
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream chat via SiliconFlow (OpenAI-compatible)."""
+        if not self.api_key:
+            yield {"success": False, "error": "SILICONFLOW_API_KEY not configured"}
+            return
+
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.post(
+                async with client.stream(
+                    "POST",
                     f"{self.base_url}/chat/completions",
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
                     },
                     json={
-                        "model": "deepseek-ai/DeepSeek-V2.5",
-                        "messages": [{"role": "user", "content": "Hello"}],
-                        "max_tokens": 10,
+                        "model": model,
+                        "messages": [{"role": "user", "content": message}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "stream": True,
                     },
-                    timeout=30.0,
-                )
+                    timeout=60.0,
+                ) as response:
+                    if response.status_code != 200:
+                        body = await response.aread()
+                        yield {
+                            "success": False,
+                            "error": f"API error {response.status_code}",
+                            "details": body.decode(errors="ignore"),
+                        }
+                        return
 
-                if response.status_code == 200:
-                    return {
-                        "success": True,
-                        "message": "SiliconFlow API connection successful",
-                        "model": "deepseek-ai/DeepSeek-V2.5",
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": f"API error {response.status_code}",
-                        "details": response.text,
-                    }
-
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data = line[6:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(data)
+                            delta = obj.get("choices", [{}])[0].get("delta", {})
+                            if "content" in delta and delta["content"]:
+                                yield {"success": True, "content": delta["content"]}
+                        except Exception:
+                            continue
         except Exception as e:
-            logger.error("SiliconFlow API connection test failed", error=str(e))
-            return {
-                "success": False,
-                "error": str(e),
-                "message": "Failed to connect to SiliconFlow API",
-            }
+            logger.error("SiliconFlow streaming failed", error=str(e))
+            yield {"success": False, "error": str(e)}
 
 
 class LLMService:
@@ -1094,6 +1171,18 @@ class LLMService:
                 else:
                     logger.error(f"DEEPSEEK_DEBUG: Chat failed: {result}")
                     yield {"success": False, "error": result.get("error", "Unknown error")}
+            elif provider == "openai":
+                async for chunk in self.openai.stream_chat_completion(
+                    message, model, temperature, max_tokens
+                ):
+                    yield chunk
+            elif provider == "siliconflow":
+                # SiliconFlow is OpenAI-compatible
+                # Reuse OpenAI streaming with SiliconFlow base URL/API key
+                async for chunk in self.siliconflow.stream_chat_completion(
+                    message, model, temperature, max_tokens
+                ):
+                    yield chunk
             else:
                 # For other non-streaming providers, fallback to regular chat
                 logger.warning(f"Streaming not supported for provider {provider}, falling back to regular chat")

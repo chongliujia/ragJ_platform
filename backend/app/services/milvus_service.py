@@ -37,43 +37,58 @@ class MilvusService:
             self.db_name = settings.MILVUS_DATABASE
             self.tenant_collections = {}  # 缓存租户集合
             try:
-                # First, connect to the default database to check/create the target database
-                logger.info(
-                    "Connecting to Milvus default database to ensure target DB exists..."
-                )
-                connections.connect(
-                    alias="db_check",
-                    host=settings.MILVUS_HOST,
-                    port=settings.MILVUS_PORT,
-                    user=settings.MILVUS_USER,
-                    password=settings.MILVUS_PASSWORD,
-                )
-
-                existing_databases = db.list_database(using="db_check")
-                if self.db_name not in existing_databases:
-                    logger.warning(
-                        f"Database '{self.db_name}' not found. Creating it now..."
+                # First, try multi-database workflow (Milvus 2.3+)
+                try:
+                    logger.info(
+                        "Connecting to Milvus default database to ensure target DB exists..."
                     )
-                    db.create_database(self.db_name, using="db_check")
-                    logger.info(f"Database '{self.db_name}' created successfully.")
+                    connections.connect(
+                        alias="db_check",
+                        host=settings.MILVUS_HOST,
+                        port=settings.MILVUS_PORT,
+                        user=settings.MILVUS_USER,
+                        password=settings.MILVUS_PASSWORD,
+                    )
 
-                connections.disconnect("db_check")
-                logger.info("Disconnected from default database.")
+                    existing_databases = db.list_database(using="db_check")
+                    if self.db_name not in existing_databases:
+                        logger.warning(
+                            f"Database '{self.db_name}' not found. Creating it now..."
+                        )
+                        db.create_database(self.db_name, using="db_check")
+                        logger.info(f"Database '{self.db_name}' created successfully.")
 
-                # Now, connect to the target database
-                logger.info(
-                    f"Connecting to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}, DB: '{self.db_name}'"
-                )
-                connections.connect(
-                    alias=self.alias,
-                    host=settings.MILVUS_HOST,
-                    port=settings.MILVUS_PORT,
-                    user=settings.MILVUS_USER,
-                    password=settings.MILVUS_PASSWORD,
-                    db_name=self.db_name,
-                )
-                logger.info("Successfully connected to Milvus target database.")
-                self.initialized = True
+                    connections.disconnect("db_check")
+                    logger.info("Disconnected from default database.")
+
+                    # Now, connect to the target database
+                    logger.info(
+                        f"Connecting to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}, DB: '{self.db_name}'"
+                    )
+                    connections.connect(
+                        alias=self.alias,
+                        host=settings.MILVUS_HOST,
+                        port=settings.MILVUS_PORT,
+                        user=settings.MILVUS_USER,
+                        password=settings.MILVUS_PASSWORD,
+                        db_name=self.db_name,
+                    )
+                    logger.info("Successfully connected to Milvus target database.")
+                    self.initialized = True
+                except Exception as db_err:
+                    # Fallback: Milvus without database feature (e.g., Milvus < 2.3)
+                    logger.warning(
+                        f"Milvus multi-database ops failed ({db_err}). Trying single-DB connection without db_name..."
+                    )
+                    connections.connect(
+                        alias=self.alias,
+                        host=settings.MILVUS_HOST,
+                        port=settings.MILVUS_PORT,
+                        user=settings.MILVUS_USER,
+                        password=settings.MILVUS_PASSWORD,
+                    )
+                    logger.info("Connected to Milvus without specifying database (single-DB mode).")
+                    self.initialized = True
             except Exception as e:
                 logger.error(f"Failed to connect to Milvus: {e}", exc_info=True)
                 self.initialized = False
@@ -245,29 +260,92 @@ class MilvusService:
 
         try:
             collection = Collection(name=collection_name, using=self.alias)
-            # The 'entities' should be a list of lists, matching the field order.
-            # Example: data = [ ["text1", "text2"], [ [vec1], [vec2] ], ... ]
-            # Let's prepare the data in the correct format.
-            texts = [entity["text"] for entity in entities]
-            vectors = [entity["vector"] for entity in entities]
-            tenant_ids = [entity["tenant_id"] for entity in entities]
-            user_ids = [entity["user_id"] for entity in entities]
-            document_names = [entity["document_name"] for entity in entities]
-            knowledge_bases = [entity["knowledge_base"] for entity in entities]
-            data_to_insert = [texts, vectors, tenant_ids, user_ids, document_names, knowledge_bases]
+            # Prepare columnar data from entities
+            texts = [entity.get("text", "") for entity in entities]
+            vectors = [entity.get("vector") for entity in entities]
+            tenant_ids = [int(entity.get("tenant_id", 0)) for entity in entities]
+            user_ids = [int(entity.get("user_id", 0)) for entity in entities]
+            document_names = [str(entity.get("document_name", "")) for entity in entities]
+            knowledge_bases = [str(entity.get("knowledge_base", "")) for entity in entities]
+
+            # Basic sanity: filter out any rows with missing vector or None
+            filtered = []
+            for i in range(len(entities)):
+                v = vectors[i]
+                if v is None or (isinstance(v, list) and len(v) == 0):
+                    logger.warning(f"Skip entity at index {i} due to empty vector")
+                    continue
+                filtered.append(i)
+
+            if len(filtered) != len(entities):
+                texts = [texts[i] for i in filtered]
+                vectors = [vectors[i] for i in filtered]
+                tenant_ids = [tenant_ids[i] for i in filtered]
+                user_ids = [user_ids[i] for i in filtered]
+                document_names = [document_names[i] for i in filtered]
+                knowledge_bases = [knowledge_bases[i] for i in filtered]
+                logger.warning(
+                    f"Filtered entities with invalid vectors: kept {len(filtered)} of {len(entities)} rows"
+                )
+
+            # Ensure equal row counts across columns
+            lengths = [
+                ("texts", len(texts)),
+                ("vectors", len(vectors)),
+                ("tenant_ids", len(tenant_ids)),
+                ("user_ids", len(user_ids)),
+                ("document_names", len(document_names)),
+                ("knowledge_bases", len(knowledge_bases)),
+            ]
+            unique_lengths = {l for _, l in lengths}
+            if len(unique_lengths) != 1:
+                logger.warning(
+                    "Inconsistent column lengths before insert: "
+                    + ", ".join(f"{k}={v}" for k, v in lengths)
+                )
+                min_len = min(unique_lengths) if unique_lengths else 0
+                texts = texts[:min_len]
+                vectors = vectors[:min_len]
+                tenant_ids = tenant_ids[:min_len]
+                user_ids = user_ids[:min_len]
+                document_names = document_names[:min_len]
+                knowledge_bases = knowledge_bases[:min_len]
+                logger.warning(f"Trimmed all columns to min length {min_len}")
+
+            if len(texts) == 0:
+                logger.warning("No valid rows to insert after filtering; returning empty result")
+                return []
+
+            data_to_insert = [
+                texts,
+                vectors,
+                tenant_ids,
+                user_ids,
+                document_names,
+                knowledge_bases,
+            ]
 
             result = collection.insert(data_to_insert)
-            collection.flush()  # Ensure data is indexed
+            collection.flush()  # Ensure data is persisted
             logger.info(
-                f"Successfully inserted {len(entities)} entities into '{collection_name}'."
+                f"Successfully inserted {len(texts)} entities into '{collection_name}'."
             )
-            return result.primary_keys
+            try:
+                pks = list(result.primary_keys)  # normalize to list
+            except Exception:
+                pks = []
+            return [int(pk) for pk in pks]
         except Exception as e:
             # 检查是否是维度不匹配错误
-            if ("dimension mismatch" in str(e).lower() or 
-                "vector dimension" in str(e).lower() or 
-                "should divide the dim" in str(e).lower() or
-                ("length(" in str(e).lower() and "dim(" in str(e).lower())):
+            err = str(e).lower()
+            if (
+                "dimension mismatch" in err
+                or "vector dimension" in err
+                or "should divide the dim" in err
+                or ("length(" in err and "dim(" in err)
+                or "not equal to schema dim" in err
+                or ("expected=" in err and "actual=" in err and "invalid parameter" in err)
+            ):
                 logger.warning(f"Vector dimension mismatch detected: {e}")
                 try:
                     # 获取当前向量的实际维度
@@ -279,12 +357,38 @@ class MilvusService:
                     
                     # 重新尝试插入
                     collection = Collection(name=collection_name, using=self.alias)
-                    texts = [entity["text"] for entity in entities]
-                    vectors = [entity["vector"] for entity in entities]
-                    tenant_ids = [entity["tenant_id"] for entity in entities]
-                    user_ids = [entity["user_id"] for entity in entities]
-                    document_names = [entity["document_name"] for entity in entities]
-                    knowledge_bases = [entity["knowledge_base"] for entity in entities]
+                    # 重用与上面相同的过滤与对齐逻辑
+                    texts = [entity.get("text", "") for entity in entities]
+                    vectors = [entity.get("vector") for entity in entities]
+                    tenant_ids = [int(entity.get("tenant_id", 0)) for entity in entities]
+                    user_ids = [int(entity.get("user_id", 0)) for entity in entities]
+                    document_names = [str(entity.get("document_name", "")) for entity in entities]
+                    knowledge_bases = [str(entity.get("knowledge_base", "")) for entity in entities]
+
+                    filtered = []
+                    for i in range(len(entities)):
+                        v = vectors[i]
+                        if v is None or (isinstance(v, list) and len(v) == 0):
+                            continue
+                        filtered.append(i)
+                    if len(filtered) != len(entities):
+                        texts = [texts[i] for i in filtered]
+                        vectors = [vectors[i] for i in filtered]
+                        tenant_ids = [tenant_ids[i] for i in filtered]
+                        user_ids = [user_ids[i] for i in filtered]
+                        document_names = [document_names[i] for i in filtered]
+                        knowledge_bases = [knowledge_bases[i] for i in filtered]
+
+                    lengths = [len(texts), len(vectors), len(tenant_ids), len(user_ids), len(document_names), len(knowledge_bases)]
+                    if len(set(lengths)) != 1:
+                        min_len = min(lengths)
+                        texts = texts[:min_len]
+                        vectors = vectors[:min_len]
+                        tenant_ids = tenant_ids[:min_len]
+                        user_ids = user_ids[:min_len]
+                        document_names = document_names[:min_len]
+                        knowledge_bases = knowledge_bases[:min_len]
+
                     data_to_insert = [texts, vectors, tenant_ids, user_ids, document_names, knowledge_bases]
                     
                     result = collection.insert(data_to_insert)
@@ -292,7 +396,11 @@ class MilvusService:
                     logger.info(
                         f"Successfully inserted {len(entities)} entities into recreated collection '{collection_name}'."
                     )
-                    return result.primary_keys
+                    try:
+                        pks = list(result.primary_keys)
+                    except Exception:
+                        pks = []
+                    return [int(pk) for pk in pks]
                 except Exception as recreate_error:
                     logger.error(f"Failed to recreate collection and insert data: {recreate_error}")
                     raise recreate_error
@@ -345,6 +453,90 @@ class MilvusService:
                 f"Failed to delete vectors from '{collection_name}': {e}", exc_info=True
             )
             return 0
+
+    def delete_by_filters(self, collection_name: str, term_filters: dict) -> int:
+        """
+        Delete vectors by matching field filters (e.g., document_name, tenant_id, knowledge_base).
+
+        Args:
+            collection_name: Target collection name
+            term_filters: Field -> value exact matches
+
+        Returns:
+            Approximate number of deleted entities
+        """
+        if not self.initialized:
+            logger.error("Milvus connection not initialized. Cannot delete by filters.")
+            return 0
+
+        if not self.has_collection(collection_name):
+            logger.warning(
+                f"Collection '{collection_name}' does not exist. Skip delete_by_filters."
+            )
+            return 0
+
+        try:
+            def _escape(s: str) -> str:
+                return s.replace('\\', '\\\\').replace('"', '\\"')
+
+            conds = []
+            for k, v in term_filters.items():
+                if isinstance(v, (int, float)):
+                    conds.append(f"{k} == {v}")
+                else:
+                    conds.append(f'{k} == "{_escape(str(v))}"')
+            expr = " and ".join(conds) if conds else ""
+            if not expr:
+                return 0
+
+            collection = Collection(name=collection_name, using=self.alias)
+            res = collection.delete(expr)
+            collection.flush()
+            deleted = getattr(res, "delete_count", None)
+            if deleted is None:
+                logger.info(f"Delete by filters executed on '{collection_name}' with expr: {expr}")
+                return 0
+            logger.info(
+                f"Deleted ~{int(deleted)} vectors from '{collection_name}' by filters: {term_filters}"
+            )
+            return int(deleted)
+        except Exception as e:
+            logger.error(
+                f"Failed to delete by filters from '{collection_name}': {e}", exc_info=True
+            )
+            return 0
+
+    def get_texts_by_ids(self, collection_name: str, ids: list[int]) -> list[dict]:
+        """
+        Fetch text fields for given primary key IDs from a collection.
+
+        Returns list of {"id": int, "text": str}. Order is not guaranteed; caller may reorder.
+        """
+        if not self.initialized:
+            logger.error("Milvus connection not initialized. Cannot fetch texts.")
+            return []
+
+        if not ids:
+            return []
+
+        if not self.has_collection(collection_name):
+            logger.error(f"Collection '{collection_name}' does not exist. Cannot fetch texts.")
+            return []
+
+        try:
+            collection = Collection(name=collection_name, using=self.alias)
+            expr_ids = ",".join(str(int(i)) for i in ids)
+            expr = f"pk in [{expr_ids}]"
+            rows = collection.query(expr=expr, output_fields=["pk", "text"])
+            results = []
+            for row in rows:
+                # row may be a dict with keys matching output_fields
+                rid = int(row.get("pk")) if "pk" in row else int(row.get("id", 0))
+                results.append({"id": rid, "text": row.get("text", "")})
+            return results
+        except Exception as e:
+            logger.error(f"Failed to query texts by ids from '{collection_name}': {e}", exc_info=True)
+            return []
 
     async def search(
         self,

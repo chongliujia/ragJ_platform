@@ -232,7 +232,7 @@ export const TeamManagement: React.FC = () => {
                     成员数量: {currentTeam.member_count}/{currentTeam.max_members}
                   </Typography>
                   <Typography variant="body2">
-                    我的角色: <Chip label={currentTeam.my_member_type} size="small" />
+                    我的角色: <Chip component="span" label={currentTeam.my_member_type} size="small" />
                   </Typography>
                   <Typography variant="body2">
                     隐私: {currentTeam.is_private ? '私有' : '公开'}

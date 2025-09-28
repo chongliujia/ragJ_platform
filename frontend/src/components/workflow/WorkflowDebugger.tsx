@@ -324,7 +324,7 @@ const WorkflowDebugger: React.FC<WorkflowDebuggerProps> = ({ nodes, edges, onExe
             />
             <Typography variant="body2" sx={{ color: 'white', mt: 1 }}>
               执行进度: {currentStep} / {debugSteps.length} 
-              {isPaused && <Chip label="已暂停" size="small" sx={{ ml: 1, backgroundColor: 'rgba(255, 152, 0, 0.2)' }} />}
+              {isPaused && <Chip component="span" label="已暂停" size="small" sx={{ ml: 1, backgroundColor: 'rgba(255, 152, 0, 0.2)' }} />}
             </Typography>
           </Box>
         )}

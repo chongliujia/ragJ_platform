@@ -22,6 +22,8 @@ from app.core.dependencies import get_tenant_id, get_current_user
 from app.db.database import get_db
 from app.db.models.knowledge_base import KnowledgeBase as KBModel
 from app.db.models.user import User
+from app.services import parser_service
+from app.services.chunking_service import chunking_service, ChunkingStrategy
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -216,6 +218,108 @@ async def list_knowledge_bases(
         )
 
 
+@router.post("/{kb_name}/maintenance/rebuild-es-index")
+async def rebuild_es_index(
+    kb_name: str,
+    reindex: bool = False,
+    tenant_id: int = Depends(get_tenant_id),
+    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Maintenance: Drop and recreate the Elasticsearch index for this KB (tenant-scoped).
+
+    - If `reindex=true`, attempts to reindex existing documents into ES from original files.
+      Reindexing parses and chunks the original file again; chunk boundaries may differ from
+      the existing Milvus vectors.
+    """
+    if es_service is None:
+        raise HTTPException(status_code=503, detail="Elasticsearch service not available")
+
+    tenant_index = f"tenant_{tenant_id}_{kb_name}"
+
+    try:
+        # Drop if exists
+        if await es_service.index_exists(tenant_index):
+            await es_service.delete_index(tenant_index)
+
+        # Recreate with latest mapping
+        await es_service.create_index(tenant_index)
+
+        indexed = 0
+        if reindex:
+            # Fetch documents for this KB/tenant
+            from app.db.models.document import Document
+
+            documents = (
+                db.query(Document)
+                .filter(
+                    Document.knowledge_base_name == kb_name,
+                    Document.tenant_id == tenant_id,
+                )
+                .all()
+            )
+
+            batch: list[dict] = []
+            BATCH_SIZE = 200
+
+            for doc in documents:
+                try:
+                    # Read file
+                    if not doc.file_path:
+                        continue
+                    # Safety: only read existing files
+                    import os
+
+                    if not os.path.exists(doc.file_path):
+                        continue
+                    with open(doc.file_path, "rb") as f:
+                        content = f.read()
+                    # Parse and chunk with default recursive strategy
+                    text = parser_service.parse_document(content, doc.filename)
+                    if not text:
+                        continue
+                    chunks = await chunking_service.chunk_document(
+                        text=text,
+                        strategy=ChunkingStrategy.RECURSIVE,
+                        chunk_size=1000,
+                        chunk_overlap=200,
+                    )
+                    # Accumulate ES docs
+                    for ch in chunks:
+                        batch.append(
+                            {
+                                "text": ch,
+                                "tenant_id": tenant_id,
+                                "user_id": doc.uploaded_by,
+                                "document_name": doc.filename,
+                                "knowledge_base": kb_name,
+                            }
+                        )
+                        if len(batch) >= BATCH_SIZE:
+                            await es_service.bulk_index_documents(tenant_index, batch)
+                            indexed += len(batch)
+                            batch = []
+                except Exception as dbe:
+                    logger.warning(f"Reindex failed for document {doc.id}: {dbe}")
+
+            if batch:
+                await es_service.bulk_index_documents(tenant_index, batch)
+                indexed += len(batch)
+
+        return {
+            "message": "Elasticsearch index recreated",
+            "index": tenant_index,
+            "reindexed_docs": indexed,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Rebuild ES index failed for KB '{kb_name}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{kb_name}", response_model=KnowledgeBase)
 async def get_knowledge_base(
     kb_name: str,
@@ -278,6 +382,164 @@ async def get_knowledge_base(
             detail="Failed to retrieve knowledge base details from Milvus.",
         )
 
+
+@router.post("/{kb_name}/maintenance/clear-vectors")
+async def clear_kb_vectors(
+    kb_name: str,
+    include_es: bool = False,
+    tenant_id: int = Depends(get_tenant_id),
+    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Clear all vectors for a KB (tenant-scoped):
+    - Drop and recreate the Milvus collection
+    - Reset vector_ids/total_chunks for all documents in DB
+    - Optionally clear Elasticsearch index when include_es=true
+    """
+    tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+    tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+
+    try:
+        # Drop and recreate Milvus collection
+        if milvus_service.has_collection(tenant_collection_name):
+            milvus_service.drop_collection(tenant_collection_name)
+        # Recreate with default dimension from settings
+        milvus_service.create_collection(tenant_collection_name)
+
+        # Reset document vector metadata
+        from app.db.models.document import Document
+        docs = (
+            db.query(Document)
+            .filter(
+                Document.knowledge_base_name == kb_name,
+                Document.tenant_id == tenant_id,
+            )
+            .all()
+        )
+        for d in docs:
+            d.vector_ids = []
+            d.total_chunks = 0
+        db.commit()
+
+        # Optionally clear ES index
+        if include_es:
+            if es_service is None:
+                raise HTTPException(status_code=503, detail="Elasticsearch service not available")
+            if await es_service.index_exists(tenant_index_name):
+                await es_service.delete_index(tenant_index_name)
+            await es_service.create_index(tenant_index_name)
+
+        # Update KB counters
+        kb = (
+            db.query(KBModel)
+            .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id)
+            .first()
+        )
+        if kb:
+            from sqlalchemy import func as sa_func
+            from app.db.models.document import Document as DocModel
+            totals = db.query(
+                sa_func.coalesce(sa_func.sum(DocModel.total_chunks), 0)
+            ).filter(
+                DocModel.knowledge_base_name == kb_name,
+                DocModel.tenant_id == tenant_id,
+            ).first()
+            kb.total_chunks = int(totals[0] or 0)
+            db.add(kb)
+            db.commit()
+
+        return {"message": "Vectors cleared", "include_es": include_es}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear vectors for KB '{kb_name}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to clear vectors: {e}")
+
+@router.post("/maintenance/clear-all-vectors")
+async def clear_all_kb_vectors(
+    include_es: bool = False,
+    tenant_id: int = Depends(get_tenant_id),
+    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Clear Milvus vectors for ALL knowledge bases under current tenant.
+
+    - Drops and recreates Milvus collections for KBs found in DB so that KBs remain visible.
+    - Drops stray Milvus collections not present in DB (with tenant prefix).
+    - Resets all document.vector_ids and total_chunks to 0 for this tenant.
+    - Optionally clears Elasticsearch indices and recreates for DB KBs.
+    """
+    try:
+        tenant_prefix = f"tenant_{tenant_id}_"
+
+        # Load KB names from DB
+        kb_rows = db.query(KBModel).filter(KBModel.tenant_id == tenant_id).all()
+        kb_names_in_db = {kb.name for kb in kb_rows}
+
+        # List all Milvus collections and identify those for this tenant
+        all_collections = milvus_service.list_collections()
+        tenant_collections = [c for c in all_collections if c.startswith(tenant_prefix)]
+
+        # Drop stray collections (not in DB)
+        for coll in tenant_collections:
+            kb_name = coll[len(tenant_prefix):]
+            if kb_name not in kb_names_in_db:
+                try:
+                    milvus_service.drop_collection(coll)
+                except Exception as e:
+                    logger.warning(f"Failed to drop stray collection '{coll}': {e}")
+
+        # For KBs in DB: drop and recreate their collections
+        for kb_name in kb_names_in_db:
+            coll_name = f"{tenant_prefix}{kb_name}"
+            if milvus_service.has_collection(coll_name):
+                try:
+                    milvus_service.drop_collection(coll_name)
+                except Exception as e:
+                    logger.warning(f"Failed to drop collection '{coll_name}': {e}")
+            # Recreate with default dimension
+            try:
+                milvus_service.create_collection(coll_name)
+            except Exception as e:
+                logger.warning(f"Failed to recreate collection '{coll_name}': {e}")
+
+        # Reset documents vector metadata for this tenant
+        from app.db.models.document import Document
+        docs = db.query(Document).filter(Document.tenant_id == tenant_id).all()
+        for d in docs:
+            d.vector_ids = []
+            d.total_chunks = 0
+        db.commit()
+
+        # Optionally clear Elasticsearch indices for KBs in DB
+        if include_es:
+            if es_service is None:
+                raise HTTPException(status_code=503, detail="Elasticsearch service not available")
+            for kb_name in kb_names_in_db:
+                idx = f"{tenant_prefix}{kb_name}"
+                try:
+                    if await es_service.index_exists(idx):
+                        await es_service.delete_index(idx)
+                    await es_service.create_index(idx)
+                except Exception as e:
+                    logger.warning(f"Failed to reset ES index '{idx}': {e}")
+
+        # Update aggregated counters on KBs
+        for kb in kb_rows:
+            kb.total_chunks = 0
+            db.add(kb)
+        db.commit()
+
+        return {"message": "All vectors cleared for tenant", "include_es": include_es, "kb_count": len(kb_rows)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to clear all vectors: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to clear all vectors: {e}")
 
 @router.delete("/{kb_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_knowledge_base(

@@ -6,6 +6,7 @@ Handles document uploads and processing within a knowledge base.
 import logging
 from typing import Optional, List
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, status, Form, HTTPException, Depends, Path
+import os
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,7 @@ from app.services.chunking_service import ChunkingStrategy, chunking_service
 from app.db.database import get_db
 from app.db.models.document import Document, DocumentStatus as DocumentStatusEnum
 from app.core.dependencies import get_current_user, get_tenant_id
+from app.core.config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -54,6 +56,23 @@ class DocumentStatus(BaseModel):
     progress: Optional[dict] = None
 
 
+class DocumentChunk(BaseModel):
+    """Document chunk response model."""
+
+    id: int
+    chunk_index: int
+    text: str
+
+
+class BatchDeleteRequest(BaseModel):
+    """Batch delete request payload."""
+
+    document_ids: List[int]
+
+class BatchDeleteResult(BaseModel):
+    deleted: int
+
+
 @router.post(
     "/", response_model=DocumentUploadResponse, status_code=status.HTTP_202_ACCEPTED
 )
@@ -81,7 +100,28 @@ async def upload_document(
         f"Received file '{file.filename}' for knowledge base '{kb_name}' with strategy '{chunking_strategy}'."
     )
 
+    # Sanitize filename to prevent path traversal
+    original_filename = file.filename or "uploaded_file"
+    safe_filename = os.path.basename(original_filename)
+    if not safe_filename:
+        safe_filename = "uploaded_file"
+
+    # Validate extension against allowed list
+    ext = safe_filename.rsplit('.', 1)[-1].lower() if '.' in safe_filename else ''
+    allowed_exts = set(ext.strip().lower() for ext in settings.get_supported_file_types())
+    if ext not in allowed_exts:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported file type: .{ext}. Allowed: {', '.join(sorted(allowed_exts))}",
+        )
+
+    # Read content and validate size
     content = await file.read()
+    if len(content) > settings.MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Max size: {settings.MAX_FILE_SIZE} bytes",
+        )
 
     # Parse chunking strategy
     try:
@@ -106,20 +146,47 @@ async def upload_document(
     # TODO: Add validation for file type based on settings.SUPPORTED_FILE_TYPES
     # For example, check file.content_type or filename extension
 
-    # Add the processing task to the background
-    background_tasks.add_task(
-        document_service.process_document,
-        content,
-        file.filename,
-        kb_name,
-        tenant_id,
-        current_user.id,
-        strategy,
-        params,
-    )
+    # Dispatch processing: Celery (if enabled) or local background task
+    if settings.USE_CELERY:
+        # Save file to disk first; Celery task will read from path
+        upload_dir = os.path.join(settings.UPLOAD_DIR or "/tmp/uploads", str(tenant_id))
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, safe_filename)
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(content)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+
+        try:
+            from app.tasks.document_tasks import process_document_task
+            process_document_task.delay(
+                file_path,
+                safe_filename,
+                kb_name,
+                tenant_id,
+                current_user.id,
+                strategy.value,
+                params,
+            )
+        except Exception as e:
+            logger.error(f"Failed to enqueue Celery task: {e}")
+            raise HTTPException(status_code=500, detail="Failed to enqueue processing task")
+    else:
+        # Add the processing task to the background
+        background_tasks.add_task(
+            document_service.process_document,
+            content,
+            safe_filename,
+            kb_name,
+            tenant_id,
+            current_user.id,
+            strategy,
+            params,
+        )
 
     return {
-        "filename": file.filename,
+        "filename": safe_filename,
         "content_type": file.content_type,
         "message": "File accepted and is being processed in the background.",
     }
@@ -206,14 +273,34 @@ async def delete_document(
                 detail=f"Document with id {document_id} not found in knowledge base '{kb_name}'"
             )
         
-        # Remove from vector database
-        if document.vector_ids:
-            try:
-                tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
-                from app.services.milvus_service import milvus_service
-                milvus_service.delete_vectors(tenant_collection_name, document.vector_ids)
-            except Exception as e:
-                logger.warning(f"Failed to delete vectors for document {document_id}: {e}")
+        # Remove from vector database (prefer pk deletion; fallback to filters)
+        try:
+            tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+            from app.services.milvus_service import milvus_service
+            ids = []
+            if document.vector_ids:
+                try:
+                    ids = [int(i) for i in document.vector_ids]
+                except Exception:
+                    ids = []
+            deleted = 0
+            if ids:
+                deleted = milvus_service.delete_vectors(tenant_collection_name, ids)
+                if deleted == 0:
+                    logger.warning(
+                        f"Delete by ids returned 0 for document {document_id}. Falling back to filter deletion."
+                    )
+            if not ids or deleted == 0:
+                milvus_service.delete_by_filters(
+                    tenant_collection_name,
+                    {
+                        "tenant_id": tenant_id,
+                        "document_name": document.filename,
+                        "knowledge_base": kb_name,
+                    },
+                )
+        except Exception as e:
+            logger.warning(f"Failed to delete vectors for document {document_id}: {e}")
 
         # Remove from Elasticsearch
         try:
@@ -255,6 +342,166 @@ async def delete_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete document: {e}"
         )
+
+
+@router.get("/{document_id}/chunks", response_model=List[DocumentChunk])
+async def get_document_chunks(
+    kb_name: str,
+    document_id: int = Path(..., description="Document ID"),
+    offset: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_tenant_id),
+    current_user = Depends(get_current_user),
+):
+    """
+    Retrieve chunk texts for a specific document, ordered by original insertion order.
+    Uses stored Milvus primary key IDs in the document record to fetch chunk texts.
+    """
+    try:
+        document = db.query(Document).filter(
+            Document.id == document_id,
+            Document.knowledge_base_name == kb_name,
+            Document.tenant_id == tenant_id,
+        ).first()
+
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        vector_ids = document.vector_ids or []
+        if not isinstance(vector_ids, list):
+            vector_ids = []
+
+        # Pagination over stored ids to preserve order
+        total = len(vector_ids)
+        if offset < 0:
+            offset = 0
+        if limit <= 0:
+            limit = 100
+        end = min(offset + limit, total)
+        if offset >= end:
+            return []
+
+        slice_ids = [int(i) for i in vector_ids[offset:end]]
+
+        # Fetch from Milvus by IDs
+        from app.services.milvus_service import milvus_service
+        tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+
+        results = milvus_service.get_texts_by_ids(tenant_collection_name, slice_ids)
+
+        # Build map and preserve order
+        text_by_id = {int(r["id"]): r.get("text", "") for r in results}
+        chunks: list[DocumentChunk] = []
+        for idx, pk in enumerate(slice_ids):
+            chunks.append(
+                DocumentChunk(id=int(pk), chunk_index=offset + idx, text=text_by_id.get(int(pk), ""))
+            )
+
+        return chunks
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get chunks for document {document_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve document chunks: {e}")
+
+
+@router.post("/batch-delete", response_model=BatchDeleteResult)
+async def batch_delete_documents(
+    kb_name: str,
+    payload: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_tenant_id),
+    current_user = Depends(get_current_user),
+):
+    """
+    Batch delete multiple documents and their associated vectors and ES entries.
+    """
+    try:
+        ids = list({int(i) for i in (payload.document_ids or [])})
+        if not ids:
+            return BatchDeleteResult(deleted=0)
+
+        # Fetch documents filtered by tenant and KB
+        docs = (
+            db.query(Document)
+            .filter(
+                Document.id.in_(ids),
+                Document.knowledge_base_name == kb_name,
+                Document.tenant_id == tenant_id,
+            )
+            .all()
+        )
+
+        deleted_count = 0
+        from app.services.milvus_service import milvus_service
+        tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+
+        # ES service (optional)
+        from app.services.elasticsearch_service import get_elasticsearch_service
+        es_service = await get_elasticsearch_service()
+        tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+
+        for doc in docs:
+            # Delete vectors: prefer IDs, fallback to filters
+            try:
+                vec_ids = []
+                if doc.vector_ids:
+                    try:
+                        vec_ids = [int(i) for i in doc.vector_ids]
+                    except Exception:
+                        vec_ids = []
+
+                did = 0
+                if vec_ids:
+                    did = milvus_service.delete_vectors(tenant_collection_name, vec_ids)
+                if not vec_ids or did == 0:
+                    milvus_service.delete_by_filters(
+                        tenant_collection_name,
+                        {
+                            "tenant_id": tenant_id,
+                            "document_name": doc.filename,
+                            "knowledge_base": kb_name,
+                        },
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to delete vectors for document {doc.id}: {e}")
+
+            # Delete ES documents
+            try:
+                if es_service is not None:
+                    await es_service.delete_by_query(
+                        index_name=tenant_index_name,
+                        term_filters={
+                            "tenant_id": tenant_id,
+                            "document_name": doc.filename,
+                            "knowledge_base": kb_name,
+                        },
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to delete ES docs for document {doc.id}: {e}")
+
+            # Delete file
+            try:
+                if doc.file_path:
+                    import os
+                    if os.path.exists(doc.file_path):
+                        os.remove(doc.file_path)
+            except Exception as e:
+                logger.warning(f"Failed to delete file {doc.file_path}: {e}")
+
+            # Delete DB row
+            try:
+                db.delete(doc)
+                deleted_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to delete DB row for document {doc.id}: {e}")
+
+        db.commit()
+        return BatchDeleteResult(deleted=deleted_count)
+    except Exception as e:
+        logger.error(f"Batch delete failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Batch delete failed: {e}")
 
 
 @router.get("/{document_id}/status", response_model=DocumentStatus)

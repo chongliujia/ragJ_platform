@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Typography,
@@ -39,6 +39,7 @@ const KnowledgeBases: React.FC = () => {
   const [newKbDescription, setNewKbDescription] = useState('');
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
   
   // 文档上传相关状态
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -48,9 +49,9 @@ const KnowledgeBases: React.FC = () => {
   const [manageDialogOpen, setManageDialogOpen] = useState(false);
 
   // 获取知识库列表
-  const fetchKnowledgeBases = async () => {
+  const fetchKnowledgeBases = async (silent: boolean = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const response = await knowledgeBaseApi.getList();
       setKnowledgeBases(response.data);
       setError(null);
@@ -58,23 +59,37 @@ const KnowledgeBases: React.FC = () => {
       console.error('Failed to fetch knowledge bases:', error);
       setError(t('knowledgeBase.messages.fetchError'));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   // 创建知识库
+  const normalizeKbName = (raw: string) => {
+    // 允许字母数字下划线；将空格和连字符替换为下划线，移除其他字符
+    let s = raw.trim();
+    s = s.replace(/[\s-]+/g, '_');
+    s = s.replace(/[^A-Za-z0-9_]/g, '');
+    return s;
+  };
+
+  const validateKbName = (name: string) => {
+    if (!name) return '名称不能为空';
+    if (!/^[A-Za-z0-9_]+$/.test(name)) return '仅允许字母、数字和下划线';
+    if (name.length > 255) return '名称过长（≤255）';
+    return null;
+  };
+
   const createKnowledgeBase = async () => {
-    if (!newKbName.trim()) {
-      setError(t('knowledgeBase.createDialog.nameRequired'));
-      return;
-    }
+    const normalized = normalizeKbName(newKbName);
+    const err = validateKbName(normalized);
+    if (err) { setNameError(err); return; }
 
     try {
       setCreating(true);
       setError(null);
       
       const response = await knowledgeBaseApi.create({
-        name: newKbName.trim(),
+        name: normalized,
         description: newKbDescription.trim(),
       });
 
@@ -87,7 +102,8 @@ const KnowledgeBases: React.FC = () => {
       setCreateDialogOpen(false);
     } catch (error: any) {
       console.error('Failed to create knowledge base:', error);
-      setError(error.response?.data?.detail || t('knowledgeBase.messages.createError'));
+      // 显示后端的详细错误
+      setError(error?.response?.data?.detail || t('knowledgeBase.messages.createError'));
     } finally {
       setCreating(false);
     }
@@ -134,6 +150,34 @@ const KnowledgeBases: React.FC = () => {
   useEffect(() => {
     fetchKnowledgeBases();
   }, []);
+
+  // 自动刷新：上传/管理对话框打开时加快刷新频率，否则低频刷新
+  const kbRefreshTimerRef = useRef<any>(null);
+  useEffect(() => {
+    // 计算刷新间隔：对话框打开时 2s，否则 10s
+    const intervalMs = (uploadDialogOpen || manageDialogOpen) ? 2000 : 10000;
+
+    // 清理旧定时器
+    if (kbRefreshTimerRef.current) {
+      clearInterval(kbRefreshTimerRef.current);
+      kbRefreshTimerRef.current = null;
+    }
+
+    // 启动新定时器
+    kbRefreshTimerRef.current = setInterval(() => {
+      // 若页面隐藏，跳过本次（减少无谓请求）
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetchKnowledgeBases(true);
+    }, intervalMs);
+
+    // 卸载时清理
+    return () => {
+      if (kbRefreshTimerRef.current) {
+        clearInterval(kbRefreshTimerRef.current);
+        kbRefreshTimerRef.current = null;
+      }
+    };
+  }, [uploadDialogOpen, manageDialogOpen]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -300,9 +344,26 @@ const KnowledgeBases: React.FC = () => {
             fullWidth
             variant="outlined"
             value={newKbName}
-            onChange={(e) => setNewKbName(e.target.value)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setNewKbName(raw);
+              // 即时校验并提供自动修复建议
+              const normalized = normalizeKbName(raw);
+              const err = validateKbName(normalized);
+              setNameError(err);
+            }}
+            error={!!nameError}
+            helperText={nameError ? nameError : '仅允许字母、数字、下划线。会自动将空格和连字符转换为下划线。'}
             sx={{ mb: 2 }}
           />
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="caption" color="text.secondary">
+              规范化后名称：{normalizeKbName(newKbName) || '-'}
+            </Typography>
+            <Button size="small" onClick={() => setNewKbName(normalizeKbName(newKbName))}>
+              自动修复
+            </Button>
+          </Box>
           <TextField
             margin="dense"
             label={t('knowledgeBase.createDialog.descriptionLabel')}

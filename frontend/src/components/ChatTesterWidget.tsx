@@ -82,6 +82,7 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
   };
 
   const onMouseDownHeader = (e: React.MouseEvent) => {
+    if (collapsed) return; // 折叠状态禁用拖拽
     // 避免在点击图标按钮时触发拖拽
     const target = e.target as HTMLElement;
     if (target.closest('button')) return;
@@ -91,6 +92,7 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
   };
 
   const onTouchStartHeader = (e: React.TouchEvent) => {
+    if (collapsed) return; // 折叠状态禁用拖拽
     const touch = e.touches[0];
     startDrag(touch.clientX, touch.clientY);
     window.addEventListener('touchmove', onTouchMove);
@@ -290,6 +292,13 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
     }
   })();
 
+  // 折叠时固定到右下角
+  const collapsedPositionStyle: React.CSSProperties = (() => {
+    const pad = 24;
+    const safeBottom = 24; // 折叠后仅标题栏，直接贴近右下角
+    return { position: 'fixed', right: pad, bottom: safeBottom, zIndex: 1400 };
+  })();
+
   if (!open) {
     return (
       <IconButton
@@ -310,9 +319,9 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
 
   return (
     <Paper ref={panelRef} elevation={8} sx={{
-      ...positionStyle,
-      width: 360, // 优化后的宽度
-      height: collapsed ? 48 : 480, // 动态高度，折叠时更紧凑
+      ...(collapsed ? collapsedPositionStyle : positionStyle),
+      width: 360,
+      height: collapsed ? 48 : 480,
       display: 'flex', 
       flexDirection: 'column',
       borderRadius: collapsed ? 24 : 3, // 折叠时更圆润
@@ -320,7 +329,7 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
       border: '1px solid rgba(0, 212, 255, 0.3)',
       background: 'linear-gradient(180deg, #1a1f2e 0%, #0f1419 100%)',
       boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)',
-      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', // 平滑过渡
+      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
     }}>
       <Box 
         sx={{ 
@@ -408,7 +417,12 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
         </Box>
       </Box>
 
-      {!collapsed && (
+      {/* 可折叠内容区：保持面板总高度不变，仅折叠内容区域，实现“向下收放” */}
+      <Box sx={{
+        flex: 1,
+        display: collapsed ? 'none' : 'flex',
+        flexDirection: 'column',
+      }}>
         <>
           {/* 全局挂载版本不再需要选择知识库，工作流内部配置决定是否启用RAG */}
 
@@ -679,7 +693,7 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
             </IconButton>
           </Box>
         </>
-      )}
+      </Box>
     </Paper>
   );
 };

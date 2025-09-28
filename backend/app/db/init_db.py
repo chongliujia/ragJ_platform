@@ -31,6 +31,12 @@ async def init_db():
         Base.metadata.create_all(bind=engine)
         logger.info("数据库表创建完成")
 
+        # 迁移/补齐历史表字段（向后兼容旧 SQLite 文件）
+        try:
+            _safe_migrate_documents_table()
+        except Exception as mig_err:
+            logger.warning(f"文档表迁移检查失败: {mig_err}")
+
         # 初始化基础数据
         db = next(get_db())
         try:
@@ -46,6 +52,48 @@ async def init_db():
     except Exception as e:
         logger.error("数据库初始化失败", error=str(e))
         raise
+
+
+def _safe_migrate_documents_table():
+    """补齐 documents 表的新增字段，兼容旧版本 SQLite 文件。
+
+    新增字段：
+      - knowledge_base_name TEXT NOT NULL DEFAULT ''
+      - doc_metadata TEXT DEFAULT '{}'
+      - vector_ids TEXT DEFAULT '[]'
+      - tenant_id INTEGER NOT NULL DEFAULT 1
+      - uploaded_by INTEGER NOT NULL DEFAULT 0
+    """
+    from sqlalchemy import text
+    conn = engine.connect()
+    try:
+        dialect_name = engine.dialect.name
+        if dialect_name != 'sqlite':
+            # 仅在 SQLite 下做轻量迁移；其他数据库建议通过正式迁移工具
+            return
+
+        cols = conn.execute(text("PRAGMA table_info('documents')")).fetchall()
+        existing = {c[1] for c in cols}  # name at index 1
+
+        to_add = []
+        if 'knowledge_base_name' not in existing:
+            to_add.append("ALTER TABLE documents ADD COLUMN knowledge_base_name TEXT NOT NULL DEFAULT ''")
+        if 'doc_metadata' not in existing:
+            to_add.append("ALTER TABLE documents ADD COLUMN doc_metadata TEXT DEFAULT '{}' ")
+        if 'vector_ids' not in existing:
+            to_add.append("ALTER TABLE documents ADD COLUMN vector_ids TEXT DEFAULT '[]' ")
+        if 'tenant_id' not in existing:
+            to_add.append("ALTER TABLE documents ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1")
+        if 'uploaded_by' not in existing:
+            to_add.append("ALTER TABLE documents ADD COLUMN uploaded_by INTEGER NOT NULL DEFAULT 0")
+
+        for sql in to_add:
+            logger.info(f"迁移 documents 表：执行 {sql}")
+            conn.execute(text(sql))
+        if to_add:
+            logger.info("documents 表字段补齐完成")
+    finally:
+        conn.close()
 
 
 async def init_permissions(db: Session):

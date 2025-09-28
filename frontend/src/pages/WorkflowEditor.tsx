@@ -538,6 +538,9 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const [dataFlowValidation, setDataFlowValidation] = useState<any>(null);
   const [validating, setValidating] = useState(false);
   const [snackbar, setSnackbar] = useState<{open: boolean; message: string; severity: 'success'|'info'|'warning'|'error'}>({ open: false, message: '', severity: 'info' });
+  const [zoom, setZoom] = useState(1);
+  const [snap, setSnap] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
 
   // 兼容旧连接：自动补齐缺失的句柄（避免出现 output -> input）
   useEffect(() => {
@@ -676,9 +679,48 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     setNodeConfigOpen(true);
   }, []);
 
+  // 根据验证结果标记节点状态（错误/警告）
+  const applyValidationMarkers = useCallback((errors: any[], warnings: any[]) => {
+    const getIds = (arr: any[]) => {
+      const ids = new Set<string>();
+      for (const msg of arr || []) {
+        const s = String(msg || '');
+        let m = s.match(/节点\s+(\S+)/);
+        if (!m) m = s.match(/node\s+(\S+)/i);
+        if (m && m[1]) ids.add(m[1]);
+      }
+      return ids;
+    };
+    const errorIds = getIds(errors);
+    const warnIds = getIds(warnings);
+    setNodes((nds) => nds.map((n) => {
+      const d: any = { ...(n.data || {}) };
+      if (errorIds.has(n.id)) d.status = 'error';
+      else if (warnIds.has(n.id)) d.status = 'running';
+      else if (d.status === 'error' || d.status === 'running') d.status = 'idle';
+      return { ...n, data: d } as any;
+    }));
+  }, [setNodes]);
+
   // 保存工作流
   // 保存当前工作流；返回保存后的工作流ID（新建时）
   const handleSave = useCallback(async (): Promise<string | undefined> => {
+      // 预校验：检索节点 knowledge_base 必须已选择
+      const invalidRetriever = nodes.find((n: any) => (
+        ['rag_retriever','hybrid_retriever','retriever'].includes((n.data?.type || n.type)) && (!n.data?.config?.knowledge_base)
+      ));
+      if (invalidRetriever) {
+        showSnackbar('保存失败：存在未配置知识库的检索节点', 'warning');
+        try {
+          const n = invalidRetriever;
+          if (reactFlowInstance) {
+            const padding = 100;
+            reactFlowInstance.fitBounds({ x: n.position.x - padding, y: n.position.y - padding, width: 2*padding, height: 2*padding }, { padding: 0.2 });
+          }
+          setNodes(nds => nds.map(nn => ({ ...nn, selected: nn.id === n.id })));
+        } catch {}
+        return undefined;
+      }
       const normalizeHandle = (h: any) => {
         if (!h) return undefined;
         // 若是通用别名（input*/output*），则不写入句柄，由后端按默认处理
@@ -829,6 +871,22 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
 
   // 后端校验工作流
   const handleValidate = useCallback(async () => {
+    // 预校验：检索节点 knowledge_base 必须已选择
+    const invalidRetriever = nodes.find((n: any) => (
+      ['rag_retriever','hybrid_retriever','retriever'].includes((n.data?.type || n.type)) && (!n.data?.config?.knowledge_base)
+    ));
+    if (invalidRetriever) {
+      showSnackbar('验证失败：存在未配置知识库的检索节点', 'warning');
+      try {
+        const n = invalidRetriever;
+        if (reactFlowInstance) {
+          const padding = 100;
+          reactFlowInstance.fitBounds({ x: n.position.x - padding, y: n.position.y - padding, width: 2*padding, height: 2*padding }, { padding: 0.2 });
+        }
+        setNodes(nds => nds.map(nn => ({ ...nn, selected: nn.id === n.id })));
+      } catch {}
+      return;
+    }
     try {
       setValidating(true);
       const normalizeHandle2 = (h: any) => {
@@ -878,6 +936,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         suggestions: data.suggestions || [],
       };
       setDataFlowValidation(result);
+      applyValidationMarkers(result.errors, result.warnings);
       if (!result.isValid && result.errors.length) {
         focusEdgeByError(String(result.errors[0]));
       }
@@ -888,7 +947,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     } finally {
       setValidating(false);
     }
-  }, [workflowName, workflowDescription, nodes, edges, showSnackbar]);
+  }, [workflowName, workflowDescription, nodes, edges, showSnackbar, applyValidationMarkers]);
 
   // 根据错误字符串尝试定位相关边
   const focusEdgeByError = (text: string) => {
@@ -984,6 +1043,14 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
         handleValidate();
       } else if (key === 'l') {
         handleAutoLayout();
+      } else if (key === '+') {
+        try { reactFlowInstance?.zoomIn({ duration: 100 }); } catch {}
+      } else if (key === '-') {
+        try { reactFlowInstance?.zoomOut({ duration: 100 }); } catch {}
+      } else if (key === 'g') {
+        setShowGrid(v => !v);
+      } else if (key === 's' && !mod) {
+        setSnap(v => !v);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -1956,11 +2023,12 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
             onDragOver={onDragOver}
             onNodeClick={onNodeClick}
             onInit={setReactFlowInstance}
+            onMoveEnd={(_, viewport) => { try { setZoom((viewport as any)?.zoom || 1); } catch {} }}
             nodeTypes={useMemo(() => nodeTypes, [])}
             edgeTypes={useMemo(() => edgeTypes, [])}
             connectionLineComponent={EnhancedConnectionLine}
             connectionMode={ConnectionMode.Loose}
-            snapToGrid
+            snapToGrid={snap}
             snapGrid={[20, 20]}
             fitView
             className="custom-workflow-editor"
@@ -1976,7 +2044,7 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               gap={30} 
               size={1.5}
               color="rgba(0, 212, 255, 0.3)"
-              style={{ backgroundColor: 'transparent' }}
+              style={{ backgroundColor: 'transparent', display: showGrid ? 'block' : 'none' }}
             />
             <Controls 
               style={{ 
@@ -2074,6 +2142,25 @@ const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
                   <IconButton size="small" onClick={handleFitView} sx={{ color: '#00d4ff' }}>
                     <FitIcon fontSize="small" />
                   </IconButton>
+                </span></Tooltip>
+              </Box>
+            </Panel>
+
+            <Panel position="bottom-right">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, p: 1, background: 'rgba(26, 31, 46, 0.9)', borderRadius: 2, border: '1px solid rgba(0, 212, 255, 0.3)' }}>
+                <Tooltip title="缩小 (-)"><span>
+                  <IconButton size="small" onClick={() => { try { reactFlowInstance?.zoomOut({ duration: 200 }); } catch {} }} sx={{ color: 'rgba(255,255,255,0.8)' }}>−</IconButton>
+                </span></Tooltip>
+                <Typography variant="caption" sx={{ minWidth: 48, textAlign: 'center', color: 'rgba(255,255,255,0.8)' }}>{Math.round(zoom * 100)}%</Typography>
+                <Tooltip title="放大 (+)"><span>
+                  <IconButton size="small" onClick={() => { try { reactFlowInstance?.zoomIn({ duration: 200 }); } catch {} }} sx={{ color: 'rgba(255,255,255,0.8)' }}>+</IconButton>
+                </span></Tooltip>
+                <Divider flexItem orientation="vertical" sx={{ borderColor: 'rgba(0, 212, 255, 0.3)' }} />
+                <Tooltip title={`网格 ${showGrid ? '开' : '关'} (G)`}><span>
+                  <Button size="small" variant={showGrid ? 'contained' : 'outlined'} onClick={() => setShowGrid(v => !v)}>Grid</Button>
+                </span></Tooltip>
+                <Tooltip title={`吸附 ${snap ? '开' : '关'} (S)`}><span>
+                  <Button size="small" variant={snap ? 'contained' : 'outlined'} onClick={() => setSnap(v => !v)}>Snap</Button>
                 </span></Tooltip>
               </Box>
             </Panel>

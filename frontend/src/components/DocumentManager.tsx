@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Dialog,
@@ -33,6 +33,7 @@ import {
 import {
   Description as DocumentIcon,
   Delete as DeleteIcon,
+  Visibility as ViewIcon,
   CloudSync as ProcessIcon,
   Search as SearchIcon,
   FilterList as FilterIcon,
@@ -43,7 +44,8 @@ import {
   Refresh as RefreshIcon,
   SelectAll as SelectAllIcon,
 } from '@mui/icons-material';
-import { documentApi } from '../services/api';
+import { documentApi, knowledgeBaseApi } from '../services/api';
+import DocumentChunksDialog from './DocumentChunksDialog';
 
 interface Document {
   id: string;
@@ -79,51 +81,32 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
   const [processingDocuments, setProcessingDocuments] = useState<string[]>([]);
   const [deletingDocuments, setDeletingDocuments] = useState<string[]>([]);
+  const [chunksDialogOpen, setChunksDialogOpen] = useState(false);
+  const [activeDocForChunks, setActiveDocForChunks] = useState<Document | null>(null);
 
-  // 获取文档列表
-  const fetchDocuments = async () => {
+  // 获取文档列表（真实 API，做字段映射以复用现有表格）
+  const fetchDocuments = async (silent: boolean = false) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setError(null);
-      // 注意：这里使用的是模拟数据，实际需要后端API支持
-      // const response = await documentApi.getList(knowledgeBaseId);
-      // setDocuments(response.data);
-      
-      // 模拟数据
-      const mockDocuments: Document[] = [
-        {
-          id: '1',
-          filename: 'sample_document.pdf',
-          size: 1024 * 1024 * 2.5, // 2.5MB
-          upload_time: new Date().toISOString(),
-          status: 'completed',
-          chunks_count: 25,
-          content_type: 'application/pdf',
-        },
-        {
-          id: '2',
-          filename: 'user_manual.docx',
-          size: 1024 * 1024 * 1.2, // 1.2MB
-          upload_time: new Date(Date.now() - 3600000).toISOString(),
-          status: 'processing',
-          content_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        },
-        {
-          id: '3',
-          filename: 'data_analysis.xlsx',
-          size: 1024 * 512, // 512KB
-          upload_time: new Date(Date.now() - 7200000).toISOString(),
-          status: 'failed',
-          error_message: 'Unsupported file format',
-          content_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        },
-      ];
-      setDocuments(mockDocuments);
+      const response = await documentApi.getList(knowledgeBaseId);
+      const items = Array.isArray(response.data) ? response.data : [];
+      const mapped: Document[] = items.map((d: any) => ({
+        id: String(d.id),
+        filename: d.filename,
+        size: Number(d.file_size || 0),
+        upload_time: d.created_at || new Date().toISOString(),
+        status: d.status || 'pending',
+        chunks_count: d.total_chunks || 0,
+        error_message: d.error_message || undefined,
+        content_type: d.file_type || undefined,
+      }));
+      setDocuments(mapped);
     } catch (error: any) {
       console.error('Failed to fetch documents:', error);
       setError(error.response?.data?.detail || t('document.manager.fetchError'));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -131,20 +114,17 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   const deleteDocuments = async (documentIds: string[]) => {
     try {
       setDeletingDocuments(documentIds);
-      
-      // 逐个删除文档
-      for (const docId of documentIds) {
-        await documentApi.delete(knowledgeBaseId, docId);
-      }
-      
+      // 批量删除
+      await documentApi.batchDelete(knowledgeBaseId, documentIds);
+
       // 更新本地状态
       setDocuments(prev => prev.filter(doc => !documentIds.includes(doc.id)));
       setSelectedDocuments(prev => prev.filter(id => !documentIds.includes(id)));
-      
+
       // 通知父组件文档已变更
       onDocumentsChanged();
     } catch (error: any) {
-      console.error('Failed to delete documents:', error);
+      console.error('Failed to batch delete documents:', error);
       setError(error.response?.data?.detail || t('document.manager.deleteError'));
     } finally {
       setDeletingDocuments([]);
@@ -230,6 +210,36 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
     }
   }, [open, knowledgeBaseId]);
 
+  // Auto refresh while there are processing/pending docs
+  const refreshTimerRef = useRef<any>(null);
+  useEffect(() => {
+    if (!open) {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+      return;
+    }
+    const hasProcessing = documents.some(
+      (d) => d.status === 'processing' || d.status === 'pending'
+    );
+    if (hasProcessing && !refreshTimerRef.current) {
+      refreshTimerRef.current = setInterval(() => {
+        fetchDocuments(true); // silent refresh
+      }, 2000);
+    }
+    if (!hasProcessing && refreshTimerRef.current) {
+      clearInterval(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    }
+    return () => {
+      if (refreshTimerRef.current && !hasProcessing) {
+        clearInterval(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+  }, [open, documents]);
+
   const filteredDocuments = getFilteredDocuments();
   const selectedCount = selectedDocuments.length;
   const filteredSelectedCount = filteredDocuments.filter(doc => selectedDocuments.includes(doc.id)).length;
@@ -287,6 +297,22 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
             disabled={loading}
           >
             {t('document.manager.actions.refresh')}
+          </Button>
+          <Button
+            size="small"
+            onClick={async () => {
+              if (!window.confirm('确定清空该知识库的所有向量？此操作不可撤销。')) return;
+              try {
+                await knowledgeBaseApi.clearVectors(knowledgeBaseId);
+                setDocuments(prev => prev.map(d => ({ ...d, chunks_count: 0 })));
+              } catch (e: any) {
+                console.error('Failed to clear vectors:', e);
+                setError(e?.response?.data?.detail || '清空向量失败');
+              }
+            }}
+            startIcon={<ProcessIcon />}
+          >
+            清空向量
           </Button>
           
           <Button
@@ -384,6 +410,15 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                       <TableCell>
                         <IconButton
                           size="small"
+                          onClick={() => { setActiveDocForChunks(doc); setChunksDialogOpen(true); }}
+                          disabled={doc.status !== 'completed' || (doc.chunks_count ?? 0) === 0}
+                          color="primary"
+                          sx={{ mr: 1 }}
+                        >
+                          <ViewIcon />
+                        </IconButton>
+                        <IconButton
+                          size="small"
                           onClick={() => deleteDocuments([doc.id])}
                           disabled={deletingDocuments.includes(doc.id)}
                           color="error"
@@ -421,6 +456,25 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
             </ListItemIcon>
             <ListItemText>{t('document.manager.actions.deleteSelected')}</ListItemText>
           </MenuItem>
+          <MenuItem
+            onClick={async () => {
+              setActionMenuAnchor(null);
+              if (!window.confirm('确定清空该知识库的所有向量？此操作不可撤销。')) return;
+              try {
+                await knowledgeBaseApi.clearVectors(knowledgeBaseId);
+                // 清空本地文档的分片计数
+                setDocuments(prev => prev.map(d => ({ ...d, chunks_count: 0 })));
+              } catch (e: any) {
+                console.error('Failed to clear vectors:', e);
+                setError(e?.response?.data?.detail || '清空向量失败');
+              }
+            }}
+          >
+            <ListItemIcon>
+              <ProcessIcon />
+            </ListItemIcon>
+            <ListItemText>清空向量（Milvus）</ListItemText>
+          </MenuItem>
         </Menu>
       </DialogContent>
 
@@ -429,6 +483,17 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
           {t('common.close')}
         </Button>
       </DialogActions>
+
+      {/* 分片查看对话框 */}
+      {activeDocForChunks && (
+        <DocumentChunksDialog
+          open={chunksDialogOpen}
+          onClose={() => { setChunksDialogOpen(false); setActiveDocForChunks(null); }}
+          knowledgeBaseId={knowledgeBaseId}
+          documentId={activeDocForChunks.id}
+          filename={activeDocForChunks.filename}
+        />
+      )}
     </Dialog>
   );
 };

@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     CELERY_BROKER_URL: str = "redis://localhost:6379/1"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
+    USE_CELERY: bool = False
 
     # 向量数据库配置 - Milvus
     MILVUS_HOST: str = "localhost"
@@ -59,6 +60,9 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET_NAME: str = "ragj-documents"
     MINIO_SECURE: bool = False
+
+    # 上传目录（本地开发默认 /tmp/uploads）
+    UPLOAD_DIR: str = "/tmp/uploads"
 
     # LLM配置
     OPENAI_API_KEY: Optional[str] = None

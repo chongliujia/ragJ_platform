@@ -153,6 +153,18 @@ The platform includes a modern React-based web interface for easy management.
 -   📝 **Document Management**: Upload and manage documents (coming soon)
 -   🌍 **Language Support**: Switch between Chinese and English interface
 
+### Maintenance
+
+-   Elasticsearch index mapping updated to include `tenant_id`/`user_id` (integer) and `document_name`/`knowledge_base` (keyword) fields. For existing knowledge bases created with older mappings, you can rebuild the ES index:
+
+  - `POST /api/v1/knowledge-bases/{kb_name}/maintenance/rebuild-es-index` — recreate ES index only
+  - `POST /api/v1/knowledge-bases/{kb_name}/maintenance/rebuild-es-index?reindex=true` — recreate and reindex documents (re-parses source files; chunking may differ from Milvus)
+
+### Upload Processing Options
+
+-   `UPLOAD_DIR` controls where uploaded files are stored (default `/tmp/uploads`).
+-   Set `USE_CELERY=true` and configure `CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND` to offload document processing to a Celery worker instead of the API process.
+
 ## 🔧 API Usage Guide
 
 Here is how to use the core RAG pipeline via the API.

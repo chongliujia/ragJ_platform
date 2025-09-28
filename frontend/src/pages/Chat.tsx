@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   Typography,
   Box,
@@ -18,11 +20,17 @@ import {
   InputLabel,
   CircularProgress,
   Alert,
+  Chip,
+  IconButton,
+  Stack,
 } from '@mui/material';
 import {
   Send as SendIcon,
   SmartToy as BotIcon,
   Person as PersonIcon,
+  Stop as StopIcon,
+  Replay as ReplayIcon,
+  ContentCopy as CopyIcon,
 } from '@mui/icons-material';
 import { knowledgeBaseApi, chatApi } from '../services/api';
 
@@ -31,6 +39,7 @@ interface Message {
   content: string;
   sender: 'user' | 'bot';
   timestamp: Date;
+  sources?: string[];
 }
 
 interface KnowledgeBase {
@@ -47,6 +56,8 @@ const Chat: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<null | (() => void)>(null);
+  const lastUserMessageRef = useRef<string>('');
 
   // 滚动到底部
   const scrollToBottom = () => {
@@ -95,6 +106,7 @@ const Chat: React.FC = () => {
 
     setMessages(prev => [...prev, userMessage]);
     const currentMessage = inputMessage;
+    lastUserMessageRef.current = currentMessage;
     setInputMessage('');
     setLoading(true);
     setError(null);
@@ -120,65 +132,32 @@ const Chat: React.FC = () => {
         requestData.knowledge_base_id = selectedKb;
       }
 
-      // 使用流式API
-      await chatApi.streamMessage(
+      const { cancel, promise } = chatApi.streamMessageCancelable(
         requestData,
         (chunk) => {
-          // 处理流式数据块
-          if (chunk.success && chunk.content) {
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === botMessageId 
-                  ? { ...msg, content: msg.content + chunk.content }
-                  : msg
-              )
-            );
-          } else if (chunk.type === 'sources' && chunk.sources) {
-            // 处理来源信息
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === botMessageId 
-                  ? { ...msg, content: msg.content + '\n\n📚 参考文档：\n' + chunk.sources.join('\n') }
-                  : msg
-              )
-            );
-          } else if (chunk.success === false) {
-            // 处理错误
+          if (chunk?.success && chunk?.content) {
+            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: m.content + chunk.content } : m));
+          } else if (chunk?.type === 'sources' && Array.isArray(chunk.sources)) {
+            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, sources: chunk.sources } : m));
+          } else if (chunk?.success === false) {
             const errorContent = chunk.error || t('chat.errorResponse');
-            setMessages(prev => 
-              prev.map(msg => 
-                msg.id === botMessageId 
-                  ? { ...msg, content: errorContent }
-                  : msg
-              )
-            );
+            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: errorContent } : m));
           }
         },
-        (error) => {
-          console.error('Stream error:', error);
-          
-          // 根据错误类型提供更友好的错误消息
-          let errorContent = t('chat.errorResponse');
-          if (error.message?.includes('timeout')) {
-            errorContent = selectedKb 
-              ? '处理知识库查询时超时，请稍后重试。如果问题持续存在，请尝试简化您的问题。'
-              : '请求超时，请稍后重试。';
-          }
-          
-          setMessages(prev => 
-            prev.map(msg => 
-              msg.id === botMessageId 
-                ? { ...msg, content: errorContent }
-                : msg
-            )
-          );
+        (err) => {
+          console.error('Stream error:', err);
+          const isTimeout = err?.message?.includes('timeout');
+          const errorContent = isTimeout
+            ? (selectedKb ? '处理知识库查询时超时，请稍后重试。如果问题持续存在，请尝试简化您的问题。' : '请求超时，请稍后重试。')
+            : t('chat.errorResponse');
+          setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: errorContent } : m));
           setLoading(false);
         },
-        () => {
-          // 流式完成
-          setLoading(false);
-        }
+        () => setLoading(false)
       );
+      cancelRef.current = cancel;
+      await promise;
+      cancelRef.current = null;
     } catch (error: any) {
       console.error('Failed to send message:', error);
       
@@ -198,6 +177,25 @@ const Chat: React.FC = () => {
         )
       );
       setLoading(false);
+    }
+  };
+
+  // 停止生成
+  const stopGenerating = () => {
+    const cancel = cancelRef.current;
+    if (cancel) {
+      try { cancel(); } catch {}
+      cancelRef.current = null;
+      setLoading(false);
+    }
+  };
+
+  // 重新生成
+  const regenerate = () => {
+    const last = lastUserMessageRef.current;
+    if (last) {
+      setInputMessage(last);
+      setTimeout(() => sendMessage(), 0);
     }
   };
 
@@ -378,7 +376,38 @@ const Chat: React.FC = () => {
                           fontSize: '0.9em'
                         }
                       }}>
-                        <ReactMarkdown>{message.content}</ReactMarkdown>
+                        <ReactMarkdown
+                          components={{
+                            code({node, inline, className, children, ...props}) {
+                              const match = /language-(\w+)/.exec(className || '');
+                              const codeString = String(children || '').replace(/\n$/, '');
+                              const lang = match ? match[1] : 'plaintext';
+                              const onCopy = () => navigator.clipboard.writeText(codeString).catch(()=>{});
+                              if (inline) {
+                                return <code className={className} {...props}>{children}</code>;
+                              }
+                              return (
+                                <Box sx={{ position: 'relative' }}>
+                                  <IconButton size="small" onClick={onCopy} sx={{ position: 'absolute', right: 6, top: 6, zIndex: 1 }}>
+                                    <CopyIcon fontSize="small" />
+                                  </IconButton>
+                                  <SyntaxHighlighter language={lang} style={oneDark} PreTag="div" customStyle={{ borderRadius: 8, paddingTop: 28 }}>
+                                    {codeString}
+                                  </SyntaxHighlighter>
+                                </Box>
+                              );
+                            }
+                          }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                        {message.sources && message.sources.length > 0 && (
+                          <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
+                            {message.sources.map((s, idx) => (
+                              <Chip key={idx} label={s} size="small" variant="outlined" color="info" />
+                            ))}
+                          </Stack>
+                        )}
                       </Box>
                     ) : (
                       <Typography variant="body1" sx={{ 
@@ -472,6 +501,9 @@ const Chat: React.FC = () => {
         border: '1px solid rgba(0, 212, 255, 0.2)',
         boxShadow: '0 4px 16px rgba(0, 0, 0, 0.2)'
       }}>
+        <IconButton onClick={regenerate} disabled={loading || !lastUserMessageRef.current} title={t('chat.regenerate') as string}>
+          <ReplayIcon />
+        </IconButton>
         <TextField
           fullWidth
           multiline
@@ -507,6 +539,19 @@ const Chat: React.FC = () => {
             }
           }}
         />
+        <Button
+          variant="outlined"
+          onClick={stopGenerating}
+          disabled={!loading}
+          startIcon={<StopIcon />}
+          sx={{ 
+            minWidth: 64,
+            height: 54,
+            borderRadius: 1.5,
+          }}
+        >
+          {t('chat.stop')}
+        </Button>
         <Button
           variant="contained"
           onClick={sendMessage}

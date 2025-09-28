@@ -50,6 +50,15 @@ class RustDocumentProcessor:
         filename = Path(file_path).name
         return _extract_metadata(content, filename)
 
+    def get_metadata_from_content(
+        self, content: bytes, filename: str
+    ) -> Dict[str, Any]:
+        """Extract metadata directly from in-memory content.
+
+        Mirrors the Rust binding signature extract_metadata(content, filename).
+        """
+        return _extract_metadata(content, filename)
+
     def process_batch(
         self, files: List[str], options: Optional[Dict[str, Any]] = None
     ) -> List[str]:
@@ -82,4 +91,3 @@ class RustDocumentProcessor:
 
 # Global instance (None when Rust is not available)
 rust_processor = RustDocumentProcessor() if RUST_AVAILABLE else None
-

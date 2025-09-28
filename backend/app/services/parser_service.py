@@ -9,6 +9,8 @@ import docx
 from io import BytesIO
 import logging
 from typing import Optional, Dict, Any
+from bs4 import BeautifulSoup
+import markdown as md
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,10 @@ def _parse_document_python(content: bytes, filename: str) -> str:
         return parse_pdf(content)
     elif file_ext == "docx":
         return parse_docx(content)
+    elif file_ext == "md":
+        return parse_md(content)
+    elif file_ext == "html" or file_ext == "htm":
+        return parse_html(content)
     else:
         logger.warning(f"Unsupported file format: {file_ext}")
         return ""
@@ -108,6 +114,34 @@ def parse_docx(content: bytes) -> str:
         return ""
 
 
+def parse_md(content: bytes) -> str:
+    """Parses text from a .md (Markdown) file by converting to HTML then stripping tags."""
+    try:
+        text = content.decode("utf-8", errors="ignore")
+        # Convert markdown to HTML
+        html = md.markdown(text)
+        # Strip HTML tags to plain text
+        soup = BeautifulSoup(html, "html.parser")
+        return soup.get_text(separator="\n")
+    except Exception as e:
+        logger.error(f"Error parsing MD file: {e}", exc_info=True)
+        return ""
+
+
+def parse_html(content: bytes) -> str:
+    """Parses text from a .html file using BeautifulSoup."""
+    try:
+        html = content.decode("utf-8", errors="ignore")
+        soup = BeautifulSoup(html, "html.parser")
+        # Remove script/style elements
+        for tag in soup(["script", "style"]):
+            tag.decompose()
+        return soup.get_text(separator="\n")
+    except Exception as e:
+        logger.error(f"Error parsing HTML file: {e}", exc_info=True)
+        return ""
+
+
 def get_supported_formats() -> list[str]:
     """Get list of supported document formats."""
     if RUST_AVAILABLE:
@@ -117,7 +151,7 @@ def get_supported_formats() -> list[str]:
             logger.warning(f"Failed to get supported formats from Rust: {e}")
 
     # Fallback to Python-supported formats
-    return ["txt", "pdf", "docx"]
+    return ["txt", "pdf", "docx", "md", "html", "htm"]
 
 
 def extract_metadata(content: bytes, filename: str) -> Dict[str, Any]:

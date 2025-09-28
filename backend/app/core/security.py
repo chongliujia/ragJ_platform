@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models.user import User
+from app.db.models.permission import Permission, RolePermission
 
 # 密码上下文
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -67,12 +68,26 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     return user
 
 
-def check_user_permission(user: User, permission: str) -> bool:
-    """检查用户是否拥有指定权限"""
+def check_user_permission(db: Session, user: User, permission: str) -> bool:
+    """检查用户是否拥有指定权限。
+
+    注意：建议在 API 层使用 app.core.dependencies.require_permission 装饰器，
+    此函数提供底层布尔检查能力。
+    """
     # 超级管理员拥有所有权限
     if user.role == "super_admin":
         return True
 
-    # TODO: 实现完整的权限检查逻辑
-    # 这里需要查询用户角色对应的权限
-    return True
+    # 基于角色-权限关联进行检查
+    has_perm = (
+        db.query(Permission)
+        .join(RolePermission, Permission.id == RolePermission.permission_id)
+        .filter(
+            RolePermission.role == user.role,
+            Permission.name == permission,
+            Permission.is_active == True,
+        )
+        .first()
+        is not None
+    )
+    return has_perm

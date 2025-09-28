@@ -1,0 +1,43 @@
+# OS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+.venv/
+venv/
+env/
+
+# Environments / Secrets
+.env
+backend/.env
+backend/.env.dev
+*.env.local
+
+# Databases / runtime files
+*.db
+backend/ragj_platform.db
+backend/static/
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+dist/
+build/
+
+# Rust
+target/
+**/target/
+
+# Generated Rust-Python bindings
+backend/rust_bindings/
+
+# Logs
+logs/
+*.log
+

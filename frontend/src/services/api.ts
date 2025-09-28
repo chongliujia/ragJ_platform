@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { streamSSE, streamSSECancelable } from './sse';
 
 // 配置 axios 默认设置
 // 使用环境变量以便在不同环境（本地、Docker、生产）下正确指向后端
@@ -71,6 +72,12 @@ export const knowledgeBaseApi = {
   
   // 获取知识库详情
   getDetail: (id: string) => api.get(`/api/v1/knowledge-bases/${id}`),
+
+  // 清空向量（可选清理ES）
+  clearVectors: (
+    kbName: string,
+    data?: { include_es?: boolean }
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/maintenance/clear-vectors`, data || {}),
 };
 
 // 聊天相关 API
@@ -88,58 +95,46 @@ export const chatApi = {
   ) => {
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      const response = await fetch(`${API_BASE_URL}/api/v1/chat/stream`, {
+      await streamSSE(
+        `${API_BASE_URL}/api/v1/chat/stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(data),
+        },
+        { onEvent: onChunk, onError, onComplete },
+        { retries: 1, retryDelayBaseMs: 800 }
+      );
+    } catch (error) {
+      console.error('Stream error:', error);
+      onError(error);
+    }
+  },
+  
+  // 流式聊天（可取消）
+  streamMessageCancelable: (
+    data: { message: string; knowledge_base_id?: string; model?: string },
+    onChunk: (chunk: any) => void,
+    onError: (error: any) => void,
+    onComplete: () => void
+  ) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    return streamSSECancelable(
+      `${API_BASE_URL}/api/v1/chat/stream`,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(data),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No reader available');
-      }
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') {
-                onComplete();
-                return;
-              }
-              
-              try {
-                const parsed = JSON.parse(data);
-                onChunk(parsed);
-              } catch (e) {
-                console.warn('Failed to parse SSE data:', data);
-              }
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
-    } catch (error) {
-      console.error('Stream error:', error);
-      onError(error);
-    }
+      },
+      { onEvent: onChunk, onError, onComplete },
+      { retries: 1, retryDelayBaseMs: 800 }
+    );
   },
   
   // 获取重排提供商
@@ -154,9 +149,10 @@ export const documentApi = {
     api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`),
   
   // 上传文档（使用嵌套路由，避免额外参数解析不一致）
-  upload: (knowledgeBaseId: string, formData: FormData) => 
+  upload: (knowledgeBaseId: string, formData: FormData, signal?: AbortSignal) => 
     api.post(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      signal,
     }),
   
   // 删除文档
@@ -166,6 +162,19 @@ export const documentApi = {
   // 获取分片策略
   getChunkingStrategies: () => 
     api.get('/api/v1/documents/chunking-strategies'),
+
+  // 获取某文档的分片内容（支持分页）
+  getChunks: (
+    knowledgeBaseId: string,
+    documentId: string | number,
+    params?: { offset?: number; limit?: number }
+  ) => api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks`, { params }),
+
+  // 批量删除文档
+  batchDelete: (
+    knowledgeBaseId: string,
+    ids: (string | number)[]
+  ) => api.post(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/batch-delete`, { document_ids: ids.map(id => Number(id)) }),
 };
 
 // 系统状态相关 API
@@ -274,69 +283,62 @@ export const workflowApi = {
   ) => {
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      const response = await fetch(`${API_BASE_URL}/api/v1/workflows/${id}/execute/stream`, {
+      await streamSSE(
+        `${API_BASE_URL}/api/v1/workflows/${id}/execute/stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(data),
+        },
+        {
+          onEvent: (evt) => {
+            if (evt?.type === 'progress') onProgress(evt);
+            else if (evt?.type === 'complete') onComplete(evt);
+            else if (evt?.type === 'error') onError(evt);
+          },
+          onError,
+          onComplete: () => onComplete(null),
+        },
+        { retries: 1, retryDelayBaseMs: 800 }
+      );
+    } catch (error) {
+      console.error('Workflow execution stream error:', error);
+      onError(error);
+    }
+  },
+  // 流式执行工作流（可取消）
+  executeStreamCancelable: (
+    id: string,
+    data: { input_data: any; config?: any; debug?: boolean },
+    onProgress: (progress: any) => void,
+    onError: (error: any) => void,
+    onComplete: (result: any) => void
+  ) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    return streamSSECancelable(
+      `${API_BASE_URL}/api/v1/workflows/${id}/execute/stream`,
+      {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify(data),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No reader available');
-      }
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') {
-                onComplete(null); // 确保在流结束时调用完成回调
-                return;
-              }
-              
-              try {
-                const parsed = JSON.parse(data);
-                console.log('SSE parsed data:', parsed); // 添加调试日志
-                
-                if (parsed.type === 'progress') {
-                  onProgress(parsed);
-                } else if (parsed.type === 'complete') {
-                  console.log('Calling onComplete with:', parsed); // 添加调试日志
-                  onComplete(parsed);
-                } else if (parsed.type === 'error') {
-                  onError(parsed);
-                } else {
-                  console.log('Unknown event type:', parsed); // 添加调试日志
-                }
-              } catch (e) {
-                console.warn('Failed to parse SSE data:', data, e);
-              }
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
-    } catch (error) {
-      console.error('Workflow execution stream error:', error);
-      onError(error);
-    }
+      },
+      {
+        onEvent: (evt) => {
+          if (evt?.type === 'progress') onProgress(evt);
+          else if (evt?.type === 'complete') onComplete(evt);
+          else if (evt?.type === 'error') onError(evt);
+        },
+        onError,
+        onComplete: () => onComplete(null),
+      },
+      { retries: 1, retryDelayBaseMs: 800 }
+    );
   },
   
   // 获取执行历史
@@ -421,54 +423,19 @@ export const agentApi = {
   ) => {
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      const response = await fetch(`${API_BASE_URL}/api/v1/agents/${id}/chat/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+      await streamSSE(
+        `${API_BASE_URL}/api/v1/agents/${id}/chat/stream`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(data),
         },
-        body: JSON.stringify(data),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No reader available');
-      }
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const data = line.slice(6);
-              if (data === '[DONE]') {
-                onComplete();
-                return;
-              }
-              
-              try {
-                const parsed = JSON.parse(data);
-                onChunk(parsed);
-              } catch (e) {
-                console.warn('Failed to parse SSE data:', data);
-              }
-            }
-          }
-        }
-      } finally {
-        reader.releaseLock();
-      }
+        { onEvent: onChunk, onError, onComplete },
+        { retries: 1, retryDelayBaseMs: 800 }
+      );
     } catch (error) {
       console.error('Agent chat stream error:', error);
       onError(error);
