@@ -70,7 +70,8 @@
       "knowledgeBases": "Total Knowledge Bases",
       "documents": "Total Documents",
       "chats": "Chat Sessions",
-      "systemStatus": "System Status"
+      "systemStatus": "System Status",
+      "storageUsed": "Storage Used"
     },
     "status": {
       "healthy": "Healthy",

@@ -4,6 +4,7 @@
 
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends, status, Query
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from pydantic import BaseModel
@@ -137,11 +138,23 @@ async def get_system_stats(
 async def list_all_tenants(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    search: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
     current_user: User = Depends(require_super_admin()),
     db: Session = Depends(get_db),
 ):
     """获取所有租户列表"""
-    tenants = db.query(Tenant).offset(skip).limit(limit).all()
+    base_query = db.query(Tenant)
+    if search:
+        like = f"%{search}%"
+        base_query = base_query.filter(
+            or_(Tenant.name.like(like), Tenant.slug.like(like), Tenant.description.like(like))
+        )
+    if is_active is not None:
+        base_query = base_query.filter(Tenant.is_active == is_active)
+
+    total = base_query.count()
+    tenants = base_query.offset(skip).limit(limit).all()
 
     result = []
     for tenant in tenants:
@@ -176,7 +189,7 @@ async def list_all_tenants(
             )
         )
 
-    return result
+    return JSONResponse(content=[r.dict() for r in result], headers={"X-Total-Count": str(total)})
 
 
 @router.get("/users", response_model=List[UserDetailResponse])
@@ -186,15 +199,16 @@ async def list_all_users(
     search: Optional[str] = Query(None),
     tenant_id: Optional[int] = Query(None),
     role: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
     current_user: User = Depends(require_super_admin()),
     db: Session = Depends(get_db),
 ):
     """获取所有用户列表"""
-    query = db.query(User).join(Tenant, User.tenant_id == Tenant.id)
+    base_query = db.query(User).join(Tenant, User.tenant_id == Tenant.id)
 
     # 搜索过滤
     if search:
-        query = query.filter(
+        base_query = base_query.filter(
             or_(
                 User.username.contains(search),
                 User.email.contains(search),
@@ -204,13 +218,17 @@ async def list_all_users(
 
     # 租户过滤
     if tenant_id:
-        query = query.filter(User.tenant_id == tenant_id)
+        base_query = base_query.filter(User.tenant_id == tenant_id)
 
     # 角色过滤
     if role:
-        query = query.filter(User.role == role)
+        base_query = base_query.filter(User.role == role)
 
-    users = query.offset(skip).limit(limit).all()
+    if is_active is not None:
+        base_query = base_query.filter(User.is_active == is_active)
+
+    total = base_query.count()
+    users = base_query.offset(skip).limit(limit).all()
 
     result = []
     for user in users:
@@ -241,7 +259,7 @@ async def list_all_users(
             )
         )
 
-    return result
+    return JSONResponse(content=[r.dict() for r in result], headers={"X-Total-Count": str(total)})
 
 
 @router.get("/knowledge-bases", response_model=List[KnowledgeBaseDetailResponse])

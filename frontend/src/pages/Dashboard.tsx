@@ -33,6 +33,8 @@ const Dashboard: React.FC = () => {
     systemStatus: 'healthy',
   });
   const [loading, setLoading] = useState(true);
+  const [totalSizeBytes, setTotalSizeBytes] = useState(0);
+  const [totalChunks, setTotalChunks] = useState(0);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -41,7 +43,10 @@ const Dashboard: React.FC = () => {
         
         // 获取知识库数量
         const kbResponse = await knowledgeBaseApi.getList();
-        const knowledgeBasesCount = kbResponse.data.length;
+        const kbList = kbResponse.data || [];
+        const knowledgeBasesCount = kbList.length;
+        const sizeSum = kbList.reduce((acc: number, kb: any) => acc + (kb.total_size_bytes || 0), 0);
+        const chunksSum = kbList.reduce((acc: number, kb: any) => acc + (kb.total_chunks || 0), 0);
         
         // 尝试获取系统统计信息
         let systemStats = {
@@ -68,6 +73,8 @@ const Dashboard: React.FC = () => {
           totalChats: systemStats.totalChats,
           systemStatus: systemStats.systemStatus,
         });
+        setTotalSizeBytes(sizeSum);
+        setTotalChunks(chunksSum);
       } catch (error) {
         console.error('Failed to fetch stats:', error);
         // 使用默认值
@@ -141,6 +148,20 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const formatBytes = (bytes: number) => {
+    if (!bytes || bytes <= 0) return '0 B';
+    const thresh = 1024;
+    if (Math.abs(bytes) < thresh) return `${bytes} B`;
+    const units = ['KB','MB','GB','TB'];
+    let u = -1;
+    let b = bytes;
+    do {
+      b /= thresh;
+      ++u;
+    } while (Math.abs(b) >= thresh && u < units.length - 1);
+    return `${b.toFixed(1)} ${units[u]}`;
+  };
+
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 3, fontWeight: 'bold' }}>
@@ -166,6 +187,36 @@ const Dashboard: React.FC = () => {
           icon={<ChatIcon />}
           color="info"
         />
+        <Card sx={{ height: '100%', minWidth: 220 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 48,
+                  height: 48,
+                  borderRadius: 2,
+                  backgroundColor: 'secondary.100',
+                  color: 'secondary.600',
+                  mr: 2,
+                }}
+              >
+                <StorageIcon />
+              </Box>
+              <Box>
+                <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
+                  {loading ? '-' : formatBytes(totalSizeBytes)}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {t('dashboard.stats.storageUsed')} ({totalChunks.toLocaleString()} chunks)
+                </Typography>
+              </Box>
+            </Box>
+            {loading && <LinearProgress />}
+          </CardContent>
+        </Card>
         <Card sx={{ height: '100%', minWidth: 200 }}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>

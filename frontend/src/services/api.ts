@@ -170,6 +170,10 @@ export const documentApi = {
     params?: { offset?: number; limit?: number }
   ) => api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks`, { params }),
 
+  // 获取文档处理状态（全局路由，无需KB）
+  getStatus: (documentId: string | number) =>
+    api.get(`/api/v1/documents/${documentId}/status`),
+
   // 批量删除文档
   batchDelete: (
     knowledgeBaseId: string,
@@ -184,6 +188,9 @@ export const systemApi = {
   
   // 系统信息
   getInfo: () => api.get('/'),
+
+  // 系统统计（需要超级管理员权限；不可用时请捕获异常）
+  getStats: () => api.get('/api/v1/admin/stats'),
 };
 
 // 团队管理相关 API

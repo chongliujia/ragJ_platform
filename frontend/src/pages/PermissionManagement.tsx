@@ -118,7 +118,8 @@ const PermissionManagement: React.FC = () => {
   const [selectedRole, setSelectedRole] = useState('user');
   const [permissions, setPermissions] = useState<PermissionsByCategory>({});
   const [rolePermissions, setRolePermissions] = useState<Permission[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // 保存时加载
+  const [permLoading, setPermLoading] = useState(true); // 权限列表加载
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [tenants, setTenants] = useState<TenantOverview[]>([]);
@@ -148,6 +149,7 @@ const PermissionManagement: React.FC = () => {
 
   const loadPermissions = async () => {
     try {
+      setPermLoading(true);
       const response = await fetch('/api/v1/admin/permissions', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
@@ -162,6 +164,8 @@ const PermissionManagement: React.FC = () => {
       setPermissions(data.permissions);
     } catch (error: any) {
       setError(error.message);
+    } finally {
+      setPermLoading(false);
     }
   };
 
@@ -342,6 +346,46 @@ const PermissionManagement: React.FC = () => {
 
       <TabPanel value={tabValue} index={0}>
 
+      {/* 概览统计卡片：角色数/权限数/权限类别数 */}
+      <Grid container spacing={3} sx={{ mb: 2 }}>
+        <Grid item xs={12} sm={4}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                角色数
+              </Typography>
+              <Typography variant="h5">
+                {roles.length}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={4}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                权限总数
+              </Typography>
+              <Typography variant="h5">
+                {Object.values(permissions).reduce((sum, arr) => sum + arr.length, 0)}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={4}>
+          <Card>
+            <CardContent>
+              <Typography color="textSecondary" gutterBottom>
+                权限类别
+              </Typography>
+              <Typography variant="h5">
+                {Object.keys(permissions).length}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
       <Grid container spacing={3}>
         {/* 权限管理 */}
         <Grid item xs={12} lg={8}>
@@ -405,6 +449,11 @@ const PermissionManagement: React.FC = () => {
             )}
 
             <Grid container spacing={2}>
+              {permLoading && (
+                <Grid item xs={12}>
+                  <Typography variant="body2" color="text.secondary">正在加载权限...</Typography>
+                </Grid>
+              )}
               {Object.entries(permissions).map(([category, categoryPermissions]) => (
                 <Grid item xs={12} md={6} key={category}>
                   <Card variant="outlined">

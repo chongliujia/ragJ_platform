@@ -42,6 +42,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { AuthManager } from '../services/authApi';
+import { systemApi } from '../services/api';
 
 interface UserListItem {
   id: number;
@@ -70,8 +71,10 @@ const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState<number>(-1);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -101,6 +104,7 @@ const UserManagement: React.FC = () => {
 
   const loadUsers = async () => {
     try {
+      setLoadingUsers(true);
       const params = new URLSearchParams({
         skip: (page * rowsPerPage).toString(),
         limit: rowsPerPage.toString(),
@@ -148,6 +152,14 @@ const UserManagement: React.FC = () => {
         return;
       }
 
+      const totalHeader = response.headers.get('x-total-count');
+      if (totalHeader) {
+        const parsed = parseInt(totalHeader, 10);
+        if (!Number.isNaN(parsed)) setTotalCount(parsed);
+      } else {
+        setTotalCount(-1);
+      }
+
       const data = await response.json();
       setUsers(data);
       setError(null);
@@ -155,12 +167,23 @@ const UserManagement: React.FC = () => {
       console.error('Load users error:', error);
       setError(error instanceof Error ? error.message : 'Failed to load users');
       setUsers([]);
+    } finally {
+      setLoadingUsers(false);
     }
   };
 
   const loadStats = async () => {
     try {
-      // First try to load users to calculate stats manually
+      // 获取系统总数
+      let totalUsers = 0;
+      try {
+        const sys = await systemApi.getStats();
+        totalUsers = sys.data?.total_users || 0;
+      } catch (e) {
+        // ignore
+      }
+
+      // 额外统计（活跃/管理员/本月新增）——基于有限列表近似
       const usersResponse = await fetch('/api/v1/admin/users?limit=1000', {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
@@ -171,56 +194,24 @@ const UserManagement: React.FC = () => {
       if (usersResponse.ok) {
         const contentType = usersResponse.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
-          console.error('Stats API returned non-JSON response');
-          setStats({
-            total_users: 0,
-            active_users: 0,
-            admin_users: 0,
-            new_users_this_month: 0,
-          });
+          setStats({ total_users: totalUsers, active_users: 0, admin_users: 0, new_users_this_month: 0 });
           return;
         }
 
         const userData: UserListItem[] = await usersResponse.json();
-        const totalUsers = userData.length;
         const activeUsers = userData.filter((user) => user.is_active).length;
-        const adminUsers = userData.filter((user) => 
-          user.role === 'super_admin' || user.role === 'tenant_admin'
-        ).length;
-        
-        // Calculate new users this month (simple approximation)
+        const adminUsers = userData.filter((user) => user.role === 'super_admin' || user.role === 'tenant_admin').length;
         const thisMonth = new Date();
         thisMonth.setDate(1);
-        const newUsersThisMonth = userData.filter((user) => {
-          const createdDate = new Date(user.created_at);
-          return createdDate >= thisMonth;
-        }).length;
+        const newUsersThisMonth = userData.filter((user) => new Date(user.created_at) >= thisMonth).length;
 
-        setStats({
-          total_users: totalUsers,
-          active_users: activeUsers,
-          admin_users: adminUsers,
-          new_users_this_month: newUsersThisMonth,
-        });
+        setStats({ total_users: totalUsers || userData.length, active_users: activeUsers, admin_users: adminUsers, new_users_this_month: newUsersThisMonth });
       } else {
-        console.error('Failed to load users for stats, status:', usersResponse.status);
-        // Set fallback stats
-        setStats({
-          total_users: 0,
-          active_users: 0,
-          admin_users: 0,
-          new_users_this_month: 0,
-        });
+        setStats({ total_users: totalUsers, active_users: 0, admin_users: 0, new_users_this_month: 0 });
       }
     } catch (error) {
       console.error('Failed to load stats:', error);
-      // Set fallback stats
-      setStats({
-        total_users: 0,
-        active_users: 0,
-        admin_users: 0,
-        new_users_this_month: 0,
-      });
+      setStats({ total_users: 0, active_users: 0, admin_users: 0, new_users_this_month: 0 });
     }
   };
 
@@ -325,7 +316,7 @@ const UserManagement: React.FC = () => {
       )}
 
       {/* 统计卡片 */}
-      {stats && (
+      {stats ? (
         <Grid container spacing={3} sx={{ mb: 3 }}>
           <Grid item xs={12} sm={6} md={3}>
             <Card>
@@ -375,6 +366,21 @@ const UserManagement: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
+        </Grid>
+      ) : (
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          {[1,2,3,4].map((i) => (
+            <Grid item xs={12} sm={6} md={3} key={i}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    &nbsp;
+                  </Typography>
+                  <Box sx={{ height: 28, bgcolor: 'action.hover', borderRadius: 1 }} />
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
         </Grid>
       )}
 
@@ -514,7 +520,18 @@ const UserManagement: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {users.map((user) => (
+            {loadingUsers && (
+              [...Array(8)].map((_, idx) => (
+                <TableRow key={`skeleton-${idx}`}>
+                  {Array.from({ length: 10 }).map((__, cidx) => (
+                    <TableCell key={cidx}>
+                      <Box sx={{ height: 18, bgcolor: 'action.hover', borderRadius: 1 }} />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            )}
+            {!loadingUsers && users.map((user) => (
               <TableRow key={user.id} hover>
                 <TableCell sx={{ fontWeight: 'medium' }}>{user.username}</TableCell>
                 <TableCell 
@@ -599,7 +616,7 @@ const UserManagement: React.FC = () => {
         <TablePagination
           rowsPerPageOptions={[5, 10, 25]}
           component="div"
-          count={-1}
+          count={(totalCount && totalCount >= 0) ? totalCount : (stats?.total_users ?? -1)}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={(e, newPage) => setPage(newPage)}

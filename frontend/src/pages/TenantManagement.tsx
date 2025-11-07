@@ -43,6 +43,7 @@ import {
   Description as DocsIcon,
 } from '@mui/icons-material';
 import { AuthManager } from '../services/authApi';
+import { systemApi } from '../services/api';
 
 interface TenantInfo {
   id: number;
@@ -60,20 +61,22 @@ interface TenantInfo {
   updated_at: string;
 }
 
-interface TenantStats {
+interface SystemStats {
   total_tenants: number;
   active_tenants: number;
   total_users: number;
-  total_storage_mb: number;
+  total_knowledge_bases: number;
+  total_documents: number;
 }
 
 const TenantManagement: React.FC = () => {
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
-  const [stats, setStats] = useState<TenantStats | null>(null);
+  const [stats, setStats] = useState<SystemStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [totalCount, setTotalCount] = useState<number>(-1);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
@@ -126,6 +129,14 @@ const TenantManagement: React.FC = () => {
         throw new Error('Failed to load tenants');
       }
 
+      const totalHeader = response.headers.get('x-total-count');
+      if (totalHeader) {
+        const parsed = parseInt(totalHeader, 10);
+        if (!Number.isNaN(parsed)) setTotalCount(parsed);
+      } else {
+        setTotalCount(-1);
+      }
+
       const data = await response.json();
       setTenants(data);
     } catch (error: any) {
@@ -137,47 +148,11 @@ const TenantManagement: React.FC = () => {
 
   const loadStats = async () => {
     try {
-      const response = await fetch('/api/v1/admin/tenant-stats', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-          console.error('Tenant stats API returned non-JSON response');
-          setStats({
-            total_tenants: 0,
-            active_tenants: 0,
-            total_users: 0,
-            total_storage_mb: 0,
-          });
-          return;
-        }
-
-        const data = await response.json();
-        setStats(data);
-      } else {
-        console.error('Failed to load tenant stats, status:', response.status);
-        // Set fallback stats
-        setStats({
-          total_tenants: 0,
-          active_tenants: 0,
-          total_users: 0,
-          total_storage_mb: 0,
-        });
-      }
+      const res = await systemApi.getStats();
+      setStats(res.data);
     } catch (error) {
-      console.error('Failed to load tenant stats:', error);
-      // Set fallback stats
-      setStats({
-        total_tenants: 0,
-        active_tenants: 0,
-        total_users: 0,
-        total_storage_mb: 0,
-      });
+      console.error('Failed to load system stats:', error);
+      setStats(null);
     }
   };
 
@@ -296,7 +271,7 @@ const TenantManagement: React.FC = () => {
       )}
 
       {/* 统计卡片 */}
-      {stats && (
+      {stats ? (
         <Grid container spacing={3} sx={{ mb: 3 }}>
           <Grid item xs={12} sm={6} md={3}>
             <Card>
@@ -338,14 +313,29 @@ const TenantManagement: React.FC = () => {
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
-                  总存储
+                  总文档
                 </Typography>
                 <Typography variant="h5" component="div">
-                  {formatStorage(stats.total_storage_mb)}
+                  {stats.total_documents}
                 </Typography>
               </CardContent>
             </Card>
           </Grid>
+        </Grid>
+      ) : (
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          {[1,2,3,4].map((i) => (
+            <Grid item xs={12} sm={6} md={3} key={i}>
+              <Card>
+                <CardContent>
+                  <Typography color="textSecondary" gutterBottom>
+                    &nbsp;
+                  </Typography>
+                  <Box sx={{ height: 28, bgcolor: 'action.hover', borderRadius: 1 }} />
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
         </Grid>
       )}
 
@@ -404,7 +394,18 @@ const TenantManagement: React.FC = () => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {tenants.map((tenant) => (
+            {loading && (
+              [...Array(5)].map((_, idx) => (
+                <TableRow key={`skeleton-${idx}`}>
+                  {Array.from({ length: 8 }).map((__, cidx) => (
+                    <TableCell key={cidx}>
+                      <Box sx={{ height: 18, bgcolor: 'action.hover', borderRadius: 1 }} />
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            )}
+            {!loading && tenants.map((tenant) => (
               <TableRow key={tenant.id}>
                 <TableCell>{tenant.name}</TableCell>
                 <TableCell>{tenant.slug}</TableCell>
@@ -479,7 +480,7 @@ const TenantManagement: React.FC = () => {
         <TablePagination
           rowsPerPageOptions={[10, 25, 50]}
           component="div"
-          count={-1} // 未知总数
+          count={(totalCount && totalCount >= 0) ? totalCount : (stats?.total_tenants ?? -1)}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={(e, newPage) => setPage(newPage)}

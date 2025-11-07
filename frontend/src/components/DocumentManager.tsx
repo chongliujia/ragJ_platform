@@ -56,6 +56,10 @@ interface Document {
   chunks_count?: number;
   error_message?: string;
   content_type?: string;
+  progress?: {
+    percentage?: number;
+    stage?: string;
+  };
 }
 
 interface DocumentManagerProps {
@@ -107,6 +111,53 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
       setError(error.response?.data?.detail || t('document.manager.fetchError'));
     } finally {
       if (!silent) setLoading(false);
+    }
+  };
+
+  // 轮询处理中的文档进度
+  const refreshProcessingProgress = async () => {
+    const processingDocs = documents.filter(
+      (d) => d.status === 'processing' || d.status === 'pending'
+    );
+    if (processingDocs.length === 0) return;
+    try {
+      const results = await Promise.allSettled(
+        processingDocs.map((d) => documentApi.getStatus(d.id))
+      );
+      const progressById: Record<string, { percentage?: number; stage?: string; status?: string; error_message?: string }>
+        = {};
+      results.forEach((res, idx) => {
+        const docId = processingDocs[idx].id;
+        if (res.status === 'fulfilled') {
+          const data = res.value?.data || {};
+          const pg = data?.progress || {};
+          progressById[docId] = {
+            percentage: typeof pg.percentage === 'number' ? pg.percentage : undefined,
+            stage: pg.stage,
+            status: data?.status,
+            error_message: data?.error_message,
+          };
+        }
+      });
+      if (Object.keys(progressById).length > 0) {
+        setDocuments((prev) =>
+          prev.map((d) =>
+            progressById[d.id]
+              ? {
+                  ...d,
+                  status: (progressById[d.id].status as any) || d.status,
+                  error_message: progressById[d.id].error_message || d.error_message,
+                  progress: {
+                    percentage: progressById[d.id].percentage,
+                    stage: progressById[d.id].stage,
+                  },
+                }
+              : d
+          )
+        );
+      }
+    } catch (e) {
+      // 忽略单次进度刷新错误
     }
   };
 
@@ -225,7 +276,9 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
     );
     if (hasProcessing && !refreshTimerRef.current) {
       refreshTimerRef.current = setInterval(() => {
-        fetchDocuments(true); // silent refresh
+        // 列表刷新 + 进度刷新
+        fetchDocuments(true);
+        refreshProcessingProgress();
       }, 2000);
     }
     if (!hasProcessing && refreshTimerRef.current) {
@@ -394,13 +447,34 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        {getStatusChip(doc.status, doc.error_message)}
-                        {doc.status === 'processing' && (
-                          <LinearProgress 
-                            size="small" 
-                            sx={{ mt: 1, width: 80 }} 
-                          />
-                        )}
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                          {getStatusChip(doc.status, doc.error_message)}
+                          {(doc.status === 'processing' || doc.status === 'pending') && (
+                            <Box>
+                              {typeof doc.progress?.percentage === 'number' ? (
+                                <>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {doc.progress?.stage ? `${doc.progress.stage} · ` : ''}{doc.progress.percentage.toFixed(0)}%
+                                  </Typography>
+                                  <LinearProgress 
+                                    variant="determinate" 
+                                    value={Math.min(100, Math.max(0, doc.progress.percentage))}
+                                    sx={{ mt: 0.5, width: 120, height: 6, borderRadius: 3 }}
+                                  />
+                                </>
+                              ) : (
+                                <>
+                                  {doc.progress?.stage && (
+                                    <Typography variant="caption" color="text.secondary">
+                                      {doc.progress.stage}
+                                    </Typography>
+                                  )}
+                                  <LinearProgress sx={{ mt: 0.5, width: 120, height: 6, borderRadius: 3 }} />
+                                </>
+                              )}
+                            </Box>
+                          )}
+                        </Box>
                       </TableCell>
                       <TableCell>
                         <Typography variant="body2">

@@ -70,7 +70,8 @@
       "knowledgeBases": "知识库总数",
       "documents": "文档总数",
       "chats": "对话次数",
-      "systemStatus": "系统状态"
+      "systemStatus": "系统状态",
+      "storageUsed": "已用存储"
     },
     "status": {
       "healthy": "运行正常",
