@@ -246,6 +246,9 @@ class ElasticsearchService:
 
 
 async def get_elasticsearch_service() -> Optional[ElasticsearchService]:
+    # If Elasticsearch is disabled by config, skip initialization entirely.
+    if not settings.ENABLE_ELASTICSEARCH:
+        return None
     try:
         return await ElasticsearchService.get_instance()
     except Exception:

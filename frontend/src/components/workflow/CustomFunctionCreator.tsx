@@ -350,7 +350,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
       label: '基本信息',
       content: (
         <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <TextField
               fullWidth
               label="函数名称"
@@ -360,7 +360,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
               helperText="使用下划线命名，如：process_data"
             />
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <FormControl fullWidth>
               <InputLabel>函数分类</InputLabel>
               <Select
@@ -377,7 +377,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12}>
+          <Grid size={12}>
             <TextField
               fullWidth
               label="函数描述"
@@ -388,7 +388,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
               placeholder="描述这个函数的功能和用途..."
             />
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <TextField
               fullWidth
               label="作者"
@@ -396,7 +396,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
               onChange={(e) => setFunctionData(prev => ({ ...prev, author: e.target.value }))}
             />
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <TextField
               fullWidth
               label="版本"
@@ -404,7 +404,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
               onChange={(e) => setFunctionData(prev => ({ ...prev, version: e.target.value }))}
             />
           </Grid>
-          <Grid item xs={12}>
+          <Grid size={12}>
             <FormControlLabel
               control={
                 <Switch
@@ -424,7 +424,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
         <Box>
           <Grid container spacing={2}>
             {/* 参数类型选择 */}
-            <Grid item xs={12}>
+            <Grid size={12}>
               <FormControl fullWidth>
                 <InputLabel>参数类型</InputLabel>
                 <Select
@@ -439,7 +439,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
             </Grid>
             
             {/* 新参数输入 */}
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <TextField
                 fullWidth
                 label="参数名称"
@@ -448,7 +448,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
                 placeholder="parameter_name"
               />
             </Grid>
-            <Grid item xs={12} md={3}>
+            <Grid size={{ xs: 12, md: 3 }}>
               <FormControl fullWidth>
                 <InputLabel>数据类型</InputLabel>
                 <Select
@@ -465,7 +465,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <TextField
                 fullWidth
                 label="参数描述"
@@ -474,7 +474,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
                 placeholder="描述这个参数的用途..."
               />
             </Grid>
-            <Grid item xs={12} md={1}>
+            <Grid size={{ xs: 12, md: 1 }}>
               <Button
                 variant="contained"
                 onClick={addParameter}
@@ -486,7 +486,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
             </Grid>
             
             {/* 参数列表 */}
-            <Grid item xs={12}>
+            <Grid size={12}>
               <Typography variant="h6" gutterBottom>
                 输入参数 ({functionData.inputs.length})
               </Typography>
@@ -613,7 +613,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
               </Typography>
               
               <Grid container spacing={2}>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography variant="subtitle2" color="primary">
                     输入参数 ({functionData.inputs.length})
                   </Typography>
@@ -623,7 +623,7 @@ const CustomFunctionCreator: React.FC<CustomFunctionCreatorProps> = ({
                     </Typography>
                   ))}
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={6}>
                   <Typography variant="subtitle2" color="secondary">
                     输出参数 ({functionData.outputs.length})
                   </Typography>

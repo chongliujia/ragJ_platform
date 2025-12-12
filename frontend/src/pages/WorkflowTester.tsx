@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert, Stack, LinearProgress } from '@mui/material';
+import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert, Stack, LinearProgress, useMediaQuery } from '@mui/material';
 import { ArrowBack as BackIcon, Send as SendIcon, PlayArrow as PlayIcon, Stop as StopIcon } from '@mui/icons-material';
 import { workflowApi } from '../services/api';
+import { useTranslation } from 'react-i18next';
+import { alpha, useTheme } from '@mui/material/styles';
 
 interface ChatMsg {
   role: 'user' | 'assistant' | 'system';
@@ -13,6 +15,9 @@ interface ChatMsg {
 const WorkflowTester: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  const theme = useTheme();
+  const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState('');
   const [running, setRunning] = useState(false);
@@ -49,7 +54,7 @@ const WorkflowTester: React.FC = () => {
           setProgress((prev) => prev.concat(evt));
         },
         (err) => {
-          setError(err?.message || '执行失败');
+          setError(err?.message || t('workflowTester.errors.executeFailed'));
           setRunning(false);
         },
         (result) => {
@@ -66,7 +71,7 @@ const WorkflowTester: React.FC = () => {
       await promise;
       cancelRef.current = null;
     } catch (e: any) {
-      setError(e?.message || '执行异常');
+      setError(e?.message || t('workflowTester.errors.executeError'));
       setRunning(false);
     }
   };
@@ -79,63 +84,121 @@ const WorkflowTester: React.FC = () => {
     await runOnce(text);
   };
 
+  const ProgressPanel = (
+    <Paper variant="outlined" sx={{ p: 1.5 }}>
+      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+        {t('workflowTester.progress.title')}
+      </Typography>
+      {progress.length === 0 && (
+        <Typography variant="caption" color="text.secondary">
+          {t('workflowTester.progress.empty')}
+        </Typography>
+      )}
+      {progress.map((p, i) => (
+        <Box key={i} sx={{ mb: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            {p?.node_id || p?.step || t('workflowTester.progress.step', { index: i + 1 })}
+          </Typography>
+          <LinearProgress
+            variant="determinate"
+            value={p?.percent || 0}
+            sx={{ height: 6, borderRadius: 3 }}
+          />
+        </Box>
+      ))}
+    </Paper>
+  );
+
   return (
-    <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Paper elevation={0} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <Paper elevation={0} sx={{ p: 2, display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
         <IconButton onClick={() => navigate(-1)}>
           <BackIcon />
         </IconButton>
-        <Typography variant="h6" sx={{ flex: 1 }}>工作流测试（聊天）</Typography>
+        <Typography variant="h6" sx={{ flex: 1 }}>
+          {t('workflowTester.title')}
+        </Typography>
         {id && <Chip label={`ID: ${id}`} size="small" />}
         <Stack direction="row" spacing={1}>
           <Button size="small" variant="outlined" startIcon={<StopIcon />} disabled={!running} onClick={() => { const c = cancelRef.current; if (c) { try { c(); } catch {} } }}>
-            停止
+            {t('workflowTester.actions.stop')}
           </Button>
         </Stack>
       </Paper>
       <Divider />
 
-      <Box ref={listRef} sx={{ flex: 1, overflow: 'auto', p: 2, background: (t) => t.palette.mode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa', display: 'grid', gridTemplateColumns: '1fr 340px', gap: 2 }}>
-        {messages.length === 0 && (
-          <Alert severity="info">输入内容并发送，系统将使用当前工作流执行并返回结果。</Alert>
-        )}
-        <Box>
+      <Box sx={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: isMdUp ? '1fr 340px' : '1fr', gap: 2 }}>
+        <Box
+          ref={listRef}
+          sx={{
+            overflow: 'auto',
+            p: 2,
+            background: (t) => t.palette.mode === 'dark' ? 'rgba(255,255,255,0.03)' : '#fafafa',
+            minWidth: 0,
+          }}
+        >
+          {messages.length === 0 && (
+            <Alert severity="info">
+              {t('workflowTester.emptyHint')}
+            </Alert>
+          )}
           {messages.map((m, idx) => (
             <Box key={idx} sx={{ display: 'flex', mb: 2, justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
-              <Box sx={{ maxWidth: '70%', px: 1.5, py: 1, borderRadius: 2, background: m.role === 'user' ? '#1976d2' : 'rgba(0,0,0,0.1)', color: m.role === 'user' ? '#fff' : 'inherit' }}>
+              <Box
+                sx={{
+                  maxWidth: '75%',
+                  px: 1.5,
+                  py: 1,
+                  borderRadius: 2,
+                  background: m.role === 'user'
+                    ? theme.palette.primary.main
+                    : alpha(theme.palette.background.paper, 0.6),
+                  color: m.role === 'user' ? theme.palette.primary.contrastText : 'inherit',
+                  border: m.role === 'user'
+                    ? `1px solid ${alpha(theme.palette.primary.light, 0.6)}`
+                    : `1px solid ${alpha(theme.palette.divider, 0.6)}`,
+                }}
+              >
                 <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{m.content}</Typography>
               </Box>
             </Box>
           ))}
           {running && (
-            <Box sx={{ color: 'text.secondary' }}>执行中...</Box>
+            <Box sx={{ color: 'text.secondary' }}>{t('workflowTester.running')}</Box>
           )}
           {error && (
             <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>
           )}
+          {!isMdUp && (
+            <Box sx={{ mt: 2 }}>
+              {ProgressPanel}
+            </Box>
+          )}
         </Box>
-        {/* 侧边进度面板 */}
-        <Box sx={{ position: 'sticky', top: 0, height: 'fit-content' }}>
-          <Paper variant="outlined" sx={{ p: 1.5 }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>执行进度</Typography>
-            {progress.length === 0 && (
-              <Typography variant="caption" color="text.secondary">暂无进度</Typography>
-            )}
-            {progress.map((p, i) => (
-              <Box key={i} sx={{ mb: 1 }}>
-                <Typography variant="caption" color="text.secondary">{p?.node_id || p?.step || `步骤 ${i+1}`}</Typography>
-                <LinearProgress variant="determinate" value={p?.percent || 0} sx={{ height: 6, borderRadius: 3 }} />
-              </Box>
-            ))}
-          </Paper>
-        </Box>
+        {isMdUp && (
+          <Box sx={{ p: 2, pr: 0, overflow: 'auto' }}>
+            {ProgressPanel}
+          </Box>
+        )}
       </Box>
 
       <Divider />
-      <Box sx={{ p: 2, display: 'flex', gap: 1 }}>
-        <TextField fullWidth placeholder="输入问题..." value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); } }} />
-        <Button variant="contained" startIcon={running ? <PlayIcon /> : <SendIcon />} onClick={onSend} disabled={running}>
-          发送
+      <Box sx={{ p: 2, display: 'flex', gap: 1, flexShrink: 0 }}>
+        <TextField
+          fullWidth
+          placeholder={t('workflowTester.inputPlaceholder')}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); } }}
+          disabled={running}
+        />
+        <Button
+          variant="contained"
+          startIcon={running ? <PlayIcon /> : <SendIcon />}
+          onClick={onSend}
+          disabled={running}
+        >
+          {t('workflowTester.actions.send')}
         </Button>
       </Box>
     </Box>

@@ -194,7 +194,7 @@ export const TeamManagement: React.FC = () => {
         // 有团队的情况
         <Grid container spacing={3}>
           {/* 团队信息卡片 */}
-          <Grid item xs={12} md={8}>
+          <Grid size={{ xs: 12, md: 8 }}>
             <Card>
               <CardContent>
                 <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
@@ -265,7 +265,7 @@ export const TeamManagement: React.FC = () => {
           </Grid>
 
           {/* 团队成员列表 */}
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <Card>
               <CardContent>
                 <Typography variant="h6" gutterBottom>

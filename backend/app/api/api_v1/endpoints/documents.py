@@ -9,12 +9,17 @@ from fastapi import APIRouter, UploadFile, File, BackgroundTasks, status, Form, 
 import os
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sa_func
 
 from app.services.document_service import document_service
 from app.services.chunking_service import ChunkingStrategy, chunking_service
 from app.db.database import get_db
 from app.db.models.document import Document, DocumentStatus as DocumentStatusEnum
-from app.core.dependencies import get_current_user, get_tenant_id
+from app.db.models.knowledge_base import KnowledgeBase as KBModel
+from app.db.models.tenant import Tenant
+from app.db.models.user import User
+from app.db.models.permission import PermissionType
+from app.core.dependencies import get_current_user, get_tenant_id, require_permission
 from app.core.config import settings
 
 router = APIRouter()
@@ -42,7 +47,7 @@ class DocumentInfo(BaseModel):
     title: Optional[str]
     content_preview: Optional[str]
     total_chunks: int
-    created_at: str
+    created_at: Optional[str]
     processed_at: Optional[str]
 
 
@@ -76,6 +81,12 @@ class BatchDeleteResult(BaseModel):
 @router.post(
     "/", response_model=DocumentUploadResponse, status_code=status.HTTP_202_ACCEPTED
 )
+@router.post(
+    "",
+    response_model=DocumentUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    include_in_schema=False,
+)
 async def upload_document(
     kb_name: str,
     background_tasks: BackgroundTasks,
@@ -83,7 +94,8 @@ async def upload_document(
     chunking_strategy: Optional[str] = Form(ChunkingStrategy.RECURSIVE.value),
     chunking_params: Optional[str] = Form(None),
     tenant_id: int = Depends(get_tenant_id),
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_UPLOAD.value)),
+    db: Session = Depends(get_db),
 ):
     """
     Upload a document to a specified knowledge base for processing.
@@ -99,6 +111,22 @@ async def upload_document(
     logger.info(
         f"Received file '{file.filename}' for knowledge base '{kb_name}' with strategy '{chunking_strategy}'."
     )
+
+    # Validate KB exists for tenant (no auto-create)
+    kb_row = (
+        db.query(KBModel)
+        .filter(
+            KBModel.name == kb_name,
+            KBModel.tenant_id == tenant_id,
+            KBModel.is_active == True,
+        )
+        .first()
+    )
+    if kb_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Knowledge base '{kb_name}' not found",
+        )
 
     # Sanitize filename to prevent path traversal
     original_filename = file.filename or "uploaded_file"
@@ -122,6 +150,34 @@ async def upload_document(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail=f"File too large. Max size: {settings.MAX_FILE_SIZE} bytes",
         )
+
+    # Enforce tenant quotas
+    tenant_row = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if tenant_row is not None:
+        max_docs = int(tenant_row.max_documents or 0)
+        if max_docs > 0:
+            current_docs = (
+                db.query(Document).filter(Document.tenant_id == tenant_id).count()
+            )
+            if current_docs >= max_docs:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Document quota exceeded for this tenant",
+                )
+
+        quota_bytes = int(tenant_row.storage_quota_mb or 0) * 1024 * 1024
+        if quota_bytes > 0:
+            used_bytes = (
+                db.query(sa_func.coalesce(sa_func.sum(Document.file_size), 0))
+                .filter(Document.tenant_id == tenant_id)
+                .scalar()
+                or 0
+            )
+            if used_bytes + len(content) > quota_bytes:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Storage quota exceeded for this tenant",
+                )
 
     # Parse chunking strategy
     try:
@@ -201,6 +257,7 @@ async def get_chunking_strategies():
 
 
 @router.get("/", response_model=List[DocumentInfo])
+@router.get("", response_model=List[DocumentInfo], include_in_schema=False)
 async def list_knowledge_base_documents(
     kb_name: str,
     db: Session = Depends(get_db),

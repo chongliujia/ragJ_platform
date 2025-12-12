@@ -216,7 +216,7 @@ const QuickAccessPanel: React.FC<QuickAccessPanelProps> = ({
         <Box sx={{ p: 0.3 }}>
           <Grid container spacing={0.5}>
             {quickAccessNodes.map((node) => (
-              <Grid item xs={4} key={node.type}>
+              <Grid size={4} key={node.type}>
                 <Tooltip title={node.description} arrow placement="top">
                   <Paper
                     draggable

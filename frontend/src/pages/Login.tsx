@@ -217,23 +217,21 @@ const Login: React.FC = () => {
         }}
       />
 
-        <Grid 
-          container 
-          sx={{ 
-            minHeight: '100vh',
-            width: '100%'
-          }}
-        >
-          {/* 左侧品牌区域 - 桌面端显示 */}
-          <Grid 
-            item 
-            xs={false}
-            md={6}
-            sx={{ 
-              display: { xs: 'none', md: 'flex' },
-              alignItems: 'center',
-              justifyContent: 'center',
-              p: 4
+	        <Grid 
+	          container 
+	          sx={{ 
+	            minHeight: '100vh',
+	            width: '100%'
+	          }}
+	        >
+	          {/* 左侧品牌区域 - 桌面端显示 */}
+	          <Grid 
+	            size={{ md: 6 }}
+	            sx={{ 
+	              display: { xs: 'none', md: 'flex' },
+	              alignItems: 'center',
+	              justifyContent: 'center',
+	              p: 4
             }}
           >
             <Box
@@ -362,15 +360,14 @@ const Login: React.FC = () => {
             </Box>
           </Grid>
 
-          {/* 手机端简化的品牌区域 */}
-          <Grid 
-            item 
-            xs={12} 
-            sx={{ 
-              display: { xs: 'block', md: 'none' }, // 只在小屏幕显示
-              textAlign: 'center',
-              mb: 2,
-              order: 1
+	          {/* 手机端简化的品牌区域 */}
+	          <Grid 
+	            size={12} 
+	            sx={{ 
+	              display: { xs: 'block', md: 'none' }, // 只在小屏幕显示
+	              textAlign: 'center',
+	              mb: 2,
+	              order: 1
             }}
           >
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2 }}>
@@ -400,16 +397,14 @@ const Login: React.FC = () => {
             </Box>
           </Grid>
 
-          {/* 登录表单 */}
-          <Grid 
-            item 
-            xs={12} 
-            md={6}
-            sx={{ 
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              p: { xs: 2, md: 4 }
+	          {/* 登录表单 */}
+	          <Grid 
+	            size={{ xs: 12, md: 6 }}
+	            sx={{ 
+	              display: 'flex',
+	              alignItems: 'center',
+	              justifyContent: 'center',
+	              p: { xs: 2, md: 4 }
             }}
           >
             <Paper
@@ -789,11 +784,11 @@ const Login: React.FC = () => {
                   )}
 
                   <Box component="form" onSubmit={handleRegister}>
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          autoComplete="given-name"
-                          name="fullName"
+	                    <Grid container spacing={2}>
+	                      <Grid size={{ xs: 12, sm: 6 }}>
+	                        <TextField
+	                          autoComplete="given-name"
+	                          name="fullName"
                           fullWidth
                           id="fullName"
                           value={registerForm.full_name}
@@ -821,11 +816,11 @@ const Login: React.FC = () => {
                             },
                           }}
                         />
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <TextField
-                          required
-                          fullWidth
+	                      </Grid>
+	                      <Grid size={{ xs: 12, sm: 6 }}>
+	                        <TextField
+	                          required
+	                          fullWidth
                           id="username"
                           name="username"
                           autoComplete="username"
@@ -854,11 +849,11 @@ const Login: React.FC = () => {
                             },
                           }}
                         />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          required
-                          fullWidth
+	                      </Grid>
+	                      <Grid size={12}>
+	                        <TextField
+	                          required
+	                          fullWidth
                           id="email"
                           name="email"
                           autoComplete="email"
@@ -888,11 +883,11 @@ const Login: React.FC = () => {
                             },
                           }}
                         />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          required
-                          fullWidth
+	                      </Grid>
+	                      <Grid size={12}>
+	                        <TextField
+	                          required
+	                          fullWidth
                           name="password"
                           type={showPassword ? 'text' : 'password'}
                           id="password"
@@ -933,11 +928,11 @@ const Login: React.FC = () => {
                             },
                           }}
                         />
-                      </Grid>
-                      <Grid item xs={12}>
-                        <TextField
-                          required
-                          fullWidth
+	                      </Grid>
+	                      <Grid size={12}>
+	                        <TextField
+	                          required
+	                          fullWidth
                           name="confirmPassword"
                           type={showConfirmPassword ? 'text' : 'password'}
                           id="confirmPassword"
@@ -1038,11 +1033,11 @@ const Login: React.FC = () => {
             </Paper>
           </Grid>
           {/* 底部版权信息 */}
-          <Grid item xs={12} sx={{ 
-            position: 'absolute',
-            bottom: 20,
-            left: 0,
-            right: 0,
+	          <Grid size={12} sx={{ 
+	            position: 'absolute',
+	            bottom: 20,
+	            left: 0,
+	            right: 0,
             textAlign: 'center',
             display: { xs: 'block', md: 'none' }
           }}>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Typography,
@@ -41,7 +41,17 @@ const Settings: React.FC = () => {
   const { t } = useTranslation();
   const [tabValue, setTabValue] = useState(0);
   const authManager = AuthManager.getInstance();
-  const currentUser = authManager.getCurrentUser();
+  const [currentUser, setCurrentUser] = useState(authManager.getCurrentUser());
+
+  useEffect(() => {
+    if (authManager.isAuthenticated()) {
+      authManager.loadUserInfo()
+        .then((u) => setCurrentUser(u))
+        .catch(() => setCurrentUser(null));
+    } else {
+      setCurrentUser(null);
+    }
+  }, []);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -73,7 +83,7 @@ const Settings: React.FC = () => {
             aria-controls="settings-tabpanel-0" 
           />
           {/* 只有管理员及以上才能看到系统设置 */}
-          {currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin') && (
+          {currentUser && (currentUser.role === 'tenant_admin' || currentUser.role === 'super_admin') && (
             <Tab 
               icon={<SystemIcon />} 
               iconPosition="start"
@@ -89,7 +99,7 @@ const Settings: React.FC = () => {
         <UserSettings />
       </TabPanel>
       
-      {currentUser && (currentUser.role === 'admin' || currentUser.role === 'super_admin') && (
+      {currentUser && (currentUser.role === 'tenant_admin' || currentUser.role === 'super_admin') && (
         <TabPanel value={tabValue} index={1}>
           <ModelConfigManager />
         </TabPanel>

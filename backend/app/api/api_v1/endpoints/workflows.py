@@ -715,7 +715,7 @@ async def test_retrieve(
     use_rerank = bool(payload.get("rerank", True))
 
     # 1) 生成查询向量
-    emb = await llm_service.get_embeddings([query])
+    emb = await llm_service.get_embeddings(texts=[query], tenant_id=tenant_id)
     if not emb.get("success") or not emb.get("embeddings"):
         raise HTTPException(status_code=500, detail=f"Failed to embed query: {emb.get('error')}")
     query_vec = emb["embeddings"][0]
@@ -764,6 +764,7 @@ async def test_retrieve(
             documents=docs,
             provider=RerankingProvider.BGE,
             top_k=top_k,
+            tenant_id=tenant_id,
         )
         out = reranked
     else:

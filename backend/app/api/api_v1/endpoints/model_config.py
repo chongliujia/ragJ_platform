@@ -4,7 +4,7 @@
 
 import logging
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
 
 from app.services.model_config_service import (
@@ -14,6 +14,8 @@ from app.services.model_config_service import (
     ModelType,
     ProviderType,
 )
+from app.core.dependencies import get_tenant_id, require_tenant_admin
+from app.db.models.user import User
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -62,10 +64,10 @@ class UpdateProviderRequest(BaseModel):
 
 
 @router.get("/providers", response_model=List[ProviderConfigResponse])
-async def get_providers():
+async def get_providers(tenant_id: int = Depends(get_tenant_id)):
     """获取所有提供商配置"""
     try:
-        providers = model_config_service.get_providers()
+        providers = model_config_service.get_providers(tenant_id=tenant_id)
 
         response = []
         for provider_type, provider_config in providers.items():
@@ -92,14 +94,16 @@ async def get_providers():
 
 
 @router.get("/providers/{provider}/models/{model_type}")
-async def get_provider_models(provider: str, model_type: str):
+async def get_provider_models(
+    provider: str, model_type: str, tenant_id: int = Depends(get_tenant_id)
+):
     """获取指定提供商的模型列表"""
     try:
         provider_enum = ProviderType(provider)
         model_type_enum = ModelType(model_type)
 
         models = model_config_service.get_available_models(
-            provider_enum, model_type_enum
+            provider_enum, model_type_enum, tenant_id=tenant_id
         )
         return {"provider": provider, "model_type": model_type, "models": models}
 
@@ -113,13 +117,13 @@ async def get_provider_models(provider: str, model_type: str):
 
 
 @router.get("/active-models", response_model=List[ModelConfigResponse])
-async def get_active_models():
+async def get_active_models(tenant_id: int = Depends(get_tenant_id)):
     """获取当前活跃的模型配置"""
     try:
         active_models = []
 
         for model_type in ModelType:
-            config = model_config_service.get_active_model(model_type)
+            config = model_config_service.get_active_model(model_type, tenant_id=tenant_id)
             if config:
                 active_models.append(
                     ModelConfigResponse(
@@ -151,12 +155,16 @@ class ModelConfigDetailsResponse(BaseModel):
     max_tokens: Optional[int] = None
 
 
-@router.get("/active-models/{model_type}/details", response_model=ModelConfigDetailsResponse)
-async def get_model_config_details(model_type: str):
+@router.get(
+    "/active-models/{model_type}/details", response_model=ModelConfigDetailsResponse
+)
+async def get_model_config_details(
+    model_type: str, tenant_id: int = Depends(get_tenant_id)
+):
     """获取指定模型的配置详情"""
     try:
         model_type_enum = ModelType(model_type)
-        config = model_config_service.get_active_model(model_type_enum)
+        config = model_config_service.get_active_model(model_type_enum, tenant_id=tenant_id)
         
         if not config:
             raise HTTPException(
@@ -192,7 +200,12 @@ async def get_model_config_details(model_type: str):
 
 
 @router.put("/active-models/{model_type}")
-async def update_active_model(model_type: str, request: UpdateModelConfigRequest):
+async def update_active_model(
+    model_type: str,
+    request: UpdateModelConfigRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
+):
     """更新指定类型的活跃模型"""
     try:
         model_type_enum = ModelType(model_type)
@@ -211,7 +224,9 @@ async def update_active_model(model_type: str, request: UpdateModelConfigRequest
             )
 
         # 获取现有配置
-        existing_config = model_config_service.get_active_model(model_type_enum)
+        existing_config = model_config_service.get_active_model(
+            model_type_enum, tenant_id=tenant_id
+        )
         
         # 如果API密钥为空或者是掩码，则保持原有API密钥
         api_key = request.api_key
@@ -219,10 +234,15 @@ async def update_active_model(model_type: str, request: UpdateModelConfigRequest
             if existing_config and existing_config.api_key:
                 api_key = existing_config.api_key
             else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="API key is required for new configuration"
-                )
+                # Allow using provider-level key if configured
+                p_cfg = model_config_service.get_provider(provider_enum, tenant_id=tenant_id)
+                if p_cfg and p_cfg.api_key:
+                    api_key = None
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="API key is required for new configuration",
+                    )
 
         # 创建新的模型配置
         config = ModelConfig(
@@ -236,7 +256,7 @@ async def update_active_model(model_type: str, request: UpdateModelConfigRequest
         )
 
         # 设置为活跃模型
-        model_config_service.set_active_model(model_type_enum, config)
+        model_config_service.set_active_model(model_type_enum, config, tenant_id=tenant_id)
 
         return {"message": f"Active {model_type} model updated successfully"}
 
@@ -250,11 +270,18 @@ async def update_active_model(model_type: str, request: UpdateModelConfigRequest
 
 
 @router.put("/providers/{provider}")
-async def update_provider(provider: str, request: UpdateProviderRequest):
+async def update_provider(
+    provider: str,
+    request: UpdateProviderRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
+):
     """更新提供商配置"""
     try:
         provider_enum = ProviderType(provider)
-        provider_config = model_config_service.get_provider(provider_enum)
+        provider_config = model_config_service.get_provider(provider_enum, tenant_id=tenant_id)
+        if not provider_config:
+            provider_config = model_config_service.get_provider(provider_enum)
 
         if not provider_config:
             raise HTTPException(
@@ -262,12 +289,13 @@ async def update_provider(provider: str, request: UpdateProviderRequest):
             )
 
         # 更新配置
+        provider_config = provider_config.copy(deep=True)
         provider_config.api_key = request.api_key
         if request.api_base:
             provider_config.api_base = request.api_base
         provider_config.enabled = request.enabled
 
-        model_config_service.update_provider(provider_enum, provider_config)
+        model_config_service.update_provider(provider_enum, provider_config, tenant_id=tenant_id)
 
         return {"message": f"Provider '{provider}' updated successfully"}
 
@@ -279,10 +307,10 @@ async def update_provider(provider: str, request: UpdateProviderRequest):
 
 
 @router.get("/summary")
-async def get_config_summary():
+async def get_config_summary(tenant_id: int = Depends(get_tenant_id)):
     """获取配置摘要"""
     try:
-        summary = model_config_service.get_config_summary()
+        summary = model_config_service.get_config_summary(tenant_id=tenant_id)
         return summary
 
     except Exception as e:
@@ -291,11 +319,15 @@ async def get_config_summary():
 
 
 @router.post("/test/{provider}")
-async def test_provider_connection(provider: str):
+async def test_provider_connection(
+    provider: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
+):
     """测试提供商连接"""
     try:
         provider_enum = ProviderType(provider)
-        provider_config = model_config_service.get_provider(provider_enum)
+        provider_config = model_config_service.get_provider(provider_enum, tenant_id=tenant_id)
 
         if not provider_config or not provider_config.api_key:
             raise HTTPException(
@@ -320,48 +352,25 @@ async def test_provider_connection(provider: str):
 
 @router.post("/providers/{provider}/models/{model_type}")
 async def add_custom_model(
-    provider: str, 
-    model_type: str, 
-    model_name: str
+    provider: str,
+    model_type: str,
+    model_name: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
 ):
     """为提供商添加自定义模型"""
     try:
         provider_enum = ProviderType(provider)
         model_type_enum = ModelType(model_type)
-        
-        provider_config = model_config_service.get_provider(provider_enum)
-        if not provider_config:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Provider '{provider}' not found"
-            )
-        
-        # 获取现有模型列表
-        existing_models = provider_config.models.get(model_type_enum, [])
-        
-        # 如果模型不存在，添加到列表
-        if model_name not in existing_models:
-            existing_models.append(model_name)
-            provider_config.models[model_type_enum] = existing_models
-            
-            # 更新提供商配置
-            model_config_service.update_provider(provider_enum, provider_config)
-            
-            logger.info(f"Added custom model '{model_name}' to provider '{provider}' for type '{model_type}'")
-            
-            return {
-                "message": f"Custom model '{model_name}' added successfully",
-                "provider": provider,
-                "model_type": model_type,
-                "model_name": model_name
-            }
-        else:
-            return {
-                "message": f"Model '{model_name}' already exists",
-                "provider": provider,
-                "model_type": model_type,
-                "model_name": model_name
-            }
+        ok = model_config_service.add_custom_model(
+            provider_enum, model_type_enum, model_name, tenant_id=tenant_id
+        )
+        return {
+            "message": f"Custom model '{model_name}' added successfully" if ok else "No-op",
+            "provider": provider,
+            "model_type": model_type,
+            "model_name": model_name,
+        }
             
     except ValueError as e:
         raise HTTPException(
@@ -425,13 +434,15 @@ async def get_model_presets():
 
 
 @router.get("/available-chat-models")
-async def get_available_chat_models():
+async def get_available_chat_models(tenant_id: int = Depends(get_tenant_id)):
     """获取可用的聊天模型列表（只返回已配置API密钥的模型）"""
     try:
         available_models = []
         
         # 直接检查当前活跃的聊天模型配置
-        chat_config = model_config_service.get_active_model(ModelType.CHAT)
+        chat_config = model_config_service.get_active_model(
+            ModelType.CHAT, tenant_id=tenant_id
+        )
         logger.info(f"DEBUG: Current chat config: {chat_config}")
         
         if chat_config and chat_config.api_key:
@@ -439,12 +450,12 @@ async def get_available_chat_models():
             available_models.append({
                 "model_name": chat_config.model_name,
                 "provider": chat_config.provider.value,
-                "provider_display_name": model_config_service.get_provider(chat_config.provider).display_name if model_config_service.get_provider(chat_config.provider) else chat_config.provider.value,
-                "model_display_name": f"{model_config_service.get_provider(chat_config.provider).display_name if model_config_service.get_provider(chat_config.provider) else chat_config.provider.value} - {chat_config.model_name}"
+                "provider_display_name": model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id).display_name if model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id) else chat_config.provider.value,
+                "model_display_name": f"{model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id).display_name if model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id) else chat_config.provider.value} - {chat_config.model_name}"
             })
             
             # 获取同一提供商的其他可用模型
-            provider_config = model_config_service.get_provider(chat_config.provider)
+            provider_config = model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id)
             if provider_config:
                 chat_models = provider_config.models.get(ModelType.CHAT, [])
                 logger.info(f"DEBUG: Provider {chat_config.provider.value} has models: {chat_models}")
@@ -460,7 +471,7 @@ async def get_available_chat_models():
                         })
         else:
             # 如果没有活跃配置，检查所有有API密钥的提供商
-            providers = model_config_service.get_providers()
+            providers = model_config_service.get_providers(tenant_id=tenant_id)
             logger.info(f"DEBUG: No active chat config, checking {len(providers)} providers")
             
             for provider_type, provider_config in providers.items():
@@ -484,4 +495,3 @@ async def get_available_chat_models():
     except Exception as e:
         logger.error(f"Failed to get available chat models: {e}")
         raise HTTPException(status_code=500, detail="Failed to get available chat models")
-

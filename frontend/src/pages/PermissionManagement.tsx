@@ -348,7 +348,7 @@ const PermissionManagement: React.FC = () => {
 
       {/* 概览统计卡片：角色数/权限数/权限类别数 */}
       <Grid container spacing={3} sx={{ mb: 2 }}>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{ xs: 12, sm: 4 }}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
@@ -360,7 +360,7 @@ const PermissionManagement: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{ xs: 12, sm: 4 }}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
@@ -372,7 +372,7 @@ const PermissionManagement: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{ xs: 12, sm: 4 }}>
           <Card>
             <CardContent>
               <Typography color="textSecondary" gutterBottom>
@@ -388,7 +388,7 @@ const PermissionManagement: React.FC = () => {
 
       <Grid container spacing={3}>
         {/* 权限管理 */}
-        <Grid item xs={12} lg={8}>
+        <Grid size={{ xs: 12, lg: 8 }}>
           <Paper sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
               <Typography variant="h6">角色权限管理</Typography>
@@ -450,12 +450,12 @@ const PermissionManagement: React.FC = () => {
 
             <Grid container spacing={2}>
               {permLoading && (
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <Typography variant="body2" color="text.secondary">正在加载权限...</Typography>
                 </Grid>
               )}
               {Object.entries(permissions).map(([category, categoryPermissions]) => (
-                <Grid item xs={12} md={6} key={category}>
+                <Grid size={{ xs: 12, md: 6 }} key={category}>
                   <Card variant="outlined">
                     <CardHeader
                       avatar={categoryIcons[category] || <SettingsIcon />}
@@ -504,7 +504,7 @@ const PermissionManagement: React.FC = () => {
         </Grid>
 
         {/* 租户管理 */}
-        <Grid item xs={12} lg={4}>
+        <Grid size={{ xs: 12, lg: 4 }}>
           <Paper sx={{ p: 3 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
               <Typography variant="h6">租户管理</Typography>
@@ -560,7 +560,7 @@ const PermissionManagement: React.FC = () => {
               系统概览
             </Typography>
             <Grid container spacing={2}>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <Card variant="outlined">
                   <CardContent sx={{ textAlign: 'center', py: 2 }}>
                     <Typography variant="h5" color="primary">
@@ -572,7 +572,7 @@ const PermissionManagement: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <Card variant="outlined">
                   <CardContent sx={{ textAlign: 'center', py: 2 }}>
                     <Typography variant="h5" color="success.main">
@@ -584,7 +584,7 @@ const PermissionManagement: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <Card variant="outlined">
                   <CardContent sx={{ textAlign: 'center', py: 2 }}>
                     <Typography variant="h5" color="info.main">
@@ -596,7 +596,7 @@ const PermissionManagement: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={6}>
                 <Card variant="outlined">
                   <CardContent sx={{ textAlign: 'center', py: 2 }}>
                     <Typography variant="h5" color="warning.main">
@@ -618,7 +618,7 @@ const PermissionManagement: React.FC = () => {
         <DialogTitle>创建新租户</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <TextField
                 fullWidth
                 label="租户名称"
@@ -627,7 +627,7 @@ const PermissionManagement: React.FC = () => {
                 required
               />
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <TextField
                 fullWidth
                 label="租户标识符"
@@ -637,7 +637,7 @@ const PermissionManagement: React.FC = () => {
                 helperText="用于URL，只能包含字母、数字和连字符"
               />
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <TextField
                 fullWidth
                 label="描述"
@@ -647,7 +647,7 @@ const PermissionManagement: React.FC = () => {
                 rows={2}
               />
             </Grid>
-            <Grid item xs={6}>
+            <Grid size={6}>
               <TextField
                 fullWidth
                 label="最大用户数"
@@ -656,7 +656,7 @@ const PermissionManagement: React.FC = () => {
                 onChange={(e) => setNewTenant({ ...newTenant, max_users: parseInt(e.target.value) })}
               />
             </Grid>
-            <Grid item xs={6}>
+            <Grid size={6}>
               <TextField
                 fullWidth
                 label="最大知识库数"
@@ -665,7 +665,7 @@ const PermissionManagement: React.FC = () => {
                 onChange={(e) => setNewTenant({ ...newTenant, max_knowledge_bases: parseInt(e.target.value) })}
               />
             </Grid>
-            <Grid item xs={6}>
+            <Grid size={6}>
               <TextField
                 fullWidth
                 label="最大文档数"
@@ -674,7 +674,7 @@ const PermissionManagement: React.FC = () => {
                 onChange={(e) => setNewTenant({ ...newTenant, max_documents: parseInt(e.target.value) })}
               />
             </Grid>
-            <Grid item xs={6}>
+            <Grid size={6}>
               <TextField
                 fullWidth
                 label="存储配额(MB)"

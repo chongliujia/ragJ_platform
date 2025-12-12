@@ -14,17 +14,18 @@ import {
   Tooltip,
   IconButton,
   Alert,
-  Checkbox,
+  FormControl,
+  InputLabel,
+  Select,
+  Slider,
+  InputAdornment,
   MenuItem,
 } from '@mui/material';
 import { ContentCopy as CopyIcon, RestartAlt as ResetIcon, Info as InfoIcon, Code as CodeIcon } from '@mui/icons-material';
 import type { Node, Edge } from 'reactflow';
 import { modelConfigApi } from '../../services/modelConfigApi';
 import { knowledgeBaseApi } from '../../services/api';
-import { FormControl, InputLabel, Select, Slider, MenuItem as MItem } from '@mui/material';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import InputAdornment from '@mui/material/InputAdornment';
-import Icon from '@mui/material/Icon';
 
 interface Props {
   open: boolean;
@@ -448,7 +449,7 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
     };
 
     return (
-      <Grid item xs={12} key={key}>
+      <Grid size={12} key={key}>
         {hasInbound && (
           <FormControlLabel
             control={<Switch checked={useEdge} onChange={(e) => onToggleUseEdge(e.target.checked)} />}
@@ -530,16 +531,16 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
             )}
 
             {/* 类型特定配置（非函数签名参数，例如 LLM 的模型） */}
-            {type === 'llm' && (
-              <Box sx={{ mt: 2 }}>
-                <Typography variant="subtitle2" sx={{ mb: 2 }}>基础配置</Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <TextField
-                      select
-                      fullWidth
-                      label="模型"
-                      value={localConfig.model || ''}
+	            {type === 'llm' && (
+	              <Box sx={{ mt: 2 }}>
+	                <Typography variant="subtitle2" sx={{ mb: 2 }}>基础配置</Typography>
+	                <Grid container spacing={2}>
+	                  <Grid size={12}>
+	                    <TextField
+	                      select
+	                      fullWidth
+	                      label="模型"
+	                      value={localConfig.model || ''}
                       onChange={(e) => setLocalConfig((c: any) => ({ ...c, model: e.target.value }))}
                     >
                       {llmModelOptions.map((modelName) => {
@@ -552,13 +553,13 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
                         );
                       })}
                     </TextField>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <TextField
-                      multiline
-                      rows={3}
-                      fullWidth
-                      label="系统提示词（可选）"
+	                  </Grid>
+	                  <Grid size={12}>
+	                    <TextField
+	                      multiline
+	                      rows={3}
+	                      fullWidth
+	                      label="系统提示词（可选）"
                       placeholder="例如：你是一个专业的AI助手，请简洁准确地回答用户问题。"
                       value={localConfig.system_prompt || ''}
                       onChange={(e) => setLocalConfig((c: any) => ({ ...c, system_prompt: e.target.value }))}
@@ -573,24 +574,24 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
                     control={<Switch checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} />} 
                     label="高级参数" 
                   />
-                  {advanced && (
-                    <Grid container spacing={2} sx={{ mt: 1 }}>
-                      <Grid item xs={6}>
-                        <TextField
-                          type="number"
-                          fullWidth
-                          label="创造性 (0-2)"
+	                  {advanced && (
+	                    <Grid container spacing={2} sx={{ mt: 1 }}>
+	                      <Grid size={6}>
+	                        <TextField
+	                          type="number"
+	                          fullWidth
+	                          label="创造性 (0-2)"
                           value={localConfig.temperature ?? 0.7}
                           inputProps={{ step: 0.1, min: 0, max: 2 }}
                           onChange={(e) => setLocalConfig((c: any) => ({ ...c, temperature: Number(e.target.value) }))}
                           helperText="0=精确, 1=均衡, 2=创造"
                         />
-                      </Grid>
-                      <Grid item xs={6}>
-                        <TextField
-                          type="number"
-                          fullWidth
-                          label="最大长度"
+	                      </Grid>
+	                      <Grid size={6}>
+	                        <TextField
+	                          type="number"
+	                          fullWidth
+	                          label="最大长度"
                           value={localConfig.max_tokens ?? 1000}
                           inputProps={{ min: 100, max: 4000, step: 100 }}
                           onChange={(e) => setLocalConfig((c: any) => ({ ...c, max_tokens: Number(e.target.value) }))}
@@ -619,11 +620,11 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
                     <MenuItem value="hybrid">混合</MenuItem>
                   </TextField>
                 )}
-                <FormControl fullWidth sx={{ mb: 2 }}>
-                  <InputLabel>知识库</InputLabel>
-                  <Select
-                    value={localConfig.knowledge_base || ''}
-                    label="知识库"
+	                <FormControl fullWidth sx={{ mb: 2 }}>
+	                  <InputLabel>知识库</InputLabel>
+	                  <Select
+	                    value={localConfig.knowledge_base || ''}
+	                    label="知识库"
                     onChange={(e) => setLocalConfig((c: any) => ({ ...c, knowledge_base: e.target.value }))}
                     endAdornment={
                       <InputAdornment position="end">
@@ -632,12 +633,12 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
                         </IconButton>
                       </InputAdornment>
                     }
-                  >
-                    {kbOptions.map((kb) => (
-                      <MItem key={kb.id} value={kb.id}>{kb.name}</MItem>
-                    ))}
-                  </Select>
-                </FormControl>
+	                  >
+	                    {kbOptions.map((kb) => (
+	                      <MenuItem key={kb.id} value={kb.id}>{kb.name}</MenuItem>
+	                    ))}
+	                  </Select>
+	                </FormControl>
                 <Box sx={{ mb: 2 }}>
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>检索数量 (top_k): {localConfig.top_k || 5}</Typography>
                   <Slider min={1} max={50} step={1} value={localConfig.top_k || 5} onChange={(_, v) => setLocalConfig((c: any) => ({ ...c, top_k: Number(v) }))} />
@@ -651,23 +652,23 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
             )}
 
             {/* 预览检索 */}
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>测试检索</Typography>
-            <Grid container spacing={1}>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="测试查询"
-                  value={(localConfig as any)._test_query || ''}
+	            <Divider sx={{ my: 2 }} />
+	            <Typography variant="subtitle2" sx={{ mb: 1 }}>测试检索</Typography>
+	            <Grid container spacing={1}>
+	              <Grid size={12}>
+	                <TextField
+	                  fullWidth
+	                  label="测试查询"
+	                  value={(localConfig as any)._test_query || ''}
                   onChange={(e) => setLocalConfig((c: any) => ({ ...c, _test_query: e.target.value }))}
                   placeholder="输入测试查询，如：公司报销制度"
                 />
-              </Grid>
-              <Grid item xs={12}>
-                <Button
-                  variant="outlined"
-                  onClick={async () => {
-                    try {
+	              </Grid>
+	              <Grid size={12}>
+	                <Button
+	                  variant="outlined"
+	                  onClick={async () => {
+	                    try {
                       setError(null);
                       const q = (localConfig as any)._test_query || '';
                       if (!q) { setError('请输入测试查询'); return; }
@@ -700,12 +701,12 @@ const NodeConfigPanel: React.FC<Props> = ({ open, node, onClose, onSave, nodes =
                 >
                   运行测试
                 </Button>
-              </Grid>
-              <Grid item xs={12}>
-                {Array.isArray((localConfig as any)._test_results) && (localConfig as any)._test_results.length > 0 ? (
-                  <Box sx={{ maxHeight: 200, overflow: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1 }}>
-                    {(localConfig as any)._test_results.map((r: any, idx: number) => (
-                      <Box key={idx} sx={{ mb: 1 }}>
+	              </Grid>
+	              <Grid size={12}>
+	                {Array.isArray((localConfig as any)._test_results) && (localConfig as any)._test_results.length > 0 ? (
+	                  <Box sx={{ maxHeight: 200, overflow: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, p: 1 }}>
+	                    {(localConfig as any)._test_results.map((r: any, idx: number) => (
+	                      <Box key={idx} sx={{ mb: 1 }}>
                         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
                           [{r.source || 'mixed'}] score: {typeof r.score === 'number' ? r.score.toFixed(3) : r.score}
                         </Typography>

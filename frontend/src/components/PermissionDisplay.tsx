@@ -115,10 +115,10 @@ const PermissionDisplay: React.FC = () => {
           用户信息
         </Typography>
         <Grid container spacing={2} alignItems="center">
-          <Grid item>
+          <Grid>
             {getRoleIcon(permissions.user.role)}
           </Grid>
-          <Grid item>
+          <Grid>
             <Typography variant="h6">
               {permissions.user.full_name || permissions.user.username}
             </Typography>
@@ -126,7 +126,7 @@ const PermissionDisplay: React.FC = () => {
               {permissions.user.email}
             </Typography>
           </Grid>
-          <Grid item>
+          <Grid>
             <Chip
               label={getRoleLabel(permissions.user.role)}
               color={getRoleColor(permissions.user.role) as any}
@@ -144,7 +144,7 @@ const PermissionDisplay: React.FC = () => {
         </Typography>
         <Grid container spacing={1}>
           {roleCapabilities.map((capability) => (
-            <Grid item xs={12} sm={6} md={4} key={capability.label}>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={capability.label}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 {capability.value ? (
                   <CheckIcon color="success" fontSize="small" />

@@ -36,6 +36,10 @@
     "chat": "智能对话",
     "teams": "团队管理",
     "workflows": "智能工作流",
+    "workflow": {
+      "manage": "工作流管理",
+      "templates": "模板库"
+    },
     "settings": "系统设置",
     "title": "RAG Platform",
     "subtitle": "智能检索增强平台",
@@ -94,7 +98,13 @@
       "title": "创建新知识库",
       "nameLabel": "知识库名称",
       "descriptionLabel": "描述（可选）",
-      "nameRequired": "请输入知识库名称"
+      "nameRequired": "请输入知识库名称",
+      "nameEmptyError": "名称不能为空",
+      "nameInvalidError": "仅允许字母、数字和下划线",
+      "nameTooLongError": "名称过长（≤255）",
+      "nameHint": "仅允许字母、数字、下划线；空格和连字符会自动转换为下划线。",
+      "normalizedName": "规范化后名称",
+      "autoFix": "自动修复"
     },
          "empty": {
        "title": "还没有创建任何知识库",
@@ -125,6 +135,8 @@
   "chat": {
     "title": "智能对话",
     "selectKnowledgeBase": "选择知识库",
+    "selectModel": "选择聊天模型",
+    "defaultModel": "租户默认模型",
     "inputPlaceholder": "输入您的问题...",
     "thinking": "正在思考...",
     "welcome": "您好！我是 RAG Platform 的智能助手。您可以选择知识库进行基于文档的问答，或者直接进行普通对话。",
@@ -135,8 +147,16 @@
   },
   "documents": {
     "title": "文档管理",
+    "selectKnowledgeBase": "选择知识库",
     "comingSoon": "文档管理功能开发中",
-    "description": "此功能将支持文档上传、处理和管理"
+    "description": "此功能将支持文档上传、处理和管理",
+    "empty": {
+      "noKnowledgeBases": "暂无知识库",
+      "createFirst": "请先创建知识库后再上传和管理文档。"
+    },
+    "actions": {
+      "goCreateKb": "去创建知识库"
+    }
   },
   "document": {
     "upload": {
@@ -170,6 +190,14 @@
       },
       "strategies": {
         "fetchError": "获取分片策略失败"
+      },
+      "help": {
+        "title": "上传说明",
+        "supportedTypes": "当前支持文件类型：{{types}}",
+        "maxSize": "单文件大小上限：{{size}} MB",
+        "chunkingTitle": "分片策略说明",
+        "chunkingDesc": "上传后系统会按所选分片策略将文档切分为片段用于检索与问答。",
+        "tip": "如果不确定怎么选，可保持默认；后续可在知识库中重新处理文档。"
       }
     },
     "manager": {
@@ -383,6 +411,25 @@
       "email": "邮箱",
       "role": "角色",
       "accountStatus": "账户状态"
+    }
+  },
+  "workflowTester": {
+    "title": "工作流测试（聊天）",
+    "emptyHint": "输入内容并发送，系统将使用当前工作流执行并返回结果。",
+    "running": "执行中...",
+    "inputPlaceholder": "输入问题...",
+    "actions": {
+      "send": "发送",
+      "stop": "停止"
+    },
+    "progress": {
+      "title": "执行进度",
+      "empty": "暂无进度",
+      "step": "步骤 {{index}}"
+    },
+    "errors": {
+      "executeFailed": "执行失败",
+      "executeError": "执行异常"
     }
   }
 } 

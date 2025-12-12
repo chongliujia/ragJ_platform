@@ -4,6 +4,9 @@
 
 import structlog
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy import text
+import asyncio
 
 from app.db.database import engine, get_db
 from app.db.models import Base
@@ -20,12 +23,74 @@ from app.core.security import get_password_hash
 logger = structlog.get_logger(__name__)
 
 
+async def _wait_for_db_ready(max_wait_seconds: int = 60):
+    """在 MySQL 下等待数据库可用，避免容器启动竞态。"""
+    if not engine.dialect.name.startswith("mysql"):
+        return
+
+    delay = 0.5
+    deadline = max_wait_seconds
+    attempts = 0
+    while deadline > 0:
+        attempts += 1
+        try:
+            conn = engine.connect()
+            try:
+                conn.execute(text("SELECT 1"))
+                logger.info("MySQL ready", attempts=attempts)
+                return
+            finally:
+                conn.close()
+        except OperationalError as e:
+            msg = str(e).lower()
+            if (
+                "can't connect to mysql server" in msg
+                or "connection refused" in msg
+                or "server has gone away" in msg
+            ):
+                logger.warning(
+                    "MySQL not ready yet, retrying",
+                    attempts=attempts,
+                    next_delay=delay,
+                )
+                await asyncio.sleep(delay)
+                deadline -= delay
+                delay = min(delay * 2, 5.0)
+                continue
+            raise
+
+    raise RuntimeError("MySQL not ready after waiting")
+
+
 async def init_db():
     """
     初始化数据库连接和表结构
     """
+    lock_conn = None
+    acquired_lock = False
     try:
         logger.info("开始初始化数据库...")
+
+        # 等待 MySQL 容器就绪
+        await _wait_for_db_ready()
+
+        # 在 MySQL 下使用 advisory lock 串行化初始化，避免 reload 并发导致锁等待
+        if engine.dialect.name.startswith("mysql"):
+            try:
+                lock_conn = engine.connect()
+                res = lock_conn.execute(
+                    text("SELECT GET_LOCK(:name, :timeout)"),
+                    {"name": "ragj_platform_init_db", "timeout": 30},
+                ).scalar()
+                acquired_lock = res == 1
+                if acquired_lock:
+                    logger.info("已获取 init_db 锁")
+                else:
+                    logger.warning("未获取 init_db 锁，可能有另一个实例正在初始化")
+                    # 若锁超时未获取，则跳过本次初始化，避免并发写导致锁等待
+                    return
+            except Exception as e:
+                logger.warning(f"获取 init_db 锁失败，继续无锁初始化: {e}")
 
         # 创建所有表
         Base.metadata.create_all(bind=engine)
@@ -34,15 +99,31 @@ async def init_db():
         # 迁移/补齐历史表字段（向后兼容旧 SQLite 文件）
         try:
             _safe_migrate_documents_table()
+            _safe_migrate_users_table()
+            _safe_migrate_tenants_table()
         except Exception as mig_err:
             logger.warning(f"文档表迁移检查失败: {mig_err}")
 
         # 初始化基础数据
         db = next(get_db())
         try:
-            await init_permissions(db)
-            await init_default_tenant(db)
-            await init_super_admin(db)
+            try:
+                await init_permissions(db)
+            except (OperationalError, SQLAlchemyError) as e:
+                db.rollback()
+                logger.warning(f"初始化权限失败，已跳过: {e}")
+
+            try:
+                await init_default_tenant(db)
+            except (OperationalError, SQLAlchemyError) as e:
+                db.rollback()
+                logger.warning(f"初始化默认租户失败，已跳过: {e}")
+
+            try:
+                await init_super_admin(db)
+            except (OperationalError, SQLAlchemyError) as e:
+                db.rollback()
+                logger.warning(f"初始化超级管理员失败，已跳过: {e}")
             logger.info("基础数据初始化完成")
         finally:
             db.close()
@@ -52,6 +133,18 @@ async def init_db():
     except Exception as e:
         logger.error("数据库初始化失败", error=str(e))
         raise
+    finally:
+        if lock_conn is not None:
+            if acquired_lock:
+                try:
+                    lock_conn.execute(
+                        text("SELECT RELEASE_LOCK(:name)"),
+                        {"name": "ragj_platform_init_db"},
+                    )
+                    logger.info("已释放 init_db 锁")
+                except Exception:
+                    pass
+            lock_conn.close()
 
 
 def _safe_migrate_documents_table():
@@ -95,6 +188,97 @@ def _safe_migrate_documents_table():
     finally:
         conn.close()
 
+
+def _safe_migrate_users_table():
+    """补齐 users 表的新增字段，兼容旧版本 SQLite 文件。"""
+    from sqlalchemy import text
+    conn = engine.connect()
+    try:
+        if engine.dialect.name != "sqlite":
+            return
+
+        cols = conn.execute(text("PRAGMA table_info('users')")).fetchall()
+        if not cols:
+            return
+        existing = {c[1] for c in cols}
+
+        to_add = []
+        if "full_name" not in existing:
+            to_add.append("ALTER TABLE users ADD COLUMN full_name TEXT")
+        if "role" not in existing:
+            to_add.append("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+        if "is_active" not in existing:
+            to_add.append("ALTER TABLE users ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1")
+        if "is_verified" not in existing:
+            to_add.append("ALTER TABLE users ADD COLUMN is_verified BOOLEAN NOT NULL DEFAULT 0")
+        if "tenant_id" not in existing:
+            to_add.append("ALTER TABLE users ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1")
+        if "last_login_at" not in existing:
+            to_add.append("ALTER TABLE users ADD COLUMN last_login_at DATETIME")
+        if "created_at" not in existing:
+            to_add.append("ALTER TABLE users ADD COLUMN created_at DATETIME")
+        if "updated_at" not in existing:
+            to_add.append("ALTER TABLE users ADD COLUMN updated_at DATETIME")
+
+        for sql in to_add:
+            logger.info(f"迁移 users 表：执行 {sql}")
+            conn.execute(text(sql))
+        if to_add:
+            logger.info("users 表字段补齐完成")
+    finally:
+        conn.close()
+
+
+def _safe_migrate_tenants_table():
+    """补齐 tenants 表的新增字段，兼容旧版本 SQLite 文件。"""
+    from sqlalchemy import text
+    conn = engine.connect()
+    try:
+        if engine.dialect.name != "sqlite":
+            return
+
+        cols = conn.execute(text("PRAGMA table_info('tenants')")).fetchall()
+        if not cols:
+            return
+        existing = {c[1] for c in cols}
+
+        to_add = []
+        if "description" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN description TEXT")
+        if "is_active" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1")
+        if "max_users" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN max_users INTEGER DEFAULT 10")
+        if "max_knowledge_bases" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN max_knowledge_bases INTEGER DEFAULT 5")
+        if "max_documents" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN max_documents INTEGER DEFAULT 1000")
+        if "storage_quota_mb" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN storage_quota_mb INTEGER DEFAULT 1024")
+        if "settings" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN settings TEXT DEFAULT '{}' ")
+        if "team_type" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN team_type TEXT NOT NULL DEFAULT 'personal'")
+        if "max_members" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN max_members INTEGER DEFAULT 100")
+        if "created_by" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN created_by INTEGER")
+        if "team_avatar" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN team_avatar TEXT")
+        if "is_private" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 1")
+        if "created_at" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN created_at DATETIME")
+        if "updated_at" not in existing:
+            to_add.append("ALTER TABLE tenants ADD COLUMN updated_at DATETIME")
+
+        for sql in to_add:
+            logger.info(f"迁移 tenants 表：执行 {sql}")
+            conn.execute(text(sql))
+        if to_add:
+            logger.info("tenants 表字段补齐完成")
+    finally:
+        conn.close()
 
 async def init_permissions(db: Session):
     """初始化权限数据"""
@@ -152,94 +336,153 @@ async def init_role_permissions(db: Session):
     """初始化角色权限关联"""
     logger.info("初始化角色权限关联...")
 
-    # 清除现有的角色权限关联
-    db.query(RolePermission).delete()
-
     # 获取所有权限
     permissions = db.query(Permission).all()
     permission_map = {p.name: p.id for p in permissions}
 
-    # 为每个角色分配权限
+    # 计算期望的 (role, permission_id) 集合
+    desired_pairs: set[tuple[str, int]] = set()
     for role, permission_names in DEFAULT_ROLE_PERMISSIONS.items():
         for permission_name in permission_names:
-            if permission_name in permission_map:
-                role_permission = RolePermission(
-                    role=role, permission_id=permission_map[permission_name]
-                )
-                db.add(role_permission)
+            pid = permission_map.get(permission_name)
+            if pid:
+                desired_pairs.add((role, pid))
 
-    db.commit()
-    logger.info("角色权限关联初始化完成")
+    existing_pairs = {
+        (rp.role, rp.permission_id) for rp in db.query(RolePermission).all()
+    }
+    to_add = desired_pairs - existing_pairs
+    to_remove = existing_pairs - desired_pairs
+
+    # 删除过期关联（可选、尽量不阻塞启动）
+    if to_remove:
+        try:
+            for role, pid in to_remove:
+                db.query(RolePermission).filter(
+                    RolePermission.role == role,
+                    RolePermission.permission_id == pid,
+                ).delete(synchronize_session=False)
+            db.commit()
+        except (OperationalError, SQLAlchemyError) as e:
+            db.rollback()
+            logger.warning(f"删除过期角色权限关联失败，已跳过: {e}")
+
+    # 为每个角色分配权限
+    try:
+        for role, pid in to_add:
+            db.add(RolePermission(role=role, permission_id=pid))
+        db.commit()
+        logger.info(
+            "角色权限关联初始化完成",
+            added=len(to_add),
+            removed=len(to_remove) if to_remove else 0,
+        )
+    except (OperationalError, SQLAlchemyError) as e:
+        db.rollback()
+        logger.warning(f"角色权限关联写入失败（可能并发启动），已跳过: {e}")
 
 
 async def init_default_tenant(db: Session):
     """初始化默认租户"""
     logger.info("初始化默认租户...")
 
-    # 检查是否已存在默认租户
-    existing_tenant = db.query(Tenant).filter(Tenant.slug == "default").first()
-    if existing_tenant:
-        logger.info("默认租户已存在")
-        return
+    for attempt in range(5):
+        existing_tenant = db.query(Tenant).filter(Tenant.slug == "default").first()
+        if existing_tenant:
+            logger.info("默认租户已存在")
+            return
 
-    # 创建默认租户
-    default_tenant = Tenant(
-        name="默认租户",
-        slug="default",
-        description="系统默认租户",
-        max_users=100,
-        max_knowledge_bases=50,
-        max_documents=10000,
-        storage_quota_mb=10240,  # 10GB
-    )
+        default_tenant = Tenant(
+            name="默认租户",
+            slug="default",
+            description="系统默认租户",
+            max_users=100,
+            max_knowledge_bases=50,
+            max_documents=10000,
+            storage_quota_mb=10240,  # 10GB
+        )
 
-    db.add(default_tenant)
-    db.commit()
-    logger.info("默认租户创建完成")
+        try:
+            db.add(default_tenant)
+            db.commit()
+            logger.info("默认租户创建完成")
+            return
+        except OperationalError as e:
+            db.rollback()
+            msg = str(e).lower()
+            if ("lock wait timeout" in msg or "deadlock" in msg) and attempt < 4:
+                await asyncio.sleep(0.5 * (2**attempt))
+                continue
+            logger.warning(f"默认租户创建失败，已跳过: {e}")
+            return
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.warning(f"默认租户创建失败，已跳过: {e}")
+            return
 
 
 async def init_super_admin(db: Session):
     """初始化超级管理员账户"""
     logger.info("初始化超级管理员账户...")
 
-    # 检查是否已存在超级管理员
-    existing_admin = db.query(User).filter(User.username == "admin").first()
-    if existing_admin:
-        logger.info("超级管理员账户已存在")
+    for attempt in range(5):
+        existing_admin = db.query(User).filter(User.username == "admin").first()
+        if existing_admin:
+            logger.info("超级管理员账户已存在")
+            return
+
+        default_tenant = db.query(Tenant).filter(Tenant.slug == "default").first()
+        if not default_tenant:
+            logger.warning("默认租户不存在，跳过超级管理员创建")
+            return
+
+        admin_user = User(
+            username="admin",
+            email="admin@example.com",
+            hashed_password=get_password_hash("admin123"),
+            full_name="超级管理员",
+            role=UserRole.SUPER_ADMIN.value,
+            is_active=True,
+            is_verified=True,
+            tenant_id=default_tenant.id,
+        )
+
+        try:
+            db.add(admin_user)
+            db.commit()
+            db.refresh(admin_user)
+            break
+        except OperationalError as e:
+            db.rollback()
+            msg = str(e).lower()
+            if ("lock wait timeout" in msg or "deadlock" in msg) and attempt < 4:
+                await asyncio.sleep(0.5 * (2**attempt))
+                continue
+            logger.warning(f"超级管理员创建失败，已跳过: {e}")
+            return
+        except SQLAlchemyError as e:
+            db.rollback()
+            logger.warning(f"超级管理员创建失败，已跳过: {e}")
+            return
+
+    if not admin_user or not getattr(admin_user, "id", None):
         return
 
-    # 获取默认租户
-    default_tenant = db.query(Tenant).filter(Tenant.slug == "default").first()
-    if not default_tenant:
-        raise Exception("默认租户不存在，无法创建超级管理员")
-
-    # 创建超级管理员
-    admin_user = User(
-        username="admin",
-        email="admin@example.com",
-        hashed_password=get_password_hash("admin123"),
-        full_name="超级管理员",
-        role=UserRole.SUPER_ADMIN.value,
-        is_active=True,
-        is_verified=True,
-        tenant_id=default_tenant.id,
-    )
-
-    db.add(admin_user)
-    db.commit()
-    db.refresh(admin_user)
-
-    # 创建默认配置
-    admin_config = UserConfig(
-        user_id=admin_user.id,
-        preferred_chat_model="deepseek-chat",
-        preferred_embedding_model="text-embedding-v2",
-        preferred_rerank_model="gte-rerank",
-        theme="light",
-        language="zh",
-    )
-
-    db.add(admin_config)
-    db.commit()
+    # 创建默认配置（幂等）
+    existing_cfg = db.query(UserConfig).filter(UserConfig.user_id == admin_user.id).first()
+    if existing_cfg is None:
+        admin_config = UserConfig(
+            user_id=admin_user.id,
+            preferred_chat_model="deepseek-chat",
+            preferred_embedding_model="text-embedding-v2",
+            preferred_rerank_model="gte-rerank",
+            theme="light",
+            language="zh",
+        )
+        try:
+            db.add(admin_config)
+            db.commit()
+        except SQLAlchemyError:
+            db.rollback()
 
     logger.info("超级管理员账户创建完成 - 用户名: admin, 密码: admin123")

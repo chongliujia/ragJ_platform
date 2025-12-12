@@ -46,13 +46,14 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const status = error?.response?.status;
-    if (status === 401 || status === 403) {
-      // 清除无效token并引导登录
+    if (status === 401) {
+      // 401 表示未认证/令牌无效：清除 token 并引导登录
       try { localStorage.removeItem('auth_token'); } catch {}
       if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
         window.location.href = '/login';
       }
     }
+    // 403 表示已认证但权限不足，不应清除 token；由页面侧自行提示/处理
     console.error('API Error:', error);
     return Promise.reject(error);
   }
@@ -146,7 +147,7 @@ export const chatApi = {
 export const documentApi = {
   // 获取文档列表
   getList: (knowledgeBaseId: string) => 
-    api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`),
+    api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/`),
   
   // 上传文档（使用嵌套路由，避免额外参数解析不一致）
   upload: (knowledgeBaseId: string, formData: FormData, signal?: AbortSignal) => 

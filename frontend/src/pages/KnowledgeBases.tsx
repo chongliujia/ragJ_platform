@@ -73,9 +73,9 @@ const KnowledgeBases: React.FC = () => {
   };
 
   const validateKbName = (name: string) => {
-    if (!name) return '名称不能为空';
-    if (!/^[A-Za-z0-9_]+$/.test(name)) return '仅允许字母、数字和下划线';
-    if (name.length > 255) return '名称过长（≤255）';
+    if (!name) return t('knowledgeBase.createDialog.nameEmptyError');
+    if (!/^[A-Za-z0-9_]+$/.test(name)) return t('knowledgeBase.createDialog.nameInvalidError');
+    if (name.length > 255) return t('knowledgeBase.createDialog.nameTooLongError');
     return null;
   };
 
@@ -353,15 +353,15 @@ const KnowledgeBases: React.FC = () => {
               setNameError(err);
             }}
             error={!!nameError}
-            helperText={nameError ? nameError : '仅允许字母、数字、下划线。会自动将空格和连字符转换为下划线。'}
+            helperText={nameError ? nameError : t('knowledgeBase.createDialog.nameHint')}
             sx={{ mb: 2 }}
           />
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="caption" color="text.secondary">
-              规范化后名称：{normalizeKbName(newKbName) || '-'}
+              {t('knowledgeBase.createDialog.normalizedName')}: {normalizeKbName(newKbName) || '-'}
             </Typography>
             <Button size="small" onClick={() => setNewKbName(normalizeKbName(newKbName))}>
-              自动修复
+              {t('knowledgeBase.createDialog.autoFix')}
             </Button>
           </Box>
           <TextField

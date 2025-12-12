@@ -1013,7 +1013,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
               </Box>
               
               <Grid container spacing={3}>
-                <Grid item xs={12} md={4}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Typography variant="h6" sx={{ mb: 2, color: '#00d4ff' }}>
                     适用场景
                   </Typography>
@@ -1034,7 +1034,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                   </List>
                 </Grid>
                 
-                <Grid item xs={12} md={4}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Typography variant="h6" sx={{ mb: 2, color: '#4caf50' }}>
                     所需资源
                   </Typography>
@@ -1055,7 +1055,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                   </List>
                 </Grid>
                 
-                <Grid item xs={12} md={4}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Typography variant="h6" sx={{ mb: 2, color: '#ff9800' }}>
                     工作流节点
                   </Typography>

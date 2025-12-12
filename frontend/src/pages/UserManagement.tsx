@@ -318,7 +318,7 @@ const UserManagement: React.FC = () => {
       {/* 统计卡片 */}
       {stats ? (
         <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -330,7 +330,7 @@ const UserManagement: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -342,7 +342,7 @@ const UserManagement: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -354,7 +354,7 @@ const UserManagement: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -370,7 +370,7 @@ const UserManagement: React.FC = () => {
       ) : (
         <Grid container spacing={3} sx={{ mb: 3 }}>
           {[1,2,3,4].map((i) => (
-            <Grid item xs={12} sm={6} md={3} key={i}>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }} key={i}>
               <Card>
                 <CardContent>
                   <Typography color="textSecondary" gutterBottom>
@@ -387,7 +387,7 @@ const UserManagement: React.FC = () => {
       {/* 搜索和过滤 */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={4}>
+          <Grid size={{ xs: 12, md: 4 }}>
             <TextField
               fullWidth
               label={t('userManagement.search.placeholder')}
@@ -396,7 +396,7 @@ const UserManagement: React.FC = () => {
               placeholder={t('userManagement.search.hint')}
             />
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <FormControl fullWidth>
               <InputLabel>{t('userManagement.filters.role')}</InputLabel>
               <Select
@@ -411,7 +411,7 @@ const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <FormControl fullWidth>
               <InputLabel>{t('userManagement.filters.status')}</InputLabel>
               <Select
@@ -425,7 +425,7 @@ const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={2}>
+          <Grid size={{ xs: 12, md: 2 }}>
             <Button
               fullWidth
               variant="contained"
@@ -641,7 +641,7 @@ const UserManagement: React.FC = () => {
         <DialogTitle>{t('userManagement.dialog.editUser')}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <TextField
                 fullWidth
                 label={t('userManagement.dialog.fullName')}
@@ -649,7 +649,7 @@ const UserManagement: React.FC = () => {
                 onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })}
               />
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <TextField
                 fullWidth
                 label={t('userManagement.dialog.email')}
@@ -657,7 +657,7 @@ const UserManagement: React.FC = () => {
                 onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
               />
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <FormControl fullWidth>
                 <InputLabel>{t('userManagement.dialog.role')}</InputLabel>
                 <Select
@@ -676,7 +676,7 @@ const UserManagement: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <FormControlLabel
                 control={
                   <Switch

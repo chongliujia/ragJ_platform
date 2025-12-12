@@ -83,8 +83,8 @@ class TestLangGraphChatService:
     
     @pytest.mark.asyncio
     @patch('app.services.milvus_service.milvus_service.search')
-    @patch('app.services.elasticsearch_service.elasticsearch_service.search')
-    async def test_retrieve_documents_success(self, mock_es_search, mock_milvus_search, sample_state):
+    @patch('app.services.langgraph_chat_service.get_elasticsearch_service')
+    async def test_retrieve_documents_success(self, mock_get_es_service, mock_milvus_search, sample_state):
         """Test successful document retrieval"""
         # Setup mock responses
         mock_milvus_search.return_value = [
@@ -96,14 +96,16 @@ class TestLangGraphChatService:
             }
         ]
         
-        mock_es_search.return_value = [
+        mock_es = AsyncMock()
+        mock_es.search = AsyncMock(return_value=[
             {
                 "text": "RAG结合了检索和生成",
                 "score": 0.9,
                 "document_name": "rag_guide.pdf",
                 "knowledge_base": "test1"
             }
-        ]
+        ])
+        mock_get_es_service.return_value = mock_es
         
         # Set up state with embedding
         sample_state["query_vector"] = [0.1, 0.2, 0.3, 0.4]
@@ -230,8 +232,8 @@ class TestLangGraphChatService:
         
         assert "什么是RAG？" in prompt
         assert "RAG是检索增强生成技术" in prompt
-        assert "上下文信息" in prompt
-        assert "用户问题" in prompt
+        assert "信息：" in prompt
+        assert "问题：" in prompt
     
     @pytest.mark.asyncio
     @patch('app.services.langgraph_chat_service.langgraph_chat_service.graph')

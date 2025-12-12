@@ -21,34 +21,26 @@ import {
 } from '@mui/material';
 import {
   SmartToy as BotIcon,
-  Dashboard as DashboardIcon,
-  Storage as StorageIcon,
-  Description as DocumentIcon,
-  Chat as ChatIcon,
   Settings as SettingsIcon,
-  Group as GroupIcon,
-  BugReport as TestIcon,
   AccountTree as WorkflowIcon,
   AccountCircle as AccountIcon,
   Logout as LogoutIcon,
   ExpandMore as ExpandIcon,
-  People as UsersIcon,
-  Business as BusinessIcon,
-  Security as PermissionsIcon,
   AdminPanelSettings as AdminIcon,
-  LibraryBooks as TemplateIcon,
-  List as ListIcon,
 } from '@mui/icons-material';
 import LanguageSwitcher from './LanguageSwitcher';
 import { TeamSelector } from './TeamSelector';
 import { AuthManager } from '../services/authApi';
 import { usePermissions } from '../hooks/usePermissions';
 import type { UserInfo } from '../types/auth';
+import { mainNavItems, workflowNavItems, adminNavItems } from '../config/navConfig';
+import { alpha, useTheme } from '@mui/material/styles';
 
 const TopBar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const theme = useTheme();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
   const [workflowMenuAnchor, setWorkflowMenuAnchor] = useState<null | HTMLElement>(null);
@@ -64,25 +56,9 @@ const TopBar: React.FC = () => {
     setUser(currentUser);
   }, []);
 
-  const menuItems = [
-    { text: t('nav.dashboard'), icon: <DashboardIcon />, path: '/' },
-    { text: t('nav.knowledgeBases'), icon: <StorageIcon />, path: '/knowledge-bases' },
-    { text: t('nav.documents'), icon: <DocumentIcon />, path: '/documents' },
-    { text: t('nav.chat'), icon: <ChatIcon />, path: '/chat' },
-    { text: t('nav.teams'), icon: <GroupIcon />, path: '/teams' },
-    { text: t('nav.connectionTest'), icon: <TestIcon />, path: '/test' },
-  ];
-
-  const workflowMenuItems = [
-    { text: '工作流管理', icon: <ListIcon />, path: '/workflows' },
-    { text: '模板库', icon: <TemplateIcon />, path: '/workflows/templates' },
-  ];
-
-  const adminMenuItems = [
-    { text: t('nav.userManagement'), icon: <UsersIcon />, path: '/users', role: 'tenant_admin' },
-    { text: t('nav.tenantManagement'), icon: <BusinessIcon />, path: '/tenants', role: 'super_admin' },
-    { text: t('nav.permissionManagement'), icon: <PermissionsIcon />, path: '/permissions', role: 'super_admin' },
-  ];
+  const menuItems = mainNavItems.filter(i => i.showInTopBar && (!i.requiredRole || permissions.hasRole(i.requiredRole)));
+  const workflowMenuItems = workflowNavItems.filter(i => i.showInTopBar && (!i.requiredRole || permissions.hasRole(i.requiredRole)));
+  const adminMenuItems = adminNavItems.filter(i => i.showInTopBar);
 
   const handleLogout = () => {
     authManager.logout();
@@ -91,14 +67,12 @@ const TopBar: React.FC = () => {
 
   const isActive = (path: string) => location.pathname === path;
 
-  const getVisibleAdminItems = () => {
-    return adminMenuItems.filter(item => {
-      if (!item.role) return true;
-      return permissions.hasRole(item.role);
-    });
-  };
+  const visibleAdminItems = adminMenuItems.filter(item => !item.requiredRole || permissions.hasRole(item.requiredRole));
+  const shouldShowAdminMenu = visibleAdminItems.length > 0;
 
-  const shouldShowAdminMenu = getVisibleAdminItems().length > 0;
+  const activeBg = alpha(theme.palette.primary.main, 0.1);
+  const activeBorder = alpha(theme.palette.primary.main, 0.3);
+  const hoverBg = alpha(theme.palette.primary.main, 0.1);
 
   const NavButton: React.FC<{ 
     text: string; 
@@ -110,9 +84,9 @@ const TopBar: React.FC = () => {
       startIcon={icon}
       onClick={onClick || (() => navigate(path))}
       sx={{
-        color: isActive(path) ? '#00d4ff' : 'rgba(255, 255, 255, 0.7)',
-        backgroundColor: isActive(path) ? 'rgba(0, 212, 255, 0.1)' : 'transparent',
-        border: isActive(path) ? '1px solid rgba(0, 212, 255, 0.3)' : '1px solid transparent',
+        color: isActive(path) ? theme.palette.primary.main : alpha(theme.palette.common.white, 0.7),
+        backgroundColor: isActive(path) ? activeBg : 'transparent',
+        border: isActive(path) ? `1px solid ${activeBorder}` : '1px solid transparent',
         borderRadius: 2,
         px: isMobile ? 1 : 2,
         py: 1,
@@ -122,9 +96,9 @@ const TopBar: React.FC = () => {
         textTransform: 'none',
         transition: 'all 0.2s ease',
         '&:hover': {
-          backgroundColor: 'rgba(0, 212, 255, 0.1)',
-          borderColor: 'rgba(0, 212, 255, 0.3)',
-          color: '#00d4ff',
+          backgroundColor: hoverBg,
+          borderColor: activeBorder,
+          color: theme.palette.primary.main,
           transform: 'translateY(-1px)',
         },
       }}
@@ -223,14 +197,17 @@ const TopBar: React.FC = () => {
           '&::-webkit-scrollbar': { display: 'none' },
           scrollbarWidth: 'none',
         }}>
-          {!isMobile && menuItems.map((item) => (
-            <NavButton
-              key={item.path}
-              text={item.text}
-              icon={item.icon}
-              path={item.path}
-            />
-          ))}
+          {!isMobile && menuItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavButton
+                key={item.key}
+                text={t(item.translationKey)}
+                icon={<Icon />}
+                path={item.path}
+              />
+            );
+          })}
 
           {/* 智能工作流菜单 */}
           <Button
@@ -238,9 +215,9 @@ const TopBar: React.FC = () => {
             endIcon={<ExpandIcon />}
             onClick={(e) => setWorkflowMenuAnchor(e.currentTarget)}
             sx={{
-              color: location.pathname.startsWith('/workflows') ? '#00d4ff' : 'rgba(255, 255, 255, 0.7)',
-              backgroundColor: location.pathname.startsWith('/workflows') ? 'rgba(0, 212, 255, 0.1)' : 'transparent',
-              border: location.pathname.startsWith('/workflows') ? '1px solid rgba(0, 212, 255, 0.3)' : '1px solid transparent',
+              color: location.pathname.startsWith('/workflows') ? theme.palette.primary.main : alpha(theme.palette.common.white, 0.7),
+              backgroundColor: location.pathname.startsWith('/workflows') ? activeBg : 'transparent',
+              border: location.pathname.startsWith('/workflows') ? `1px solid ${activeBorder}` : '1px solid transparent',
               borderRadius: 2,
               px: isMobile ? 1 : 2,
               py: 1,
@@ -250,14 +227,14 @@ const TopBar: React.FC = () => {
               textTransform: 'none',
               transition: 'all 0.2s ease',
               '&:hover': {
-                backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                borderColor: 'rgba(0, 212, 255, 0.3)',
-                color: '#00d4ff',
+                backgroundColor: hoverBg,
+                borderColor: activeBorder,
+                color: theme.palette.primary.main,
                 transform: 'translateY(-1px)',
               },
             }}
           >
-            {isMobile ? '' : '智能工作流'}
+            {isMobile ? '' : t('nav.workflows')}
           </Button>
 
           {/* 管理功能菜单 */}
@@ -267,7 +244,7 @@ const TopBar: React.FC = () => {
               endIcon={<ExpandIcon />}
               onClick={(e) => setAdminMenuAnchor(e.currentTarget)}
               sx={{
-                color: 'rgba(255, 255, 255, 0.7)',
+                color: alpha(theme.palette.common.white, 0.7),
                 backgroundColor: 'transparent',
                 border: '1px solid transparent',
                 borderRadius: 2,
@@ -279,14 +256,14 @@ const TopBar: React.FC = () => {
                 textTransform: 'none',
                 transition: 'all 0.2s ease',
                 '&:hover': {
-                  backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                  borderColor: 'rgba(0, 212, 255, 0.3)',
-                  color: '#00d4ff',
+                  backgroundColor: hoverBg,
+                  borderColor: activeBorder,
+                  color: theme.palette.primary.main,
                   transform: 'translateY(-1px)',
                 },
               }}
             >
-              {isMobile ? '' : '管理功能'}
+              {isMobile ? '' : t('nav.adminFeatures')}
             </Button>
           )}
         </Box>
@@ -297,10 +274,10 @@ const TopBar: React.FC = () => {
           <IconButton
             onClick={() => navigate('/settings')}
             sx={{
-              color: isActive('/settings') ? '#00d4ff' : 'rgba(255, 255, 255, 0.7)',
+              color: isActive('/settings') ? theme.palette.primary.main : alpha(theme.palette.common.white, 0.7),
               '&:hover': {
-                backgroundColor: 'rgba(0, 212, 255, 0.1)',
-                color: '#00d4ff',
+                backgroundColor: hoverBg,
+                color: theme.palette.primary.main,
               },
             }}
           >
@@ -316,24 +293,24 @@ const TopBar: React.FC = () => {
           {/* 用户菜单 */}
           <IconButton
             onClick={(e) => setUserMenuAnchor(e.currentTarget)}
-            sx={{
-              p: 0.5,
-              border: '2px solid transparent',
-              '&:hover': {
-                borderColor: 'rgba(0, 212, 255, 0.5)',
-                backgroundColor: 'rgba(0, 212, 255, 0.1)',
-              },
-            }}
-          >
-            <Avatar
               sx={{
-                width: 36,
-                height: 36,
-                bgcolor: '#00d4ff',
-                fontSize: '0.9rem',
-                fontWeight: 'bold',
+                p: 0.5,
+                border: '2px solid transparent',
+                '&:hover': {
+                borderColor: alpha(theme.palette.primary.main, 0.5),
+                backgroundColor: hoverBg,
+                },
               }}
             >
+              <Avatar
+                sx={{
+                  width: 36,
+                  height: 36,
+                  bgcolor: 'primary.main',
+                  fontSize: '0.9rem',
+                  fontWeight: 'bold',
+                }}
+              >
               {user?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
             </Avatar>
           </IconButton>
@@ -353,27 +330,27 @@ const TopBar: React.FC = () => {
             },
           }}
         >
-          {workflowMenuItems.map((item) => (
-            <MenuItem
-              key={item.path}
-              onClick={() => {
-                navigate(item.path);
-                setWorkflowMenuAnchor(null);
-              }}
+	          {workflowMenuItems.map((item) => (
+	            <MenuItem
+	              key={item.key}
+	              onClick={() => {
+	                navigate(item.path);
+	                setWorkflowMenuAnchor(null);
+	              }}
               sx={{
                 color: 'white',
                 '&:hover': {
                   backgroundColor: 'rgba(0, 212, 255, 0.1)',
                 },
-              }}
-            >
-              <ListItemIcon sx={{ color: '#00d4ff' }}>
-                {item.icon}
-              </ListItemIcon>
-              <ListItemText>{item.text}</ListItemText>
-            </MenuItem>
-          ))}
-        </Menu>
+	              }}
+	            >
+	              <ListItemIcon sx={{ color: theme.palette.primary.main }}>
+	                {React.createElement(item.icon)}
+	              </ListItemIcon>
+	              <ListItemText>{t(item.translationKey)}</ListItemText>
+	            </MenuItem>
+	          ))}
+	        </Menu>
 
         {/* 管理功能菜单 */}
         <Menu
@@ -389,27 +366,27 @@ const TopBar: React.FC = () => {
             },
           }}
         >
-          {getVisibleAdminItems().map((item) => (
-            <MenuItem
-              key={item.path}
-              onClick={() => {
-                navigate(item.path);
-                setAdminMenuAnchor(null);
-              }}
+	          {visibleAdminItems.map((item) => (
+	            <MenuItem
+	              key={item.key}
+	              onClick={() => {
+	                navigate(item.path);
+	                setAdminMenuAnchor(null);
+	              }}
               sx={{
                 color: 'white',
                 '&:hover': {
                   backgroundColor: 'rgba(0, 212, 255, 0.1)',
                 },
-              }}
-            >
-              <ListItemIcon sx={{ color: '#00d4ff' }}>
-                {item.icon}
-              </ListItemIcon>
-              <ListItemText>{item.text}</ListItemText>
-            </MenuItem>
-          ))}
-        </Menu>
+	              }}
+	            >
+	              <ListItemIcon sx={{ color: theme.palette.primary.main }}>
+	                {React.createElement(item.icon)}
+	              </ListItemIcon>
+	              <ListItemText>{t(item.translationKey)}</ListItemText>
+	            </MenuItem>
+	          ))}
+	        </Menu>
 
         {/* 用户菜单 */}
         <Menu

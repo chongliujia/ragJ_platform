@@ -49,29 +49,9 @@ class DocumentService:
             .first()
         )
         if kb is None:
-            try:
-                kb = KBModel(
-                    name=kb_name,
-                    description=f"Knowledge base: {kb_name}",
-                    owner_id=user_id,
-                    tenant_id=tenant_id,
-                    is_active=True,
-                    is_public=False,
-                    embedding_model="text-embedding-v2",
-                    chunk_size=1000,
-                    chunk_overlap=200,
-                    document_count=0,
-                    total_chunks=0,
-                    total_size_bytes=0,
-                    milvus_collection_name=f"tenant_{tenant_id}_{kb_name}",
-                    settings={},
-                )
-                db.add(kb)
-                db.commit()
-                db.refresh(kb)
-            except Exception as e:
-                logger.warning(f"Auto-create KB record failed: {e}")
-                kb = None
+            raise ValueError(
+                f"Knowledge base '{kb_name}' not found for tenant {tenant_id}"
+            )
         document = Document(
             filename=filename,
             original_filename=filename,
@@ -79,7 +59,7 @@ class DocumentService:
             file_size=file_size,
             file_path=file_path,
             knowledge_base_name=kb_name,
-            knowledge_base_id=(kb.id if kb else None),
+            knowledge_base_id=kb.id,
             tenant_id=tenant_id,
             uploaded_by=user_id,
             status=DocumentStatus.PENDING.value,
@@ -204,7 +184,9 @@ class DocumentService:
             )
 
             # Get embeddings for chunks
-            embedding_response = await llm_service.get_embeddings(texts=chunks)
+            embedding_response = await llm_service.get_embeddings(
+                texts=chunks, tenant_id=tenant_id
+            )
 
             if not embedding_response.get("success"):
                 error_msg = f"Embedding generation failed: {embedding_response.get('error')}"

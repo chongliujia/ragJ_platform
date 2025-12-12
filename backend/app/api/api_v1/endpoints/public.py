@@ -18,6 +18,7 @@ from app.db.database import get_db
 from app.db.models.api_key import ApiKey
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
+from app.services.langgraph_chat_service import langgraph_chat_service
 from app.services.workflow_execution_engine import workflow_execution_engine
 from app.services.workflow_persistence_service import workflow_persistence_service
 
@@ -84,7 +85,7 @@ async def public_chat(
 
     # For RAG, pass tenant_id/user_id (use 0 as system user)
     if request.knowledge_base_id:
-        return await chat_service.chat(request, tenant_id=ctx.tenant_id, user_id=0)
+        return await langgraph_chat_service.chat(request, tenant_id=ctx.tenant_id, user_id=0)
     return await chat_service.chat(request)
 
 
@@ -100,10 +101,14 @@ async def public_chat_stream(
         raise HTTPException(status_code=403, detail="KB not allowed by API key")
 
     async def event_stream() -> AsyncGenerator[str, None]:
-        # For RAG stream, tenant_id is required; non-RAG is fine without
-        tenant = ctx.tenant_id if request.knowledge_base_id else None
-        async for chunk in chat_service.stream_chat(request, tenant_id=tenant, user_id=0):
-            yield chunk
+        if request.knowledge_base_id:
+            async for chunk in langgraph_chat_service.stream_chat(
+                request, tenant_id=ctx.tenant_id, user_id=0
+            ):
+                yield chunk
+        else:
+            async for chunk in chat_service.stream_chat(request):
+                yield chunk
 
     return StreamingResponse(
         event_stream(),
@@ -152,4 +157,3 @@ async def public_execute_workflow(
         "output_data": context.output_data,
         "error": context.error,
     }
-

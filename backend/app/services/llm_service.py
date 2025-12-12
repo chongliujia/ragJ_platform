@@ -915,6 +915,7 @@ class LLMService:
         model: str = None,
         temperature: float = 0.7,
         max_tokens: int = 1000,
+        tenant_id: int = None,
     ) -> Dict[str, Any]:
         """
         Generate chat response using configured provider
@@ -937,7 +938,9 @@ class LLMService:
                     ModelType,
                 )
 
-                chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                chat_config = model_config_service.get_active_model(
+                    ModelType.CHAT, tenant_id=tenant_id
+                )
                 logger.info(f"DEBUG: Got chat config from service: {chat_config}")
                 if chat_config:
                     provider = chat_config.provider.value
@@ -996,7 +999,9 @@ class LLMService:
                         model_config_service,
                         ModelType,
                     )
-                    chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                    chat_config = model_config_service.get_active_model(
+                        ModelType.CHAT, tenant_id=tenant_id
+                    )
                     if chat_config:
                         provider = chat_config.provider.value
                         logger.info(f"Unknown model '{model}', using default provider: {provider}")
@@ -1013,7 +1018,9 @@ class LLMService:
                     model_config_service,
                     ModelType,
                 )
-                chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                chat_config = model_config_service.get_active_model(
+                    ModelType.CHAT, tenant_id=tenant_id
+                )
                 if chat_config and chat_config.provider.value == provider:
                     # 只有当配置服务的提供商与推断的提供商一致时，才使用其API密钥
                     if provider == "deepseek":
@@ -1072,6 +1079,7 @@ class LLMService:
         model: str = None,
         temperature: float = 0.7,
         max_tokens: int = 1000,
+        tenant_id: int = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Generate streaming chat response using configured provider
@@ -1095,7 +1103,9 @@ class LLMService:
                     ModelType,
                 )
 
-                chat_config = model_config_service.get_active_model(ModelType.CHAT)
+                chat_config = model_config_service.get_active_model(
+                    ModelType.CHAT, tenant_id=tenant_id
+                )
                 logger.info(f"DEBUG: Got chat config from service: {chat_config}")
                 if chat_config:
                     provider = chat_config.provider.value
@@ -1155,7 +1165,9 @@ class LLMService:
             elif provider == "deepseek":
                 # For deepseek, fallback to regular chat but simulate streaming
                 logger.info(f"Using deepseek provider with simulated streaming")
-                result = await self.chat(message, model, temperature, max_tokens)
+                result = await self.chat(
+                    message, model, temperature, max_tokens, tenant_id=tenant_id
+                )
                 logger.info(f"DEEPSEEK_DEBUG: Got result: {result}")
                 if result.get("success"):
                     # Split content into chunks for better streaming effect  
@@ -1186,7 +1198,9 @@ class LLMService:
             else:
                 # For other non-streaming providers, fallback to regular chat
                 logger.warning(f"Streaming not supported for provider {provider}, falling back to regular chat")
-                result = await self.chat(message, model, temperature, max_tokens)
+                result = await self.chat(
+                    message, model, temperature, max_tokens, tenant_id=tenant_id
+                )
                 if result.get("success"):
                     yield {"success": True, "content": result.get("content", "")}
                 else:
@@ -1196,7 +1210,7 @@ class LLMService:
             yield {"success": False, "error": str(e)}
 
     async def get_embeddings(
-        self, texts: list[str], model: str = None
+        self, texts: list[str], model: str = None, tenant_id: int = None
     ) -> dict[str, Any]:
         """
         Get text embeddings using configured provider.
@@ -1210,7 +1224,9 @@ class LLMService:
                     ModelType,
                 )
                 
-                embedding_config = model_config_service.get_active_model(ModelType.EMBEDDING)
+                embedding_config = model_config_service.get_active_model(
+                    ModelType.EMBEDDING, tenant_id=tenant_id
+                )
                 if embedding_config:
                     provider = embedding_config.provider.value
                     model = embedding_config.model_name
@@ -1277,7 +1293,12 @@ class LLMService:
             return {"success": False, "error": str(e)}
 
     async def rerank(
-        self, query: str, documents: list[str], model: str = None, top_n: int = 5
+        self,
+        query: str,
+        documents: list[str],
+        model: str = None,
+        top_n: int = 5,
+        tenant_id: int = None,
     ) -> dict[str, Any]:
         """
         Reranks documents using configured provider.
@@ -1290,7 +1311,9 @@ class LLMService:
                     model_config_service,
                     ModelType,
                 )
-                rerank_config = model_config_service.get_active_model(ModelType.RERANKING)
+                rerank_config = model_config_service.get_active_model(
+                    ModelType.RERANKING, tenant_id=tenant_id
+                )
                 if rerank_config:
                     provider = rerank_config.provider.value
                     model = rerank_config.model_name

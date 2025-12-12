@@ -4,7 +4,7 @@ Knowledge Base Management API Endpoints
 
 import logging
 import re
-from typing import List
+from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, status, Depends
 from sqlalchemy.orm import Session
@@ -13,15 +13,18 @@ from app.services.elasticsearch_service import (
     ElasticsearchService,
     get_elasticsearch_service,
 )
+from app.core.config import settings
 from app.schemas.knowledge_base import (
     KnowledgeBase,
     KnowledgeBaseCreate,
     KnowledgeBaseCreateResponse,
 )
-from app.core.dependencies import get_tenant_id, get_current_user
+from app.core.dependencies import get_tenant_id, get_current_user, require_permission
 from app.db.database import get_db
 from app.db.models.knowledge_base import KnowledgeBase as KBModel
+from app.db.models.tenant import Tenant
 from app.db.models.user import User
+from app.db.models.permission import PermissionType
 from app.services import parser_service
 from app.services.chunking_service import chunking_service, ChunkingStrategy
 
@@ -49,9 +52,9 @@ def validate_collection_name(name: str) -> bool:
 async def create_knowledge_base(
     kb_create: KnowledgeBaseCreate,
     tenant_id: int = Depends(get_tenant_id),
-    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    es_service: Optional[ElasticsearchService] = Depends(get_elasticsearch_service),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission(PermissionType.KNOWLEDGE_BASE_CREATE.value)),
 ):
     """
     Create a new Knowledge Base.
@@ -69,11 +72,32 @@ async def create_knowledge_base(
             detail="Invalid knowledge base name. Name can only contain letters, numbers, and underscores.",
         )
 
+    # Enforce tenant KB quota
+    tenant_row = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if tenant_row is not None:
+        max_kbs = int(tenant_row.max_knowledge_bases or 0)
+        if max_kbs > 0:
+            current_kbs = (
+                db.query(KBModel).filter(KBModel.tenant_id == tenant_id).count()
+            )
+            if current_kbs >= max_kbs:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Knowledge base quota exceeded for this tenant",
+                )
+
     try:
-        # Check for existence in both services using tenant-specific names
-        if milvus_service.has_collection(tenant_collection_name) or await es_service.index_exists(
-            tenant_collection_name
-        ):
+        # Check for existence in Milvus and (optionally) Elasticsearch
+        es_exists = False
+        if es_service is not None:
+            try:
+                es_exists = await es_service.index_exists(tenant_collection_name)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to check Elasticsearch index existence for '{tenant_collection_name}': {e}"
+                )
+
+        if milvus_service.has_collection(tenant_collection_name) or es_exists:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Knowledge base '{kb_name}' already exists in Milvus or Elasticsearch.",
@@ -82,19 +106,27 @@ async def create_knowledge_base(
         # Create in Milvus with tenant-specific name
         milvus_service.create_collection(collection_name=tenant_collection_name)
 
-        # Create in Elasticsearch with tenant-specific name
-        try:
-            await es_service.create_index(index_name=tenant_collection_name)
-        except Exception as es_err:
-            # Rollback Milvus collection if ES index creation fails
-            logger.error(
-                f"Failed to create Elasticsearch index for '{kb_name}', rolling back Milvus collection. Error: {es_err}"
-            )
-            milvus_service.drop_collection(tenant_collection_name)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create Elasticsearch index: {es_err}",
-            )
+        # Create in Elasticsearch with tenant-specific name (optional)
+        es_created = False
+        if settings.ENABLE_ELASTICSEARCH:
+            if es_service is None:
+                logger.warning(
+                    f"Elasticsearch enabled but unavailable; skipping index creation for '{kb_name}'."
+                )
+            else:
+                try:
+                    await es_service.create_index(index_name=tenant_collection_name)
+                    es_created = True
+                except Exception as es_err:
+                    # Rollback Milvus collection if ES index creation fails
+                    logger.error(
+                        f"Failed to create Elasticsearch index for '{kb_name}', rolling back Milvus collection. Error: {es_err}"
+                    )
+                    milvus_service.drop_collection(tenant_collection_name)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"Failed to create Elasticsearch index: {es_err}",
+                    )
 
         # Persist Knowledge Base in DB (upsert by name+tenant)
         try:
@@ -142,7 +174,15 @@ async def create_knowledge_base(
 
         return KnowledgeBaseCreateResponse(
             data=kb,
-            msg="Knowledge base created successfully in both Milvus and Elasticsearch",
+            msg=(
+                "Knowledge base created successfully in Milvus and Elasticsearch"
+                if es_created
+                else (
+                    "Knowledge base created successfully in Milvus; Elasticsearch unavailable"
+                    if settings.ENABLE_ELASTICSEARCH
+                    else "Knowledge base created successfully in Milvus; Elasticsearch disabled"
+                )
+            ),
         )
     except HTTPException as http_exc:
         raise http_exc  # Re-raise HTTPException to preserve status code and detail
@@ -158,63 +198,79 @@ async def create_knowledge_base(
 async def list_knowledge_bases(
     tenant_id: int = Depends(get_tenant_id),
     db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_READ.value)
+    ),
 ):
     """
-    List all available Knowledge Bases for the current tenant.
-    This corresponds to listing all collections in Milvus that belong to the tenant.
+    List all Knowledge Bases for the current tenant.
+
+    Rule: KBs are source-of-truth in DB; do not infer or auto-create from Milvus.
     """
     try:
-        tenant_prefix = f"tenant_{tenant_id}_"
-        
-        collection_names = milvus_service.list_collections()
-        kbs = []
-        for name in collection_names:
-            # Only include collections that belong to this tenant
-            if name.startswith(tenant_prefix):
-                # Extract the original KB name by removing the tenant prefix
-                kb_name = name[len(tenant_prefix):]
-                
-                # Get metrics from DB documents table
-                try:
-                    from app.db.models.document import Document
-                    count = db.query(Document).filter(
+        kb_rows = (
+            db.query(KBModel)
+            .filter(KBModel.tenant_id == tenant_id, KBModel.is_active == True)
+            .order_by(KBModel.created_at.desc())
+            .all()
+        )
+        kbs: List[KnowledgeBase] = []
+        for row in kb_rows:
+            kb_name = row.name
+            tenant_collection_name = (
+                row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+            )
+
+            # Get metrics from DB documents table
+            try:
+                from app.db.models.document import Document
+                from sqlalchemy import func as sa_func
+
+                count = (
+                    db.query(Document)
+                    .filter(
                         Document.knowledge_base_name == kb_name,
                         Document.tenant_id == tenant_id,
-                    ).count()
-                    from sqlalchemy import func as sa_func
-                    totals = db.query(
+                    )
+                    .count()
+                )
+                totals = (
+                    db.query(
                         sa_func.coalesce(sa_func.sum(Document.total_chunks), 0),
                         sa_func.coalesce(sa_func.sum(Document.file_size), 0),
-                    ).filter(
+                    )
+                    .filter(
                         Document.knowledge_base_name == kb_name,
                         Document.tenant_id == tenant_id,
-                    ).first()
-                    total_chunks = int(totals[0] or 0)
-                    total_size_bytes = int(totals[1] or 0)
-                except Exception:
-                    count = 0
-                    total_chunks = 0
-                    total_size_bytes = 0
-
-                # Create knowledge base object with original name
-                kb = KnowledgeBase(
-                    id=kb_name,
-                    name=kb_name,
-                    description=f"Knowledge base: {kb_name}",
-                    document_count=count,
-                    total_chunks=total_chunks,
-                    total_size_bytes=total_size_bytes,
-                    created_at=datetime.now(),  # In a real app, this would be stored in DB
-                    status="active",
+                    )
+                    .first()
                 )
-                kbs.append(kb)
+                total_chunks = int(totals[0] or 0)
+                total_size_bytes = int(totals[1] or 0)
+            except Exception:
+                count = 0
+                total_chunks = 0
+                total_size_bytes = 0
+
+            milvus_exists = milvus_service.has_collection(tenant_collection_name)
+            kb = KnowledgeBase(
+                id=kb_name,
+                name=kb_name,
+                description=row.description or f"Knowledge base: {kb_name}",
+                document_count=count,
+                total_chunks=total_chunks,
+                total_size_bytes=total_size_bytes,
+                created_at=row.created_at or datetime.now(),
+                status="active" if milvus_exists else "error",
+            )
+            kbs.append(kb)
 
         return kbs
     except Exception as e:
         logger.error(f"Failed to list knowledge bases: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve knowledge bases from Milvus.",
+            detail="Failed to retrieve knowledge bases.",
         )
 
 
@@ -223,9 +279,11 @@ async def rebuild_es_index(
     kb_name: str,
     reindex: bool = False,
     tenant_id: int = Depends(get_tenant_id),
-    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    es_service: Optional[ElasticsearchService] = Depends(get_elasticsearch_service),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_UPDATE.value)
+    ),
 ):
     """
     Maintenance: Drop and recreate the Elasticsearch index for this KB (tenant-scoped).
@@ -234,10 +292,19 @@ async def rebuild_es_index(
       Reindexing parses and chunks the original file again; chunk boundaries may differ from
       the existing Milvus vectors.
     """
+    # Validate KB exists in DB for tenant
+    kb_row = (
+        db.query(KBModel)
+        .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id, KBModel.is_active == True)
+        .first()
+    )
+    if kb_row is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
     if es_service is None:
         raise HTTPException(status_code=503, detail="Elasticsearch service not available")
 
-    tenant_index = f"tenant_{tenant_id}_{kb_name}"
+    tenant_index = kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
 
     try:
         # Drop if exists
@@ -325,18 +392,29 @@ async def get_knowledge_base(
     kb_name: str,
     tenant_id: int = Depends(get_tenant_id),
     db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_READ.value)
+    ),
 ):
     """
     Get details of a specific Knowledge Base.
     """
     try:
-        tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
-        
-        if not milvus_service.has_collection(tenant_collection_name):
+        kb_row = (
+            db.query(KBModel)
+            .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id, KBModel.is_active == True)
+            .first()
+        )
+        if kb_row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Knowledge base '{kb_name}' not found.",
             )
+
+        tenant_collection_name = (
+            kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+        )
+        milvus_exists = milvus_service.has_collection(tenant_collection_name)
 
         # Get metrics from DB
         try:
@@ -364,12 +442,12 @@ async def get_knowledge_base(
         kb = KnowledgeBase(
             id=kb_name,
             name=kb_name,
-            description=f"Knowledge base: {kb_name}",
+            description=kb_row.description or f"Knowledge base: {kb_name}",
             document_count=count,
             total_chunks=total_chunks,
             total_size_bytes=total_size_bytes,
-            created_at=datetime.now(),  # In a real app, this would be stored in DB
-            status="active",
+            created_at=kb_row.created_at or datetime.now(),
+            status="active" if milvus_exists else "error",
         )
 
         return kb
@@ -388,9 +466,11 @@ async def clear_kb_vectors(
     kb_name: str,
     include_es: bool = False,
     tenant_id: int = Depends(get_tenant_id),
-    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    es_service: Optional[ElasticsearchService] = Depends(get_elasticsearch_service),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_UPDATE.value)
+    ),
 ):
     """
     Clear all vectors for a KB (tenant-scoped):
@@ -398,8 +478,17 @@ async def clear_kb_vectors(
     - Reset vector_ids/total_chunks for all documents in DB
     - Optionally clear Elasticsearch index when include_es=true
     """
-    tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
-    tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+    # Validate KB exists in DB for tenant
+    kb_row = (
+        db.query(KBModel)
+        .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id, KBModel.is_active == True)
+        .first()
+    )
+    if kb_row is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    tenant_collection_name = kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+    tenant_index_name = tenant_collection_name
 
     try:
         # Drop and recreate Milvus collection
@@ -461,9 +550,11 @@ async def clear_kb_vectors(
 async def clear_all_kb_vectors(
     include_es: bool = False,
     tenant_id: int = Depends(get_tenant_id),
-    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    es_service: Optional[ElasticsearchService] = Depends(get_elasticsearch_service),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_UPDATE.value)
+    ),
 ):
     """
     Clear Milvus vectors for ALL knowledge bases under current tenant.
@@ -545,33 +636,53 @@ async def clear_all_kb_vectors(
 async def delete_knowledge_base(
     kb_name: str, 
     tenant_id: int = Depends(get_tenant_id),
-    es_service: ElasticsearchService = Depends(get_elasticsearch_service),
+    es_service: Optional[ElasticsearchService] = Depends(get_elasticsearch_service),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_DELETE.value)
+    ),
 ):
     """
     Delete a Knowledge Base.
     This will drop the corresponding collection in Milvus and index in Elasticsearch.
     """
     try:
-        tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+        kb_row = (
+            db.query(KBModel)
+            .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id, KBModel.is_active == True)
+            .first()
+        )
+        if kb_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Knowledge base '{kb_name}' not found.",
+            )
+
+        tenant_collection_name = (
+            kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+        )
         
         # We need to check existence before attempting deletion
         milvus_exists = milvus_service.has_collection(tenant_collection_name)
-        es_exists = await es_service.index_exists(tenant_collection_name)
-
-        if not milvus_exists and not es_exists:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Knowledge base '{kb_name}' not found in Milvus or Elasticsearch.",
-            )
+        es_exists = False
+        if es_service is not None:
+            try:
+                es_exists = await es_service.index_exists(tenant_collection_name)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to check Elasticsearch index existence for '{tenant_collection_name}': {e}"
+                )
 
         # It's safer to attempt deletion from both services even if one check fails
         if milvus_exists:
             milvus_service.drop_collection(tenant_collection_name)
 
-        if es_exists:
+        if es_exists and es_service is not None:
             await es_service.delete_index(tenant_collection_name)
+        elif es_exists and settings.ENABLE_ELASTICSEARCH:
+            logger.warning(
+                f"Elasticsearch enabled but unavailable; could not delete index '{tenant_collection_name}'."
+            )
 
         # Delete documents rows in DB (best-effort)
         try:
@@ -598,6 +709,8 @@ async def delete_knowledge_base(
             logger.warning(f"Failed to delete KB row from DB: {dbe}")
 
         return
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to delete knowledge base '{kb_name}': {e}", exc_info=True)
         raise HTTPException(

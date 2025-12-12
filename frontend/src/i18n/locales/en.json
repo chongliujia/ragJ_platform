@@ -36,6 +36,10 @@
     "chat": "Chat",
     "teams": "Teams",
     "workflows": "Workflows",
+    "workflow": {
+      "manage": "Workflow Management",
+      "templates": "Template Library"
+    },
     "settings": "Settings",
     "title": "RAG Platform",
     "subtitle": "Intelligent Retrieval Augmented Generation Platform",
@@ -94,7 +98,13 @@
       "title": "Create New Knowledge Base",
       "nameLabel": "Knowledge Base Name",
       "descriptionLabel": "Description (Optional)",
-      "nameRequired": "Please enter knowledge base name"
+      "nameRequired": "Please enter knowledge base name",
+      "nameEmptyError": "Name cannot be empty",
+      "nameInvalidError": "Only letters, numbers, and underscores are allowed",
+      "nameTooLongError": "Name is too long (≤255)",
+      "nameHint": "Only letters, numbers, and underscores are allowed. Spaces and hyphens will be converted to underscores automatically.",
+      "normalizedName": "Normalized name",
+      "autoFix": "Auto-fix"
     },
     "empty": {
       "title": "No knowledge bases created yet",
@@ -125,6 +135,8 @@
   "chat": {
     "title": "Intelligent Chat",
     "selectKnowledgeBase": "Select Knowledge Base",
+    "selectModel": "Select Chat Model",
+    "defaultModel": "Tenant Default Model",
     "inputPlaceholder": "Enter your question...",
     "thinking": "Thinking...",
     "welcome": "Hello! I'm the intelligent assistant of RAG Platform. You can choose knowledge bases for document-based Q&A, or chat directly without knowledge bases.",
@@ -135,8 +147,16 @@
   },
   "documents": {
     "title": "Document Management",
+    "selectKnowledgeBase": "Knowledge Base",
     "comingSoon": "Document management feature is under development",
-    "description": "This feature will support document upload, processing and management"
+    "description": "This feature will support document upload, processing and management",
+    "empty": {
+      "noKnowledgeBases": "No knowledge bases yet",
+      "createFirst": "Create a knowledge base before uploading or managing documents."
+    },
+    "actions": {
+      "goCreateKb": "Create Knowledge Base"
+    }
   },
   "document": {
     "upload": {
@@ -170,6 +190,14 @@
       },
       "strategies": {
         "fetchError": "Failed to fetch chunking strategies"
+      },
+      "help": {
+        "title": "Upload Help",
+        "supportedTypes": "Supported file types: {{types}}",
+        "maxSize": "Max size per file: {{size}} MB",
+        "chunkingTitle": "Chunking Strategy",
+        "chunkingDesc": "After upload, documents are split into chunks using the selected strategy for retrieval and Q&A.",
+        "tip": "If unsure, keep the default. You can reprocess documents later in the knowledge base."
       }
     },
     "manager": {
@@ -383,6 +411,25 @@
       "email": "Email",
       "role": "Role",
       "accountStatus": "Account Status"
+    }
+  },
+  "workflowTester": {
+    "title": "Workflow Test (Chat)",
+    "emptyHint": "Enter a message and send. The system will execute the current workflow and return results.",
+    "running": "Running...",
+    "inputPlaceholder": "Enter your question...",
+    "actions": {
+      "send": "Send",
+      "stop": "Stop"
+    },
+    "progress": {
+      "title": "Execution Progress",
+      "empty": "No progress yet",
+      "step": "Step {{index}}"
+    },
+    "errors": {
+      "executeFailed": "Execution failed",
+      "executeError": "Execution error"
     }
   }
 } 

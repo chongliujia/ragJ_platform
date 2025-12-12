@@ -22,6 +22,7 @@ langchain
 langchain-core
 langchain-community
 langchain-openai
+langchain-text-splitters
 
 
 # 向量数据库客户端
@@ -54,6 +55,9 @@ pydantic-settings
 # 安全
 python-jose[cryptography]
 passlib[bcrypt]
+# Passlib 1.7.x is incompatible with bcrypt>=4 on some platforms.
+# Pin bcrypt to a compatible version to avoid startup/login failures.
+bcrypt<4.0.0
 
 # HTTP客户端
 httpx

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.database import get_db
 from app.db.models.user import User, UserRole, UserConfig
@@ -56,7 +57,14 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     """
     用户登录
     """
-    user = authenticate_user(db, request.username, request.password)
+    try:
+        user = authenticate_user(db, request.username, request.password)
+    except Exception as e:
+        # 兼容错误：数据库/密码后端异常
+        raise HTTPException(
+            status_code=500,
+            detail=str(e) if settings.DEBUG else "Internal authentication error",
+        ) from e
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -73,13 +81,30 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
     from datetime import datetime
 
     user.last_login_at = datetime.utcnow()
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError as e:
+        # 旧数据库缺字段时允许继续登录
+        db.rollback()
+        logger = None
+        try:
+            import structlog
+            logger = structlog.get_logger(__name__)
+            logger.warning("Failed to update last_login_at, continuing", error=str(e))
+        except Exception:
+            pass
 
     # 创建访问令牌
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        subject=user.id, expires_delta=access_token_expires
-    )
+    try:
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            subject=user.id, expires_delta=access_token_expires
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e) if settings.DEBUG else "Token generation error",
+        ) from e
 
     return AuthResponse(
         access_token=access_token,
@@ -121,11 +146,14 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         )
 
     # 检查租户用户数量限制
-    user_count = db.query(User).filter(User.tenant_id == tenant.id).count()
-    if user_count >= tenant.max_users:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Tenant user limit exceeded"
-        )
+    max_users = int(getattr(tenant, "max_users", 0) or 0)
+    if max_users > 0:
+        user_count = db.query(User).filter(User.tenant_id == tenant.id).count()
+        if user_count >= max_users:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant user limit exceeded",
+            )
 
     # 创建用户
     user = User(
@@ -140,8 +168,15 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     )
 
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.commit()
+        db.refresh(user)
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Database error while creating user",
+        ) from e
 
     # 创建用户配置
     user_config = UserConfig(
@@ -154,7 +189,18 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
     )
 
     db.add(user_config)
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError as e:
+        db.rollback()
+        # 用户已创建但配置失败，不阻断注册
+        try:
+            import structlog
+            structlog.get_logger(__name__).warning(
+                "UserConfig create failed, continuing", error=str(e)
+            )
+        except Exception:
+            pass
 
     # 创建访问令牌
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

@@ -572,7 +572,7 @@ const WorkflowDataFlowManager: React.FC<WorkflowDataFlowManagerProps> = ({
               if (!schema) return null;
 
               return (
-                <Grid item xs={12} md={6} key={node.id}>
+                <Grid size={{ xs: 12, md: 6 }} key={node.id}>
                   <Paper sx={{ p: 2, backgroundColor: 'rgba(26, 31, 46, 0.8)' }}>
                     <Typography variant="h6" sx={{ color: 'white', mb: 1 }}>
                       {node.data.name}

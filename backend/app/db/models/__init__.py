@@ -20,6 +20,8 @@ from .workflow import (
     ExecutionStatus
 )
 from .api_key import ApiKey
+from .tenant_model_config import TenantProviderConfig, TenantModelConfig
+from .agent import Agent
 
 __all__ = [
     "Base",
@@ -45,4 +47,7 @@ __all__ = [
     "WorkflowStatus",
     "ExecutionStatus",
     "ApiKey",
+    "TenantProviderConfig",
+    "TenantModelConfig",
+    "Agent",
 ]

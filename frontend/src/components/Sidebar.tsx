@@ -21,16 +21,7 @@ import {
   Tooltip,
 } from '@mui/material';
 import {
-  Dashboard as DashboardIcon,
-  Storage as StorageIcon,
-  Description as DocumentIcon,
-  Chat as ChatIcon,
-  Settings as SettingsIcon,
   SmartToy as BotIcon,
-  BugReport as TestIcon,
-  People as UsersIcon,
-  Business as BusinessIcon,
-  Security as PermissionsIcon,
   AccountCircle as AccountIcon,
   Logout as LogoutIcon,
   ExpandLess,
@@ -38,16 +29,15 @@ import {
   AdminPanelSettings as AdminIcon,
   Menu as MenuIcon,
   ChevronLeft as ChevronLeftIcon,
-  Group as GroupIcon,
   AccountTree as WorkflowIcon,
-  LibraryBooks as TemplateIcon,
-  List as ListIcon,
 } from '@mui/icons-material';
 import LanguageSwitcher from './LanguageSwitcher';
 import { TeamSelector } from './TeamSelector';
 import { AuthManager } from '../services/authApi';
 import { usePermissions } from '../hooks/usePermissions';
 import type { UserInfo } from '../types/auth';
+import { mainNavItems, workflowNavItems, adminNavItems } from '../config/navConfig';
+import { alpha, useTheme } from '@mui/material/styles';
 
 const drawerWidth = 240;
 const collapsedWidth = 64;
@@ -61,6 +51,7 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const theme = useTheme();
   const [user, setUser] = useState<UserInfo | null>(null);
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
@@ -75,26 +66,9 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
     setUser(currentUser);
   }, []);
 
-  const menuItems = [
-    { text: t('nav.dashboard'), icon: <DashboardIcon />, path: '/' },
-    { text: t('nav.knowledgeBases'), icon: <StorageIcon />, path: '/knowledge-bases' },
-    { text: t('nav.documents'), icon: <DocumentIcon />, path: '/documents' },
-    { text: t('nav.chat'), icon: <ChatIcon />, path: '/chat' },
-    { text: t('nav.teams'), icon: <GroupIcon />, path: '/teams' },
-    { text: t('nav.settings'), icon: <SettingsIcon />, path: '/settings' },
-    { text: t('nav.connectionTest'), icon: <TestIcon />, path: '/test' },
-  ];
-
-  const workflowMenuItems = [
-    { text: '工作流管理', icon: <ListIcon />, path: '/workflows' },
-    { text: '模板库', icon: <TemplateIcon />, path: '/workflows/templates' },
-  ];
-
-  const adminMenuItems = [
-    { text: t('nav.userManagement'), icon: <UsersIcon />, path: '/users', role: 'tenant_admin' },
-    { text: t('nav.tenantManagement'), icon: <BusinessIcon />, path: '/tenants', role: 'super_admin' },
-    { text: t('nav.permissionManagement'), icon: <PermissionsIcon />, path: '/permissions', role: 'super_admin' },
-  ];
+  const menuItems = mainNavItems.filter(i => i.showInSidebar);
+  const workflowItems = workflowNavItems.filter(i => i.showInSidebar);
+  const adminItems = adminNavItems.filter(i => i.showInSidebar);
 
   const handleUserMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
     setUserMenuAnchor(event.currentTarget);
@@ -135,13 +109,19 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
     }
   };
 
-  const canAccessAdminMenu = () => {
-    return permissions.isAdmin;
-  };
-
-  const canAccessMenuItem = (requiredRole: string) => {
+  const canAccessMenuItem = (requiredRole?: string) => {
+    if (!requiredRole) return true;
     return permissions.hasRole(requiredRole);
   };
+
+  const visibleMenuItems = menuItems.filter(i => canAccessMenuItem(i.requiredRole));
+  const visibleWorkflowItems = workflowItems.filter(i => canAccessMenuItem(i.requiredRole));
+  const visibleAdminItems = adminItems.filter(i => canAccessMenuItem(i.requiredRole));
+  const canAccessAdminMenu = () => visibleAdminItems.length > 0;
+
+  const activeBg = alpha(theme.palette.primary.main, 0.2);
+  const activeBgHover = alpha(theme.palette.primary.main, 0.28);
+  const hoverBg = alpha(theme.palette.primary.main, 0.08);
 
   return (
     <Drawer
@@ -177,7 +157,7 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
 
       <Box sx={{ p: open ? 2 : 1, textAlign: 'center', transition: 'all 0.3s ease-in-out' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-          <BotIcon sx={{ fontSize: 32, color: '#3b82f6', mr: open ? 1 : 0 }} />
+          <BotIcon sx={{ fontSize: 32, color: 'primary.main', mr: open ? 1 : 0 }} />
           {open && (
             <Typography variant="h6" sx={{ fontWeight: 'bold', color: 'white' }}>
               {t('nav.title')}
@@ -185,13 +165,13 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
           )}
         </Box>
         {open && (
-          <Typography variant="body2" sx={{ color: '#94a3b8' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
             {t('nav.subtitle')}
           </Typography>
         )}
       </Box>
       
-      <Divider sx={{ borderColor: '#334155' }} />
+      <Divider />
       
       {/* 团队选择器 */}
       {open && (
@@ -206,28 +186,28 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
       
       <List sx={{ pt: open ? 1 : 2, flex: 1 }}>
         {/* 主菜单项 */}
-        {menuItems.map((item) => (
-          <ListItem key={item.text} disablePadding>
-            <Tooltip title={!open ? item.text : ''} placement="right">
+        {visibleMenuItems.map((item) => (
+          <ListItem key={item.key} disablePadding>
+            <Tooltip title={!open ? t(item.translationKey) : ''} placement="right">
               <ListItemButton
                 onClick={() => navigate(item.path)}
                 sx={{
                   mx: 1,
                   mb: 0.5,
                   borderRadius: 1,
-                  backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
+                  backgroundColor: location.pathname === item.path ? activeBg : 'transparent',
                   justifyContent: open ? 'initial' : 'center',
                   '&:hover': {
-                    backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
+                    backgroundColor: location.pathname === item.path ? activeBgHover : hoverBg,
                   },
                 }}
               >
                 <ListItemIcon sx={{ color: 'inherit', minWidth: open ? 40 : 0, justifyContent: 'center' }}>
-                  {item.icon}
+                  {React.createElement(item.icon)}
                 </ListItemIcon>
                 {open && (
                   <ListItemText 
-                    primary={item.text}
+                    primary={t(item.translationKey)}
                     sx={{ 
                       '& .MuiListItemText-primary': { 
                         fontSize: '0.9rem',
@@ -251,9 +231,9 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
                   mx: 1,
                   mb: 0.5,
                   borderRadius: 1,
-                  backgroundColor: location.pathname.startsWith('/workflows') ? '#3b82f6' : 'transparent',
+                  backgroundColor: location.pathname.startsWith('/workflows') ? activeBg : 'transparent',
                   '&:hover': {
-                    backgroundColor: location.pathname.startsWith('/workflows') ? '#2563eb' : '#334155',
+                    backgroundColor: location.pathname.startsWith('/workflows') ? activeBgHover : hoverBg,
                   },
                 }}
               >
@@ -274,25 +254,25 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
             </ListItem>
             <Collapse in={workflowMenuOpen} timeout="auto" unmountOnExit>
               <List component="div" disablePadding>
-                {workflowMenuItems.map((item) => (
-                  <ListItem key={item.text} disablePadding>
+                {visibleWorkflowItems.map((item) => (
+                  <ListItem key={item.key} disablePadding>
                     <ListItemButton
                       onClick={() => navigate(item.path)}
                       sx={{
                         mx: 2,
                         mb: 0.5,
                         borderRadius: 1,
-                        backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
+                        backgroundColor: location.pathname === item.path ? activeBg : 'transparent',
                         '&:hover': {
-                          backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
+                          backgroundColor: location.pathname === item.path ? activeBgHover : hoverBg,
                         },
                       }}
                     >
                       <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
-                        {item.icon}
+                        {React.createElement(item.icon)}
                       </ListItemIcon>
                       <ListItemText 
-                        primary={item.text}
+                        primary={t(item.translationKey)}
                         sx={{ 
                           '& .MuiListItemText-primary': { 
                             fontSize: '0.85rem',
@@ -306,35 +286,35 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
               </List>
             </Collapse>
           </>
-        ) : (
+        ) : visibleWorkflowItems.length > 0 ? (
           // 折叠状态下显示工作流图标
           <ListItem disablePadding>
             <Tooltip title={t('nav.workflows')} placement="right">
               <ListItemButton
                 onClick={() => navigate('/workflows')}
-                sx={{
-                  mx: 1,
-                  mb: 0.5,
-                  borderRadius: 1,
-                  backgroundColor: location.pathname.startsWith('/workflows') ? '#3b82f6' : 'transparent',
-                  justifyContent: 'center',
-                  '&:hover': {
-                    backgroundColor: location.pathname.startsWith('/workflows') ? '#2563eb' : '#334155',
-                  },
-                }}
-              >
+              sx={{
+                mx: 1,
+                mb: 0.5,
+                borderRadius: 1,
+                backgroundColor: location.pathname.startsWith('/workflows') ? activeBg : 'transparent',
+                justifyContent: 'center',
+                '&:hover': {
+                  backgroundColor: location.pathname.startsWith('/workflows') ? activeBgHover : hoverBg,
+                },
+              }}
+            >
                 <ListItemIcon sx={{ color: 'inherit', minWidth: 0, justifyContent: 'center' }}>
                   <WorkflowIcon />
                 </ListItemIcon>
               </ListItemButton>
             </Tooltip>
           </ListItem>
-        )}
+        ) : null}
 
         {/* 管理员菜单 */}
         {canAccessAdminMenu() && (
           <>
-            <Divider sx={{ my: 1, borderColor: '#334155' }} />
+            <Divider sx={{ my: 1 }} />
             {open ? (
               <>
                 <ListItem disablePadding>
@@ -345,7 +325,7 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
                       mb: 0.5,
                       borderRadius: 1,
                       '&:hover': {
-                        backgroundColor: '#334155',
+                        backgroundColor: hoverBg,
                       },
                     }}
                   >
@@ -366,26 +346,25 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
                 </ListItem>
                 <Collapse in={adminMenuOpen} timeout="auto" unmountOnExit>
                   <List component="div" disablePadding>
-                    {adminMenuItems.map((item) => (
-                      canAccessMenuItem(item.role) && (
-                        <ListItem key={item.text} disablePadding>
+                    {visibleAdminItems.map((item) => (
+                        <ListItem key={item.key} disablePadding>
                           <ListItemButton
                             onClick={() => navigate(item.path)}
                             sx={{
                               mx: 2,
                               mb: 0.5,
                               borderRadius: 1,
-                              backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
+                              backgroundColor: location.pathname === item.path ? activeBg : 'transparent',
                               '&:hover': {
-                                backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
+                                backgroundColor: location.pathname === item.path ? activeBgHover : hoverBg,
                               },
                             }}
                           >
                             <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
-                              {item.icon}
+                              {React.createElement(item.icon)}
                             </ListItemIcon>
                             <ListItemText 
-                              primary={item.text}
+                              primary={t(item.translationKey)}
                               sx={{ 
                                 '& .MuiListItemText-primary': { 
                                   fontSize: '0.85rem',
@@ -395,37 +374,34 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
                             />
                           </ListItemButton>
                         </ListItem>
-                      )
                     ))}
                   </List>
                 </Collapse>
               </>
             ) : (
               // 折叠状态下，直接显示管理员菜单项
-              adminMenuItems.map((item) => (
-                canAccessMenuItem(item.role) && (
-                  <ListItem key={item.text} disablePadding>
-                    <Tooltip title={item.text} placement="right">
+              visibleAdminItems.map((item) => (
+                  <ListItem key={item.key} disablePadding>
+                    <Tooltip title={t(item.translationKey)} placement="right">
                       <ListItemButton
                         onClick={() => navigate(item.path)}
                         sx={{
                           mx: 1,
                           mb: 0.5,
                           borderRadius: 1,
-                          backgroundColor: location.pathname === item.path ? '#3b82f6' : 'transparent',
+                          backgroundColor: location.pathname === item.path ? activeBg : 'transparent',
                           justifyContent: 'center',
                           '&:hover': {
-                            backgroundColor: location.pathname === item.path ? '#2563eb' : '#334155',
+                            backgroundColor: location.pathname === item.path ? activeBgHover : hoverBg,
                           },
                         }}
                       >
                         <ListItemIcon sx={{ color: 'inherit', minWidth: 0, justifyContent: 'center' }}>
-                          {item.icon}
+                          {React.createElement(item.icon)}
                         </ListItemIcon>
                       </ListItemButton>
                     </Tooltip>
                   </ListItem>
-                )
               ))
             )}
           </>
@@ -433,7 +409,7 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
       </List>
 
       {/* 用户信息和语言切换 */}
-      <Box sx={{ borderTop: '1px solid #334155' }}>
+      <Box sx={{ borderTop: '1px solid', borderColor: 'divider' }}>
         {/* 用户信息 */}
         {user && (
           <Box sx={{ p: open ? 2 : 1 }}>
@@ -444,12 +420,12 @@ const Sidebar: React.FC<SidebarProps> = ({ open, onToggle }) => {
                   borderRadius: 1,
                   justifyContent: open ? 'initial' : 'center',
                   '&:hover': {
-                    backgroundColor: '#334155',
+                    backgroundColor: hoverBg,
                   },
                 }}
               >
                 <ListItemIcon sx={{ minWidth: open ? 40 : 0, justifyContent: 'center' }}>
-                  <Avatar sx={{ width: 32, height: 32, bgcolor: '#3b82f6' }}>
+                  <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
                     {user.username.charAt(0).toUpperCase()}
                   </Avatar>
                 </ListItemIcon>

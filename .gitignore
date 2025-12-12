@@ -1,5 +1,7 @@
 # OS
 .DS_Store
+.AppleDouble
+.LSOverride
 
 # Python
 __pycache__/
@@ -7,28 +9,51 @@ __pycache__/
 *.pyo
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 .coverage
 coverage.xml
+htmlcov/
+coverage/
 .venv/
 venv/
 env/
+.tox/
+.nox/
+*.egg-info/
+.python-version
+.ipynb_checkpoints/
 
 # Environments / Secrets
 .env
+.env.*
+**/.env.*
+!.env.example
+!**/.env.example
 backend/.env
 backend/.env.dev
 *.env.local
+.envrc
 
 # Databases / runtime files
 *.db
+*.sqlite3
 backend/ragj_platform.db
 backend/static/
+uploads/
+backend/uploads/
+backend/tmp/
+tmp/
 
 # Node / Frontend
 node_modules/
 frontend/node_modules/
 dist/
 build/
+frontend/.vite/
+frontend/.turbo/
+frontend/.cache/
+*.tsbuildinfo
+.eslintcache
 
 # Rust
 target/
@@ -41,3 +66,16 @@ backend/rust_bindings/
 logs/
 *.log
 
+# IDE / editor
+.idea/
+.vscode/
+.history/
+*.swp
+*.swo
+*.bak
+*.tmp
+*.temp
+
+# Local assistant configs
+.claude/
+.claude

@@ -603,7 +603,7 @@ const WorkflowManagement: React.FC = () => {
               workflows.length > 0 ? (
                 workflows.map(renderWorkflowCard)
               ) : (
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <Alert 
                     severity="info" 
                     sx={{ 
@@ -620,7 +620,7 @@ const WorkflowManagement: React.FC = () => {
               agents.length > 0 ? (
                 agents.map(renderAgentCard)
               ) : (
-                <Grid item xs={12}>
+                <Grid size={12}>
                   <Alert 
                     severity="info"
                     sx={{ 

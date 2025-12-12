@@ -6,7 +6,7 @@ Implements a sophisticated RAG pipeline using LangGraph for better conversation 
 import asyncio
 import json
 import uuid
-from typing import Dict, List, Any, Optional, TypedDict, Annotated
+from typing import Dict, List, Any, Optional, TypedDict, Annotated, AsyncGenerator
 from datetime import datetime
 import structlog
 
@@ -15,6 +15,7 @@ from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 
 from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
+from app.core.config import settings
 from app.services.llm_service import llm_service
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import get_elasticsearch_service
@@ -30,6 +31,7 @@ class ChatState(TypedDict):
     knowledge_base_id: str
     tenant_id: int
     user_id: int
+    model: Optional[str]
     query_vector: Optional[List[float]]
     retrieved_docs: List[Dict[str, Any]]
     reranked_docs: List[Dict[str, Any]]
@@ -92,6 +94,7 @@ class LangGraphChatService:
             knowledge_base_id=request.knowledge_base_id,
             tenant_id=tenant_id,
             user_id=user_id,
+            model=request.model,
             query_vector=None,
             retrieved_docs=[],
             reranked_docs=[],
@@ -108,7 +111,7 @@ class LangGraphChatService:
             return ChatResponse(
                 message=final_state["final_response"],
                 chat_id=chat_id,
-                model=request.model,
+                model=final_state["step_info"].get("model_used") or request.model or settings.CHAT_MODEL_NAME,
                 usage=final_state["step_info"].get("usage", {}),
                 timestamp=datetime.now(),
             )
@@ -118,10 +121,92 @@ class LangGraphChatService:
             return ChatResponse(
                 message="抱歉，我暂时无法获取有效的回答，请稍后再试。",
                 chat_id=chat_id,
-                model=request.model,
+                model=request.model or settings.CHAT_MODEL_NAME,
                 usage={},
                 timestamp=datetime.now(),
             )
+
+    async def stream_chat(
+        self, request: ChatRequest, tenant_id: int, user_id: int
+    ) -> AsyncGenerator[str, None]:
+        """Streaming RAG chat using the same LangGraph retrieval/rerank pipeline."""
+        chat_id = request.chat_id or f"chat_{uuid.uuid4().hex[:8]}"
+        try:
+            state = ChatState(
+                messages=[HumanMessage(content=request.message)],
+                query=request.message,
+                knowledge_base_id=request.knowledge_base_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                model=request.model,
+                query_vector=None,
+                retrieved_docs=[],
+                reranked_docs=[],
+                context="",
+                final_response="",
+                step_info={},
+            )
+
+            state = await self._generate_embedding(state)
+            if not state["step_info"].get("embedding_generated"):
+                async for chunk in llm_service.stream_chat(
+                    message=request.message,
+                    model=request.model,
+                    tenant_id=tenant_id,
+                ):
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            state = await self._retrieve_documents(state)
+            if not state.get("retrieved_docs"):
+                async for chunk in llm_service.stream_chat(
+                    message=request.message,
+                    model=request.model,
+                    tenant_id=tenant_id,
+                ):
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            state = await self._rerank_documents(state)
+            context = state.get("context") or ""
+            if not context:
+                async for chunk in llm_service.stream_chat(
+                    message=request.message,
+                    model=request.model,
+                    tenant_id=tenant_id,
+                ):
+                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+
+            rag_prompt = self._construct_rag_prompt(request.message, context)
+            async for chunk in llm_service.stream_chat(
+                message=rag_prompt,
+                model=request.model,
+                tenant_id=tenant_id,
+            ):
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+            # Send sources as a separate event for frontend rendering
+            sources: list[str] = []
+            seen: set[str] = set()
+            for doc in (state.get("reranked_docs") or [])[:3]:
+                meta = doc.get("metadata") or {}
+                name = meta.get("document_name") or ""
+                if name and name not in seen:
+                    seen.add(name)
+                    sources.append(name)
+            if sources:
+                yield f"data: {json.dumps({'success': True, 'sources': sources, 'type': 'sources'}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.error("LangGraph streaming failed", error=str(e), exc_info=True)
+            error_chunk = {"success": False, "error": str(e), "type": "error"}
+            yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
+
+        yield "data: [DONE]\n\n"
     
     async def _analyze_query(self, state: ChatState) -> ChatState:
         """Analyze the user query for intent and complexity"""
@@ -144,7 +229,8 @@ class LangGraphChatService:
         
         try:
             embedding_response = await llm_service.get_embeddings(
-                texts=[state["query"]]
+                texts=[state["query"]],
+                tenant_id=state["tenant_id"],
             )
             
             if embedding_response.get("success") and embedding_response.get("embeddings"):
@@ -299,6 +385,7 @@ class LangGraphChatService:
                 documents=state["retrieved_docs"],
                 provider=RerankingProvider.BGE,
                 top_k=2,  # 进一步减少重排文档数量
+                tenant_id=state["tenant_id"],
             )
             
             state["reranked_docs"] = reranked_docs
@@ -328,11 +415,13 @@ class LangGraphChatService:
         try:
             prompt = self._construct_rag_prompt(state["query"], state["context"])
             
+            model = state.get("model")
             llm_response = await llm_service.chat(
                 message=prompt,
-                model="deepseek-chat",  # Use default model
+                model=model,  # Use requested model if provided, else default
                 max_tokens=1500,  # 限制回答长度以提升速度
-                temperature=0.3   # 降低temperature以提升生成速度
+                temperature=0.3,   # 降低temperature以提升生成速度
+                tenant_id=state["tenant_id"],
             )
             
             logger.info(f"LLM response received: success={llm_response.get('success')}, message_length={len(llm_response.get('message', ''))}")
@@ -343,6 +432,7 @@ class LangGraphChatService:
                 
                 state["final_response"] = response_message
                 state["step_info"]["usage"] = llm_response.get("usage", {})
+                state["step_info"]["model_used"] = llm_response.get("model") or model
                 
                 # Add context information to the response
                 if state["reranked_docs"]:
@@ -373,14 +463,17 @@ class LangGraphChatService:
         
         try:
             # Try standard chat without RAG
+            model = state.get("model")
             llm_response = await llm_service.chat(
                 message=state["query"],
-                model="deepseek-chat"
+                model=model,
+                tenant_id=state["tenant_id"],
             )
             
             if llm_response.get("success"):
                 state["final_response"] = llm_response["message"]
                 state["step_info"]["usage"] = llm_response.get("usage", {})
+                state["step_info"]["model_used"] = llm_response.get("model") or model
             else:
                 state["final_response"] = "抱歉，我暂时无法获取有效的回答，请稍后再试。"
                 

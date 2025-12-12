@@ -165,7 +165,11 @@ class AdvancedNodeExecutors:
                     message=prompt,
                     model=config.get('model', 'qwen-turbo'),
                     max_tokens=max_length,
-                    temperature=0.3
+                    temperature=0.3,
+                    tenant_id=(
+                        (context.global_context or {}).get("tenant_id")
+                        or (context.input_data or {}).get("tenant_id")
+                    ),
                 )
                 
                 if response.get('success'):
@@ -220,7 +224,11 @@ JSON："""
                 message=prompt,
                 model=config.get('model', 'qwen-turbo'),
                 temperature=0.1,
-                max_tokens=500
+                max_tokens=500,
+                tenant_id=(
+                    (context.global_context or {}).get("tenant_id")
+                    or (context.input_data or {}).get("tenant_id")
+                ),
             )
             
             if response.get('success'):

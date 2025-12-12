@@ -16,6 +16,7 @@ import {
   TrendingUp as TrendingUpIcon,
 } from '@mui/icons-material';
 import { systemApi, knowledgeBaseApi } from '../services/api';
+import { alpha, useTheme } from '@mui/material/styles';
 
 interface SystemStats {
   knowledgeBases: number;
@@ -26,6 +27,7 @@ interface SystemStats {
 
 const Dashboard: React.FC = () => {
   const { t } = useTranslation();
+  const theme = useTheme();
   const [stats, setStats] = useState<SystemStats>({
     knowledgeBases: 0,
     documents: 0,
@@ -97,38 +99,42 @@ const Dashboard: React.FC = () => {
     value: number;
     icon: React.ReactNode;
     color: string;
-  }> = ({ title, value, icon, color }) => (
-    <Card sx={{ height: '100%', minWidth: 200 }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 48,
-              height: 48,
-              borderRadius: 2,
-              backgroundColor: `${color}.100`,
-              color: `${color}.600`,
-              mr: 2,
-            }}
-          >
-            {icon}
+  }> = ({ title, value, icon, color }) => {
+    const mainColor = (theme.palette as any)[color]?.main || theme.palette.primary.main;
+    const bgColor = alpha(mainColor, theme.palette.mode === 'dark' ? 0.18 : 0.12);
+    return (
+      <Card sx={{ height: '100%', minWidth: 200 }}>
+        <CardContent>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 48,
+                height: 48,
+                borderRadius: 2,
+                backgroundColor: bgColor,
+                color: mainColor,
+                mr: 2,
+              }}
+            >
+              {icon}
+            </Box>
+            <Box>
+              <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
+                {loading ? '-' : value.toLocaleString()}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {title}
+              </Typography>
+            </Box>
           </Box>
-          <Box>
-            <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'text.primary' }}>
-              {loading ? '-' : value.toLocaleString()}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {title}
-            </Typography>
-          </Box>
-        </Box>
-        {loading && <LinearProgress />}
-      </CardContent>
-    </Card>
-  );
+          {loading && <LinearProgress />}
+        </CardContent>
+      </Card>
+    );
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -198,8 +204,8 @@ const Dashboard: React.FC = () => {
                   width: 48,
                   height: 48,
                   borderRadius: 2,
-                  backgroundColor: 'secondary.100',
-                  color: 'secondary.600',
+                  backgroundColor: alpha(theme.palette.secondary.main, theme.palette.mode === 'dark' ? 0.18 : 0.12),
+                  color: theme.palette.secondary.main,
                   mr: 2,
                 }}
               >
@@ -228,8 +234,8 @@ const Dashboard: React.FC = () => {
                   width: 48,
                   height: 48,
                   borderRadius: 2,
-                  backgroundColor: 'success.100',
-                  color: 'success.600',
+                  backgroundColor: alpha(theme.palette.success.main, theme.palette.mode === 'dark' ? 0.18 : 0.12),
+                  color: theme.palette.success.main,
                   mr: 2,
                 }}
               >

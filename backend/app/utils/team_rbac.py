@@ -176,6 +176,11 @@ def switch_user_team(user_id: int, new_team_id: int, invited_by: Optional[int], 
                 invited_by=invited_by
             )
             db.add(new_user_tenant)
+
+        # 3. 同步用户当前租户（资源访问范围）到新团队
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            user.tenant_id = new_team_id
         
         db.commit()
         return True

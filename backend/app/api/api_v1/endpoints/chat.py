@@ -44,7 +44,9 @@ async def handle_chat(
             response = await langgraph_chat_service.chat(request, tenant_id, current_user.id)
         else:
             # Use original chat service for standard chat
-            response = await chat_service.chat(request)
+            response = await chat_service.chat(
+                request, tenant_id=tenant_id, user_id=current_user.id
+            )
             
         return response
     except Exception as e:
@@ -68,8 +70,16 @@ async def handle_stream_chat(
             "Handling streaming chat request",
             knowledge_base_id=request.knowledge_base_id,
         )
+        if request.knowledge_base_id:
+            generator = langgraph_chat_service.stream_chat(
+                request, tenant_id=tenant_id, user_id=current_user.id
+            )
+        else:
+            generator = chat_service.stream_chat(
+                request, tenant_id=tenant_id, user_id=current_user.id
+            )
         return StreamingResponse(
-            chat_service.stream_chat(request, tenant_id=tenant_id, user_id=current_user.id), 
+            generator,
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

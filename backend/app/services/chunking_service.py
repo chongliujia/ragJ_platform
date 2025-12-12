@@ -8,10 +8,18 @@ from typing import List, Dict, Any
 from enum import Enum
 from abc import ABC, abstractmethod
 
-from langchain.text_splitter import (
-    RecursiveCharacterTextSplitter,
-    CharacterTextSplitter,
-)
+# LangChain splitters were moved to langchain_text_splitters in newer versions.
+# Try new import first, fallback to old path for compatibility.
+try:
+    from langchain_text_splitters import (
+        RecursiveCharacterTextSplitter,
+        CharacterTextSplitter,
+    )
+except ImportError:  # pragma: no cover
+    from langchain.text_splitter import (
+        RecursiveCharacterTextSplitter,
+        CharacterTextSplitter,
+    )
 from app.services.llm_service import llm_service
 
 # Try to import Rust text processor for enhanced performance

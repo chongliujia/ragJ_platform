@@ -273,7 +273,7 @@ const TenantManagement: React.FC = () => {
       {/* 统计卡片 */}
       {stats ? (
         <Grid container spacing={3} sx={{ mb: 3 }}>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -285,7 +285,7 @@ const TenantManagement: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -297,7 +297,7 @@ const TenantManagement: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -309,7 +309,7 @@ const TenantManagement: React.FC = () => {
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
+          <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
                 <Typography color="textSecondary" gutterBottom>
@@ -325,7 +325,7 @@ const TenantManagement: React.FC = () => {
       ) : (
         <Grid container spacing={3} sx={{ mb: 3 }}>
           {[1,2,3,4].map((i) => (
-            <Grid item xs={12} sm={6} md={3} key={i}>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }} key={i}>
               <Card>
                 <CardContent>
                   <Typography color="textSecondary" gutterBottom>
@@ -342,7 +342,7 @@ const TenantManagement: React.FC = () => {
       {/* 搜索和过滤 */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} md={6}>
+          <Grid size={{ xs: 12, md: 6 }}>
             <TextField
               fullWidth
               label="搜索租户"
@@ -351,7 +351,7 @@ const TenantManagement: React.FC = () => {
               placeholder="租户名称或标识"
             />
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <FormControl fullWidth>
               <InputLabel>状态</InputLabel>
               <Select
@@ -365,7 +365,7 @@ const TenantManagement: React.FC = () => {
               </Select>
             </FormControl>
           </Grid>
-          <Grid item xs={12} md={3}>
+          <Grid size={{ xs: 12, md: 3 }}>
             <Button
               fullWidth
               variant="contained"
@@ -506,7 +506,7 @@ const TenantManagement: React.FC = () => {
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="租户名称"
@@ -514,7 +514,7 @@ const TenantManagement: React.FC = () => {
                 onChange={(e) => setTenantForm({ ...tenantForm, name: e.target.value })}
               />
             </Grid>
-            <Grid item xs={12} sm={6}>
+            <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
                 label="租户标识"
@@ -523,7 +523,7 @@ const TenantManagement: React.FC = () => {
                 disabled={!!selectedTenant} // 编辑时不允许修改slug
               />
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <TextField
                 fullWidth
                 label="描述"
@@ -533,7 +533,7 @@ const TenantManagement: React.FC = () => {
                 onChange={(e) => setTenantForm({ ...tenantForm, description: e.target.value })}
               />
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
                 fullWidth
                 label="最大用户数"
@@ -542,7 +542,7 @@ const TenantManagement: React.FC = () => {
                 onChange={(e) => setTenantForm({ ...tenantForm, max_users: parseInt(e.target.value) })}
               />
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
                 fullWidth
                 label="最大知识库数"
@@ -551,7 +551,7 @@ const TenantManagement: React.FC = () => {
                 onChange={(e) => setTenantForm({ ...tenantForm, max_knowledge_bases: parseInt(e.target.value) })}
               />
             </Grid>
-            <Grid item xs={12} sm={4}>
+            <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
                 fullWidth
                 label="存储配额 (MB)"
@@ -560,7 +560,7 @@ const TenantManagement: React.FC = () => {
                 onChange={(e) => setTenantForm({ ...tenantForm, storage_quota_mb: parseInt(e.target.value) })}
               />
             </Grid>
-            <Grid item xs={12}>
+            <Grid size={12}>
               <FormControlLabel
                 control={
                   <Switch

@@ -30,7 +30,11 @@ class BaseReranker(ABC):
 
     @abstractmethod
     async def rerank(
-        self, query: str, documents: List[Dict[str, Any]], top_k: int = 5
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = 5,
+        tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """
         重排文档
@@ -50,7 +54,11 @@ class NoReranker(BaseReranker):
     """无重排器（直接返回原始结果）"""
 
     async def rerank(
-        self, query: str, documents: List[Dict[str, Any]], top_k: int = 5
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = 5,
+        tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """直接返回原始文档，按现有分数排序"""
         sorted_docs = sorted(documents, key=lambda x: x.get("score", 0), reverse=True)
@@ -63,7 +71,7 @@ class BGEReranker(BaseReranker):
     def __init__(self):
         self.model_name = "BAAI/bge-reranker-v2-m3"
 
-    def _get_config(self):
+    def _get_config(self, tenant_id: int = None):
         """动态获取配置"""
         try:
             from app.services.model_config_service import (
@@ -73,7 +81,9 @@ class BGEReranker(BaseReranker):
             )
 
             # 尝试从模型配置服务获取重排模型配置
-            rerank_config = model_config_service.get_active_model(ModelType.RERANKING)
+            rerank_config = model_config_service.get_active_model(
+                ModelType.RERANKING, tenant_id=tenant_id
+            )
             if rerank_config and rerank_config.provider == ProviderType.SILICONFLOW:
                 return (
                     rerank_config.api_base or "https://api.siliconflow.cn/v1",
@@ -92,12 +102,16 @@ class BGEReranker(BaseReranker):
             return "https://api.siliconflow.cn/v1", None
 
     async def rerank(
-        self, query: str, documents: List[Dict[str, Any]], top_k: int = 5
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = 5,
+        tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """使用BGE重排器重排文档"""
         try:
             # 动态获取配置
-            api_url, api_key = self._get_config()
+            api_url, api_key = self._get_config(tenant_id=tenant_id)
             
             logger.info(f"BGE reranking configuration - API URL: {api_url}, has API key: {bool(api_key)}")
 
@@ -197,7 +211,7 @@ class CohereReranker(BaseReranker):
         self.model_name = "rerank-multilingual-v3.0"
         self.api_url = "https://api.cohere.ai/v1/rerank"
 
-    def _get_config(self):
+    def _get_config(self, tenant_id: int = None):
         """动态获取配置"""
         try:
             from app.services.model_config_service import (
@@ -207,7 +221,9 @@ class CohereReranker(BaseReranker):
             )
 
             # 尝试从模型配置服务获取重排模型配置
-            rerank_config = model_config_service.get_active_model(ModelType.RERANKING)
+            rerank_config = model_config_service.get_active_model(
+                ModelType.RERANKING, tenant_id=tenant_id
+            )
             if rerank_config and rerank_config.provider == ProviderType.COHERE:
                 return rerank_config.api_key
 
@@ -218,10 +234,14 @@ class CohereReranker(BaseReranker):
             return None
 
     async def rerank(
-        self, query: str, documents: List[Dict[str, Any]], top_k: int = 5
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = 5,
+        tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """使用Cohere重排器重排文档"""
-        api_key = self._get_config()
+        api_key = self._get_config(tenant_id=tenant_id)
 
         if not api_key:
             logger.warning(
@@ -283,7 +303,7 @@ class QwenReranker(BaseReranker):
         self.model_name = "gte-rerank"
         self.api_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
 
-    def _get_config(self):
+    def _get_config(self, tenant_id: int = None):
         """动态获取配置"""
         try:
             from app.services.model_config_service import (
@@ -293,7 +313,9 @@ class QwenReranker(BaseReranker):
             )
 
             # 尝试从模型配置服务获取重排模型配置
-            rerank_config = model_config_service.get_active_model(ModelType.RERANKING)
+            rerank_config = model_config_service.get_active_model(
+                ModelType.RERANKING, tenant_id=tenant_id
+            )
             if rerank_config and rerank_config.provider == ProviderType.QWEN:
                 return rerank_config.api_key
 
@@ -304,10 +326,14 @@ class QwenReranker(BaseReranker):
             return None
 
     async def rerank(
-        self, query: str, documents: List[Dict[str, Any]], top_k: int = 5
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = 5,
+        tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """使用Qwen重排器重排文档"""
-        api_key = self._get_config()
+        api_key = self._get_config(tenant_id=tenant_id)
 
         if not api_key:
             logger.warning("Qwen API key not configured, falling back to no reranking")
@@ -320,7 +346,8 @@ class QwenReranker(BaseReranker):
 
             # 使用现有的嵌入服务计算相似度
             embedding_response = await llm_service.get_embeddings(
-                texts=[query] + doc_texts
+                texts=[query] + doc_texts,
+                tenant_id=tenant_id,
             )
 
             if not embedding_response.get("success"):
@@ -374,7 +401,11 @@ class LocalReranker(BaseReranker):
     """本地重排器（基于简单的文本相似度）"""
 
     async def rerank(
-        self, query: str, documents: List[Dict[str, Any]], top_k: int = 5
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = 5,
+        tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """使用本地算法重排文档"""
         try:
@@ -428,6 +459,7 @@ class RerankingService:
         documents: List[Dict[str, Any]],
         provider: RerankingProvider = RerankingProvider.NONE,
         top_k: int = 5,
+        tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """
         重排文档
@@ -452,12 +484,14 @@ class RerankingService:
             reranker = self.rerankers[RerankingProvider.NONE]
 
         try:
-            return await reranker.rerank(query, documents, top_k)
+            return await reranker.rerank(
+                query, documents, top_k=top_k, tenant_id=tenant_id
+            )
         except Exception as e:
             logger.error(f"Reranking failed: {e}")
             # 回退到无重排
             return await self.rerankers[RerankingProvider.NONE].rerank(
-                query, documents, top_k
+                query, documents, top_k, tenant_id=tenant_id
             )
 
     def get_available_providers(self) -> List[Dict[str, Any]]:

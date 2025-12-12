@@ -291,7 +291,7 @@ const ModelConfigManager: React.FC = () => {
         </Typography>
         <Grid container spacing={2}>
           {Object.entries(presets).map(([key, preset]) => (
-            <Grid item xs={12} md={4} key={key}>
+            <Grid size={{ xs: 12, md: 4 }} key={key}>
               <Card variant="outlined">
                 <CardContent>
                   <Typography variant="h6" gutterBottom>
@@ -338,7 +338,7 @@ const ModelConfigManager: React.FC = () => {
         </Typography>
         <Grid container spacing={2}>
           {activeModels.map((model) => (
-            <Grid item xs={12} md={4} key={model.model_type}>
+            <Grid size={{ xs: 12, md: 4 }} key={model.model_type}>
               <Card variant="outlined">
                 <CardContent>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
@@ -387,7 +387,7 @@ const ModelConfigManager: React.FC = () => {
         </Typography>
         <Grid container spacing={2}>
           {providers.map((provider) => (
-            <Grid item xs={12} md={6} key={provider.provider}>
+            <Grid size={{ xs: 12, md: 6 }} key={provider.provider}>
               <Card variant="outlined">
                 <CardContent>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>

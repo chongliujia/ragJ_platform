@@ -158,10 +158,6 @@ const theme = createTheme({
           boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
           backdropFilter: 'blur(10px)',
           transition: 'all 0.2s ease-in-out',
-          '&:hover': {
-            boxShadow: '0 8px 25px rgba(0, 0, 0, 0.4)',
-            borderColor: 'rgba(0, 212, 255, 0.3)',
-          },
         },
       },
     },
@@ -503,7 +499,14 @@ function App() {
                       <Route path="/workflows/templates" element={<WorkflowTemplateLibrary />} />
                       <Route path="/workflows/:id/test" element={<WorkflowTester />} />
                       <Route path="/settings" element={<Settings />} />
-                      <Route path="/test" element={<Test />} />
+                      <Route 
+                        path="/test" 
+                        element={
+                          <AuthGuard requiredRole="tenant_admin">
+                            <Test />
+                          </AuthGuard>
+                        } 
+                      />
                       
                       {/* 管理员路由 */}
                       <Route 

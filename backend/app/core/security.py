@@ -12,8 +12,8 @@ from app.core.config import settings
 from app.db.models.user import User
 from app.db.models.permission import Permission, RolePermission
 
-# 密码上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 密码上下文（bcrypt 优先，pbkdf2_sha256 兜底）
+pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
 
 
 def create_access_token(
@@ -36,12 +36,25 @@ def create_access_token(
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """验证密码"""
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        # 密码后端异常（如 bcrypt 缺失/不兼容）不应导致 500
+        return False
 
 
 def get_password_hash(password: str) -> str:
     """获取密码哈希"""
-    return pwd_context.hash(password)
+    try:
+        return pwd_context.hash(password)
+    except Exception as e:
+        # bcrypt 后端不可用时回退到 pbkdf2_sha256，避免应用启动失败
+        try:
+            return pwd_context.hash(password, scheme="pbkdf2_sha256")
+        except Exception:
+            raise RuntimeError(
+                "Password hashing backend not available; check bcrypt/passlib installation"
+            ) from e
 
 
 def verify_token(token: str) -> Optional[str]:

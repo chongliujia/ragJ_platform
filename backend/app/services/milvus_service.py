@@ -250,13 +250,11 @@ class MilvusService:
             return []
 
         if not self.has_collection(collection_name):
-            # 创建集合时使用向量的实际维度
-            vector_dim = len(entities[0]["vector"]) if entities else settings.EMBEDDING_DIMENSION
-            logger.info(
-                f"Collection '{collection_name}' does not exist. Creating it now with dimension {vector_dim}..."
+            # Rule: KB collections must be created explicitly via KB create/maintenance APIs.
+            logger.error(
+                f"Collection '{collection_name}' does not exist. Refusing to auto-create; create the KB first."
             )
-            self.create_collection(collection_name, dim=vector_dim)
-            logger.info(f"Collection '{collection_name}' created successfully.")
+            raise RuntimeError(f"Collection '{collection_name}' not found")
 
         try:
             collection = Collection(name=collection_name, using=self.alias)

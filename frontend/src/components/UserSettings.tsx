@@ -7,7 +7,6 @@ import {
   Box,
   Paper,
   Typography,
-  TextField,
   Button,
   Grid,
   FormControl,
@@ -21,8 +20,7 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Divider,
-  Chip,
+  Slider,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -33,7 +31,8 @@ import {
   Tune as TuneIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
-import { AuthManager } from '../services/authApi';
+import { modelConfigApi } from '../services/modelConfigApi';
+import type { ProviderConfig, ModelConfig } from '../services/modelConfigApi';
 
 interface UserConfig {
   id: number;
@@ -54,6 +53,13 @@ interface UserConfig {
   updated_at: string;
 }
 
+interface AvailableChatModel {
+  model_name: string;
+  provider: string;
+  provider_display_name: string;
+  model_display_name: string;
+}
+
 const UserSettings: React.FC = () => {
   const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<UserConfig | null>(null);
@@ -62,26 +68,11 @@ const UserSettings: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const authManager = AuthManager.getInstance();
-
-  // 可用的模型选项
-  const chatModels = [
-    'deepseek-chat',
-    'qwen-max',
-    'qwen-plus',
-    'qwen-turbo',
-  ];
-
-  const embeddingModels = [
-    'text-embedding-3-small',
-    'text-embedding-ada-002',
-    'bge-large-zh-v1.5',
-  ];
-
-  const rerankModels = [
-    'bge-reranker-v2-m3',
-    'bge-reranker-base',
-  ];
+  // 动态可用模型（per-tenant）
+  const [availableChatModels, setAvailableChatModels] = useState<AvailableChatModel[]>([]);
+  const [embeddingModels, setEmbeddingModels] = useState<string[]>([]);
+  const [rerankModels, setRerankModels] = useState<string[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
 
   const themes = [
     { value: 'light', label: '浅色主题' },
@@ -96,6 +87,10 @@ const UserSettings: React.FC = () => {
 
   useEffect(() => {
     loadUserConfig();
+  }, []);
+
+  useEffect(() => {
+    loadModelOptions();
   }, []);
 
   const loadUserConfig = async () => {
@@ -117,6 +112,40 @@ const UserSettings: React.FC = () => {
       setError(error.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadModelOptions = async () => {
+    try {
+      setModelsLoading(true);
+      const [providersRes, activeRes, chatRes] = await Promise.all([
+        modelConfigApi.getProviders(),
+        modelConfigApi.getActiveModels(),
+        modelConfigApi.getAvailableChatModels().catch(() => null),
+      ]);
+
+      const providers = (providersRes.data || []) as ProviderConfig[];
+      const activeModels = (activeRes.data || []) as ModelConfig[];
+
+      const chatModels = (chatRes as any)?.data?.models || [];
+      setAvailableChatModels(chatModels);
+
+      const getOptionsForType = (type: string) => {
+        const active = activeModels.find(m => m.model_type === type);
+        const provider = active ? providers.find(p => p.provider === active.provider) : undefined;
+        const options = (provider as any)?.available_models?.[type] || (active?.model_name ? [active.model_name] : []);
+        return Array.from(new Set(options));
+      };
+
+      setEmbeddingModels(getOptionsForType('embedding'));
+      setRerankModels(getOptionsForType('reranking'));
+    } catch (error) {
+      console.error('Failed to load model options:', error);
+      setAvailableChatModels([]);
+      setEmbeddingModels([]);
+      setRerankModels([]);
+    } finally {
+      setModelsLoading(false);
     }
   };
 
@@ -176,6 +205,19 @@ const UserSettings: React.FC = () => {
     }
   };
 
+  const chatModelNames = Array.from(new Set([
+    ...availableChatModels.map(m => m.model_name),
+    ...(config?.preferred_chat_model ? [config.preferred_chat_model] : []),
+  ]));
+  const embeddingModelNames = Array.from(new Set([
+    ...embeddingModels,
+    ...(config?.preferred_embedding_model ? [config.preferred_embedding_model] : []),
+  ]));
+  const rerankModelNames = Array.from(new Set([
+    ...rerankModels,
+    ...(config?.preferred_rerank_model ? [config.preferred_rerank_model] : []),
+  ]));
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -191,6 +233,19 @@ const UserSettings: React.FC = () => {
       </Alert>
     );
   }
+
+  const temperatureNumber = Number(config.temperature);
+  const temperatureValue = Number.isFinite(temperatureNumber) ? temperatureNumber : 0.7;
+  const topPNumber = Number(config.top_p);
+  const topPValue = Number.isFinite(topPNumber) ? topPNumber : 0.9;
+  const maxTokensNumber = Number(config.max_tokens);
+  const maxTokensValue = Number.isFinite(maxTokensNumber) && maxTokensNumber > 0 ? maxTokensNumber : 1000;
+  const retrievalTopKNumber = Number(config.retrieval_top_k);
+  const retrievalTopKValue = Number.isFinite(retrievalTopKNumber) && retrievalTopKNumber > 0 ? retrievalTopKNumber : 5;
+  const chunkSizeNumber = Number(config.chunk_size);
+  const chunkSizeValue = Number.isFinite(chunkSizeNumber) && chunkSizeNumber > 0 ? chunkSizeNumber : 1000;
+  const chunkOverlapNumber = Number(config.chunk_overlap);
+  const chunkOverlapValue = Number.isFinite(chunkOverlapNumber) && chunkOverlapNumber >= 0 ? chunkOverlapNumber : 200;
 
   return (
     <Box sx={{ maxWidth: 800, mx: 'auto' }}>
@@ -216,49 +271,56 @@ const UserSettings: React.FC = () => {
         </AccordionSummary>
         <AccordionDetails>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
                 <InputLabel>聊天模型</InputLabel>
                 <Select
                   value={config.preferred_chat_model}
                   onChange={(e) => updateConfig('preferred_chat_model', e.target.value)}
                   label="聊天模型"
+                  disabled={modelsLoading}
                 >
-                  {chatModels.map((model) => (
-                    <MenuItem key={model} value={model}>
-                      {model}
-                    </MenuItem>
-                  ))}
+                  {chatModelNames.map((modelName) => {
+                    const info = availableChatModels.find(m => m.model_name === modelName);
+                    const displayName = info ? info.model_display_name : modelName;
+                    return (
+                      <MenuItem key={modelName} value={modelName}>
+                        {displayName}
+                      </MenuItem>
+                    );
+                  })}
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
                 <InputLabel>嵌入模型</InputLabel>
                 <Select
                   value={config.preferred_embedding_model}
                   onChange={(e) => updateConfig('preferred_embedding_model', e.target.value)}
                   label="嵌入模型"
+                  disabled={modelsLoading}
                 >
-                  {embeddingModels.map((model) => (
-                    <MenuItem key={model} value={model}>
-                      {model}
+                  {embeddingModelNames.map((modelName) => (
+                    <MenuItem key={modelName} value={modelName}>
+                      {modelName}
                     </MenuItem>
                   ))}
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
                 <InputLabel>重排序模型</InputLabel>
                 <Select
                   value={config.preferred_rerank_model}
                   onChange={(e) => updateConfig('preferred_rerank_model', e.target.value)}
                   label="重排序模型"
+                  disabled={modelsLoading}
                 >
-                  {rerankModels.map((model) => (
-                    <MenuItem key={model} value={model}>
-                      {model}
+                  {rerankModelNames.map((modelName) => (
+                    <MenuItem key={modelName} value={modelName}>
+                      {modelName}
                     </MenuItem>
                   ))}
                 </Select>
@@ -278,63 +340,131 @@ const UserSettings: React.FC = () => {
         </AccordionSummary>
         <AccordionDetails>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="最大令牌数"
-                type="number"
-                value={config.max_tokens}
-                onChange={(e) => updateConfig('max_tokens', parseInt(e.target.value))}
-                inputProps={{ min: 1, max: 32768 }}
-              />
+            <Grid size={{ xs: 12, md: 4 }}>
+              <Box sx={{ px: 1 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  最大令牌数 ({maxTokensValue})
+                </Typography>
+                <Slider
+                  min={256}
+                  max={32768}
+                  step={256}
+                  value={maxTokensValue}
+                  valueLabelDisplay="auto"
+                  onChange={(_, v) => {
+                    const val = Array.isArray(v) ? v[0] : v;
+                    updateConfig('max_tokens', Math.max(1, Math.round(Number(val))));
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  控制单次回复最大长度
+                </Typography>
+              </Box>
             </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="温度"
-                value={config.temperature}
-                onChange={(e) => updateConfig('temperature', e.target.value)}
-                helperText="控制生成随机性 (0.0-2.0)"
-              />
+            <Grid size={{ xs: 12, md: 4 }}>
+              <Box sx={{ px: 1 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  温度 ({temperatureValue.toFixed(2)})
+                </Typography>
+                <Slider
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={temperatureValue}
+                  valueLabelDisplay="auto"
+                  onChange={(_, v) => {
+                    const val = Array.isArray(v) ? v[0] : v;
+                    updateConfig('temperature', String(val));
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  控制生成随机性 (0.0-2.0)
+                </Typography>
+              </Box>
             </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="Top-p"
-                value={config.top_p}
-                onChange={(e) => updateConfig('top_p', e.target.value)}
-                helperText="核采样参数 (0.0-1.0)"
-              />
+            <Grid size={{ xs: 12, md: 4 }}>
+              <Box sx={{ px: 1 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  Top-p ({topPValue.toFixed(2)})
+                </Typography>
+                <Slider
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={topPValue}
+                  valueLabelDisplay="auto"
+                  onChange={(_, v) => {
+                    const val = Array.isArray(v) ? v[0] : v;
+                    updateConfig('top_p', String(val));
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  核采样参数 (0.0-1.0)
+                </Typography>
+              </Box>
             </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="检索数量"
-                type="number"
-                value={config.retrieval_top_k}
-                onChange={(e) => updateConfig('retrieval_top_k', parseInt(e.target.value))}
-                inputProps={{ min: 1, max: 20 }}
-              />
+            <Grid size={{ xs: 12, md: 4 }}>
+              <Box sx={{ px: 1 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  检索数量 ({retrievalTopKValue})
+                </Typography>
+                <Slider
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={retrievalTopKValue}
+                  valueLabelDisplay="auto"
+                  onChange={(_, v) => {
+                    const val = Array.isArray(v) ? v[0] : v;
+                    updateConfig('retrieval_top_k', Math.max(1, Math.round(Number(val))));
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  每次检索返回的片段数
+                </Typography>
+              </Box>
             </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="分块大小"
-                type="number"
-                value={config.chunk_size}
-                onChange={(e) => updateConfig('chunk_size', parseInt(e.target.value))}
-                inputProps={{ min: 100, max: 4096 }}
-              />
+            <Grid size={{ xs: 12, md: 4 }}>
+              <Box sx={{ px: 1 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  分块大小 ({chunkSizeValue})
+                </Typography>
+                <Slider
+                  min={100}
+                  max={4096}
+                  step={100}
+                  value={chunkSizeValue}
+                  valueLabelDisplay="auto"
+                  onChange={(_, v) => {
+                    const val = Array.isArray(v) ? v[0] : v;
+                    updateConfig('chunk_size', Math.max(100, Math.round(Number(val))));
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  文档切分时每块字符数
+                </Typography>
+              </Box>
             </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="分块重叠"
-                type="number"
-                value={config.chunk_overlap}
-                onChange={(e) => updateConfig('chunk_overlap', parseInt(e.target.value))}
-                inputProps={{ min: 0, max: 512 }}
-              />
+            <Grid size={{ xs: 12, md: 4 }}>
+              <Box sx={{ px: 1 }}>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  分块重叠 ({chunkOverlapValue})
+                </Typography>
+                <Slider
+                  min={0}
+                  max={512}
+                  step={10}
+                  value={chunkOverlapValue}
+                  valueLabelDisplay="auto"
+                  onChange={(_, v) => {
+                    const val = Array.isArray(v) ? v[0] : v;
+                    updateConfig('chunk_overlap', Math.max(0, Math.round(Number(val))));
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  相邻分块之间的重叠字符数
+                </Typography>
+              </Box>
             </Grid>
           </Grid>
         </AccordionDetails>
@@ -350,7 +480,7 @@ const UserSettings: React.FC = () => {
         </AccordionSummary>
         <AccordionDetails>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
+            <Grid size={{ xs: 12, md: 6 }}>
               <FormControl fullWidth>
                 <InputLabel>主题</InputLabel>
                 <Select
@@ -366,7 +496,7 @@ const UserSettings: React.FC = () => {
                 </Select>
               </FormControl>
             </Grid>
-            <Grid item xs={12} md={6}>
+            <Grid size={{ xs: 12, md: 6 }}>
               <FormControl fullWidth>
                 <InputLabel>语言</InputLabel>
                 <Select

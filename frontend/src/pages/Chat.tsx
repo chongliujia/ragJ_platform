@@ -32,7 +32,8 @@ import {
   Replay as ReplayIcon,
   ContentCopy as CopyIcon,
 } from '@mui/icons-material';
-import { knowledgeBaseApi, chatApi } from '../services/api';
+import { knowledgeBaseApi, chatApi, api } from '../services/api';
+import { modelConfigApi } from '../services/modelConfigApi';
 
 interface Message {
   id: string;
@@ -47,12 +48,21 @@ interface KnowledgeBase {
   name: string;
 }
 
+interface AvailableChatModel {
+  model_name: string;
+  provider: string;
+  provider_display_name: string;
+  model_display_name: string;
+}
+
 const Chat: React.FC = () => {
   const { t } = useTranslation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [selectedKb, setSelectedKb] = useState('');
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [availableChatModels, setAvailableChatModels] = useState<AvailableChatModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -67,6 +77,28 @@ const Chat: React.FC = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // 获取可用聊天模型（per-tenant），并尝试读取个人偏好作为默认
+  useEffect(() => {
+    const loadAvailableModels = async () => {
+      try {
+        const [modelsResponse, configResponse] = await Promise.all([
+          modelConfigApi.getAvailableChatModels(),
+          api.get('/api/v1/users/config').catch(() => null),
+        ]);
+        const models = modelsResponse.data?.models || [];
+        setAvailableChatModels(models);
+        const preferred = (configResponse as any)?.data?.preferred_chat_model;
+        if (preferred && models.some(m => m.model_name === preferred)) {
+          setSelectedModel(preferred);
+        }
+      } catch (error) {
+        console.error('Failed to fetch available chat models:', error);
+        setAvailableChatModels([]);
+      }
+    };
+    loadAvailableModels();
+  }, []);
 
   // 获取知识库列表
   const fetchKnowledgeBases = async () => {
@@ -130,6 +162,10 @@ const Chat: React.FC = () => {
       // 只有选择了知识库才传递knowledge_base_id
       if (selectedKb) {
         requestData.knowledge_base_id = selectedKb;
+      }
+      // 选择了模型则传递 model（否则走租户默认）
+      if (selectedModel) {
+        requestData.model = selectedModel;
       }
 
       const { cancel, promise } = chatApi.streamMessageCancelable(
@@ -233,29 +269,55 @@ const Chat: React.FC = () => {
           {t('chat.title')}
         </Typography>
         
-        <FormControl sx={{ 
-          minWidth: 200,
-          '& .MuiSelect-select': {
-            fontFamily: 'Inter, sans-serif',
-            fontWeight: 500
-          }
-        }}>
-          <InputLabel>{t('chat.selectKnowledgeBase')}</InputLabel>
-          <Select
-            value={selectedKb}
-            label={t('chat.selectKnowledgeBase')}
-            onChange={(e) => setSelectedKb(e.target.value)}
-          >
-            <MenuItem value="">
-              <em>{t('chat.normalChat')}</em>
-            </MenuItem>
-            {knowledgeBases.map((kb) => (
-              <MenuItem key={kb.id} value={kb.id}>
-                {kb.name}
+        <Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+          <FormControl sx={{ 
+            minWidth: 200,
+            '& .MuiSelect-select': {
+              fontFamily: 'Inter, sans-serif',
+              fontWeight: 500
+            }
+          }}>
+            <InputLabel>{t('chat.selectKnowledgeBase')}</InputLabel>
+            <Select
+              value={selectedKb}
+              label={t('chat.selectKnowledgeBase')}
+              onChange={(e) => setSelectedKb(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>{t('chat.normalChat')}</em>
               </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+              {knowledgeBases.map((kb) => (
+                <MenuItem key={kb.id} value={kb.id}>
+                  {kb.name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl sx={{ 
+            minWidth: 220,
+            '& .MuiSelect-select': {
+              fontFamily: 'Inter, sans-serif',
+              fontWeight: 500
+            }
+          }} disabled={!availableChatModels.length}>
+            <InputLabel>{t('chat.selectModel')}</InputLabel>
+            <Select
+              value={selectedModel}
+              label={t('chat.selectModel')}
+              onChange={(e) => setSelectedModel(e.target.value)}
+            >
+              <MenuItem value="">
+                <em>{t('chat.defaultModel')}</em>
+              </MenuItem>
+              {availableChatModels.map((m) => (
+                <MenuItem key={`${m.provider}:${m.model_name}`} value={m.model_name}>
+                  {m.model_display_name || m.model_name}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Stack>
       </Box>
 
       {error && (

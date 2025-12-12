@@ -13,6 +13,7 @@ import {
   Diamond as PremiumIcon,
   Translate as ChineseIcon,
 } from '@mui/icons-material';
+import { alpha } from '@mui/material/styles';
 import type { ModelsConfig } from '../types/models';
 
 interface ModelPresetsProps {
@@ -149,8 +150,8 @@ const ModelPresets: React.FC<ModelPresetsProps> = ({ onApplyPreset }) => {
                     width: 40,
                     height: 40,
                     borderRadius: 2,
-                    backgroundColor: `${preset.color}.100`,
-                    color: `${preset.color}.600`,
+                    backgroundColor: (theme) => alpha(theme.palette[preset.color].main, 0.12),
+                    color: (theme) => theme.palette[preset.color].main,
                     mr: 2,
                   }}
                 >

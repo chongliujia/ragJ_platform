@@ -33,6 +33,7 @@ import {
   CloudUpload as UploadIcon,
   ExpandMore as ExpandMoreIcon,
   Settings as SettingsIcon,
+  Info as InfoIcon,
   Description as FileIcon,
   Delete as DeleteIcon,
   Add as AddIcon,
@@ -396,6 +397,36 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
             </Button>
           </Box>
         </Paper>
+
+        {/* 上传说明 */}
+        <Accordion sx={{ mb: 3 }}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <InfoIcon />
+              <Typography variant="subtitle1">
+                {t('document.upload.help.title')}
+              </Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {t('document.upload.help.supportedTypes', { types: ALLOWED_EXTS.map(ext => ext.toUpperCase()).join(', ') })}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              {t('document.upload.help.maxSize', { size: MAX_SIZE_MB })}
+            </Typography>
+            <Divider sx={{ my: 1.5 }} />
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              {t('document.upload.help.chunkingTitle')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
+              {t('document.upload.help.chunkingDesc')}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {t('document.upload.help.tip')}
+            </Typography>
+          </AccordionDetails>
+        </Accordion>
 
         {/* 文件列表 */}
         {files.length > 0 && (

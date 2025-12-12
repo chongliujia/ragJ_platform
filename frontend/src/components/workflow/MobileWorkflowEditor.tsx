@@ -196,7 +196,7 @@ const MobileWorkflowEditor: React.FC<MobileWorkflowEditorProps> = ({
           </Typography>
           <Grid container spacing={1} sx={{ mb: 2 }}>
             {quickAddNodes.map((node) => (
-              <Grid item xs={4} key={node.type}>
+              <Grid size={4} key={node.type}>
                 <Paper
                   onClick={() => handleAddNode(node.type)}
                   sx={{
@@ -257,7 +257,7 @@ const MobileWorkflowEditor: React.FC<MobileWorkflowEditorProps> = ({
                   { type: 'transformer', label: '转换器', icon: '🔄' },
                   { type: 'classifier', label: '分类器', icon: '🏷️' },
                 ].map((node) => (
-                  <Grid item xs={4} key={node.type}>
+                  <Grid size={4} key={node.type}>
                     <Paper
                       onClick={() => handleAddNode(node.type)}
                       sx={{

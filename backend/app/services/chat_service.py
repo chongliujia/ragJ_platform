@@ -8,32 +8,21 @@ import uuid
 from typing import Optional, List, Dict, Any, AsyncGenerator
 from datetime import datetime
 import structlog
-import asyncio
 
 from app.schemas.chat import ChatRequest, ChatResponse, ChatMessage
 from app.core.config import settings
 from app.services.llm_service import llm_service
-from app.services.milvus_service import milvus_service
-from app.services.elasticsearch_service import get_elasticsearch_service
-from app.services.reranking_service import reranking_service, RerankingProvider
+from app.services.langgraph_chat_service import langgraph_chat_service
 
 logger = structlog.get_logger(__name__)
 
 
 class ChatService:
-    """Chat Service Class"""
+    """Chat Service Class (standard chat + LangGraph RAG delegation)."""
 
     def __init__(self):
         """Initializes the chat service"""
         self.chat_history: Dict[str, List[ChatMessage]] = {}
-        self.workflows: Dict[str, Any] = {}
-        self.elasticsearch_service = None
-        self.vector_service = milvus_service
-        
-    async def _ensure_services(self):
-        """Ensure services are initialized"""
-        if self.elasticsearch_service is None:
-            self.elasticsearch_service = await get_elasticsearch_service()
 
     async def chat(
         self, request: ChatRequest, tenant_id: int = None, user_id: int = None
@@ -42,10 +31,7 @@ class ChatService:
         Handles a chat request, dispatching it to the appropriate handler
         (e.g., RAG or a standard LLM call).
         """
-        # Ensure services are initialized
-        await self._ensure_services()
-        
-        # If a knowledge_base_id is provided, use the RAG pipeline
+        # If a knowledge_base_id is provided, delegate to LangGraph RAG pipeline
         if request.knowledge_base_id:
             if tenant_id is None or user_id is None:
                 raise ValueError("tenant_id and user_id are required for RAG chat.")
@@ -53,17 +39,17 @@ class ChatService:
                 f"Dispatching to RAG chat for knowledge base '{request.knowledge_base_id}'."
             )
             try:
-                return await self.rag_chat(request, tenant_id, user_id)
+                return await langgraph_chat_service.chat(request, tenant_id, user_id)
             except Exception as e:
                 logger.error(
-                    "RAG chat failed, returning fallback message",
+                    "LangGraph RAG chat failed, returning fallback message",
                     error=str(e),
                     exc_info=True,
                 )
                 return ChatResponse(
                     message="抱歉，我暂时无法获取有效的回答，请稍后再试。",
                     chat_id=request.chat_id or f"chat_{uuid.uuid4().hex[:8]}",
-                    model=request.model,
+                    model=request.model or settings.CHAT_MODEL_NAME,
                     usage={},
                     timestamp=datetime.now(),
                 )
@@ -72,7 +58,11 @@ class ChatService:
         logger.info("Performing standard chat completion.")
         try:
             llm_response = await llm_service.chat(
-                message=request.message, model=request.model
+                message=request.message,
+                model=request.model,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens or 1000,
+                tenant_id=tenant_id,
             )
 
             if not llm_response.get("success"):
@@ -83,7 +73,7 @@ class ChatService:
                 return ChatResponse(
                     message="抱歉，我暂时无法获取有效的回答，请稍后再试。",
                     chat_id=request.chat_id or f"chat_{uuid.uuid4().hex[:8]}",
-                    model=request.model,
+                    model=request.model or settings.CHAT_MODEL_NAME,
                     usage={},
                     timestamp=datetime.now(),
                 )
@@ -91,7 +81,7 @@ class ChatService:
             return ChatResponse(
                 message=llm_response.get("message", ""),
                 chat_id=request.chat_id or f"chat_{uuid.uuid4().hex[:8]}",
-                model=llm_response.get("model", request.model),
+                model=llm_response.get("model", request.model or settings.CHAT_MODEL_NAME),
                 usage=llm_response.get("usage", {}),
                 timestamp=datetime.now(),
             )
@@ -99,331 +89,36 @@ class ChatService:
             logger.error("Standard chat processing failed", error=str(e), exc_info=True)
             raise
 
-    async def rag_chat(
-        self,
-        request: ChatRequest,
-        tenant_id: int,
-        user_id: int,
-        rerank_provider: RerankingProvider = RerankingProvider.BGE,
-    ) -> ChatResponse:
-        """
-        Handles a chat request using the RAG (Retrieval-Augmented Generation) pipeline.
-        """
-        if not request.knowledge_base_id:
-            raise ValueError("knowledge_base_id is required for RAG chat.")
-
-        try:
-            logger.info("Generating embedding for the query...")
-            embedding_response = await llm_service.get_embeddings(
-                texts=[request.message]
-            )
-            if not embedding_response.get("success") or not embedding_response.get(
-                "embeddings", []
-            ):
-                logger.warning(
-                    "Query embedding failed (success=%s). Falling back to standard chat.",
-                    embedding_response.get("success"),
-                )
-                # Fallback to a normal chat without RAG
-                fallback_request = ChatRequest(
-                    message=request.message,
-                    model=request.model,
-                    chat_id=request.chat_id,
-                )
-                return await self.chat(fallback_request)
-            query_vector = embedding_response["embeddings"][0]
-
-            kb_name = request.knowledge_base_id
-            query_text = request.message
-            top_k = 5  # Retrieve more results for hybrid search
-
-            # Create tenant-specific collection and index names
-            tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
-            tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
-
-            logger.info(
-                f"Performing hybrid search in tenant-specific knowledge base '{tenant_collection_name}'..."
-            )
-
-            # --- Hybrid Search with Tenant Isolation ---
-            # 1. Perform vector search and keyword search in parallel with tenant filtering
-            vector_search_task = asyncio.create_task(
-                milvus_service.search(
-                    collection_name=tenant_collection_name,
-                    query_vector=query_vector,
-                    top_k=top_k,
-                    filter_expr=f"tenant_id == {tenant_id}",
-                )
-            )
-            # Get elasticsearch service
-            es_service = await get_elasticsearch_service()
-            if es_service:
-                keyword_search_task = asyncio.create_task(
-                    es_service.search(
-                        index_name=tenant_index_name,
-                        query=query_text,
-                        top_k=top_k,
-                        filter_query={"tenant_id": tenant_id},
-                    )
-                )
-            else:
-                # Create a dummy task that returns empty results
-                async def dummy_search():
-                    return []
-                keyword_search_task = asyncio.create_task(dummy_search())
-
-            vector_results, keyword_results = await asyncio.gather(
-                vector_search_task, keyword_search_task
-            )
-
-            # 2. Fuse the results
-            # Convert results to unified format for reranking
-            unified_docs = []
-
-            # Add vector search results
-            for res in vector_results:
-                unified_docs.append(
-                    {
-                        "text": res["text"],
-                        "score": 1.0
-                        / (
-                            1.0 + res.get("distance", 0)
-                        ),  # Convert distance to similarity
-                        "source": "vector",
-                    }
-                )
-
-            # Add keyword search results (avoid duplicates)
-            existing_texts = {doc["text"] for doc in unified_docs}
-            for res in keyword_results:
-                if res["text"] not in existing_texts:
-                    unified_docs.append(
-                        {
-                            "text": res["text"],
-                            "score": res.get("score", 0),
-                            "source": "keyword",
-                        }
-                    )
-
-            if not unified_docs:
-                logger.warning(
-                    "No documents found after fusion. Falling back to standard chat."
-                )
-                return await self.chat(
-                    ChatRequest(
-                        message=request.message,
-                        model=request.model,
-                        chat_id=request.chat_id,
-                    )
-                )
-
-            # 3. Rerank the fused results using the new reranking service
-            logger.info(
-                f"Reranking {len(unified_docs)} fused documents using {rerank_provider.value}..."
-            )
-            reranked_docs = await reranking_service.rerank_documents(
-                query=query_text,
-                documents=unified_docs,
-                provider=rerank_provider,
-                top_k=3,
-            )
-
-            final_docs = [doc["text"] for doc in reranked_docs]
-
-            context = "\n\n---\n\n".join(final_docs)
-
-            if not context:
-                logger.warning(
-                    "No relevant context found after reranking. Falling back to standard chat."
-                )
-                return await self.chat(
-                    ChatRequest(
-                        message=request.message,
-                        model=request.model,
-                        chat_id=request.chat_id,
-                    )
-                )
-
-            prompt = self._construct_rag_prompt(request.message, context)
-            logger.info(
-                "Generating final response from LLM with reranked RAG context..."
-            )
-            llm_response = await llm_service.chat(message=prompt, model=request.model)
-
-            if not llm_response.get("success"):
-                raise Exception("Failed to get a valid response from the LLM.")
-
-            return ChatResponse(
-                message=llm_response["message"],
-                chat_id=request.chat_id or f"chat_{uuid.uuid4().hex[:8]}",
-                model=llm_response["model"],
-                usage=llm_response["usage"],
-                timestamp=datetime.now(),
-            )
-        except Exception as e:
-            logger.error("RAG chat processing failed", error=str(e), exc_info=True)
-            raise
-
-    def _construct_rag_prompt(self, query: str, context: str) -> str:
-        """Constructs a prompt for the LLM using the retrieved context."""
-        prompt_template = """基于以下信息回答问题。请使用Markdown格式，包括标题、列表、粗体等来组织回答。
-如果上下文中没有相关信息，请说明在提供的文档中找不到相关信息。
-
-信息：
-{context}
-
-问题：{query}
-
-请提供结构化的Markdown回答："""
-        return prompt_template.format(context=context, query=query)
-
-    async def stream_chat(self, request: ChatRequest, tenant_id: int = None, user_id: int = None) -> AsyncGenerator[str, None]:
-        """Streaming chat response with RAG support. Requires tenant_id/user_id for RAG."""
+    async def stream_chat(
+        self, request: ChatRequest, tenant_id: int = None, user_id: int = None
+    ) -> AsyncGenerator[str, None]:
+        """Streaming chat. RAG requests are delegated to LangGraph."""
         logger.info("Initiating stream chat.")
-        
+
         try:
-            # Ensure services are initialized
-            await self._ensure_services()
-            
-            # Check if this is a RAG request
             if request.knowledge_base_id:
                 if tenant_id is None or user_id is None:
                     raise ValueError("tenant_id and user_id are required for RAG stream chat.")
-                logger.info(f"Streaming RAG chat with knowledge base: {request.knowledge_base_id}")
-
-                query_text = request.message
-
-                # 1) Generate embedding for vector search
-                emb_resp = await llm_service.get_embeddings(texts=[query_text])
-                if not emb_resp.get("success") or not emb_resp.get("embeddings"):
-                    logger.warning("Embedding failed for stream; fallback to standard chat")
-                    async for chunk in llm_service.stream_chat(
-                        message=request.message, model=request.model
-                    ):
-                        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-                else:
-                    query_vector = emb_resp["embeddings"][0]
-
-                    # 2) Parallel hybrid retrieval (Milvus + Elasticsearch)
-                    tenant_collection = f"tenant_{tenant_id}_{request.knowledge_base_id}"
-                    tenant_index = tenant_collection
-
-                    async def safe_vector_search():
-                        try:
-                            return await milvus_service.search(
-                                collection_name=tenant_collection,
-                                query_vector=query_vector,
-                                top_k=5,
-                            )
-                        except Exception as e:
-                            if (
-                                'dimension mismatch' in str(e).lower()
-                                or 'vector dimension' in str(e).lower()
-                                or 'should divide the dim' in str(e).lower()
-                            ):
-                                try:
-                                    milvus_service.recreate_collection_with_new_dimension(
-                                        tenant_collection, len(query_vector)
-                                    )
-                                    return await milvus_service.search(
-                                        collection_name=tenant_collection,
-                                        query_vector=query_vector,
-                                        top_k=5,
-                                    )
-                                except Exception:
-                                    return []
-                            return []
-
-                    vector_task = asyncio.create_task(safe_vector_search())
-
-                    keyword_task = None
-                    try:
-                        es_service = await get_elasticsearch_service()
-                        if es_service is not None:
-                            keyword_task = asyncio.create_task(
-                                es_service.search(
-                                    index_name=tenant_index,
-                                    query=query_text,
-                                    top_k=5,
-                                    filter_query={"tenant_id": tenant_id},
-                                )
-                            )
-                    except Exception:
-                        keyword_task = None
-
-                    if keyword_task:
-                        vector_results, keyword_results = await asyncio.gather(
-                            vector_task, keyword_task, return_exceptions=True
-                        )
-                    else:
-                        vector_results = await vector_task
-                        keyword_results = []
-
-                    if isinstance(vector_results, Exception):
-                        vector_results = []
-                    if isinstance(keyword_results, Exception):
-                        keyword_results = []
-
-                    # 3) Fuse results
-                    unified_docs = []
-                    for res in vector_results or []:
-                        unified_docs.append(
-                            {
-                                "text": res.get("text", ""),
-                                "score": 1.0 / (1.0 + res.get("distance", 0)),
-                                "source": "vector",
-                            }
-                        )
-                    existing = {d["text"] for d in unified_docs}
-                    for res in keyword_results or []:
-                        text = res.get("text", "")
-                        if text and text not in existing:
-                            unified_docs.append(
-                                {
-                                    "text": text,
-                                    "score": res.get("score", 0),
-                                    "source": "keyword",
-                                }
-                            )
-
-                    # 4) Rerank
-                    if unified_docs:
-                        reranked_docs = await reranking_service.rerank_documents(
-                            query=query_text,
-                            documents=unified_docs,
-                            provider=RerankingProvider.BGE,
-                            top_k=3,
-                        )
-                        context = "\n\n---\n\n".join([d["text"] for d in reranked_docs])
-
-                        rag_prompt = self._construct_rag_prompt(query_text, context)
-                        async for chunk in llm_service.stream_chat(
-                            message=rag_prompt, model=request.model
-                        ):
-                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-
-                        # Output simple source hints
-                        sources = [f"📄 {doc['source']}" for doc in reranked_docs[:3]]
-                        source_info = {"success": True, "sources": sources, "type": "sources"}
-                        yield f"data: {json.dumps(source_info, ensure_ascii=False)}\n\n"
-                    else:
-                        logger.warning("No documents found. Falling back to standard chat.")
-                        async for chunk in llm_service.stream_chat(
-                            message=request.message, model=request.model
-                        ):
-                            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            else:
-                # Standard non-RAG streaming chat
-                async for chunk in llm_service.stream_chat(
-                    message=request.message, model=request.model
+                async for chunk in langgraph_chat_service.stream_chat(
+                    request, tenant_id=tenant_id, user_id=user_id
                 ):
-                    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-                    
+                    yield chunk
+                return
+
+            async for chunk in llm_service.stream_chat(
+                message=request.message,
+                model=request.model,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens or 1000,
+                tenant_id=tenant_id,
+            ):
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
         except Exception as e:
             logger.error("Stream chat failed", error=str(e), exc_info=True)
-            error_chunk = {"success": False, "error": str(e)}
+            error_chunk = {"success": False, "error": str(e), "type": "error"}
             yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
-        
+
         yield "data: [DONE]\n\n"
 
     # The following methods are for managing chat history, kept for potential future use.

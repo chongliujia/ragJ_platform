@@ -812,11 +812,16 @@ class WorkflowExecutionEngine:
         print(f"DEBUG: Full prompt: '{full_prompt}'")
         
         # 调用LLM服务
+        tenant_id = (
+            (context.global_context or {}).get("tenant_id")
+            or (context.input_data or {}).get("tenant_id")
+        )
         response = await llm_service.chat(
             message=full_prompt,
             model=config.get('model', 'qwen-turbo'),
             temperature=config.get('temperature', 0.7),
-            max_tokens=config.get('max_tokens', 1000)
+            max_tokens=config.get('max_tokens', 1000),
+            tenant_id=tenant_id,
         )
         
         if response.get('success'):
@@ -843,15 +848,7 @@ class WorkflowExecutionEngine:
         query = input_data.get('query', '')
         knowledge_base = config.get('knowledge_base', '')
         top_k = config.get('top_k', 5)
-        
-        # 生成查询向量
-        embedding_response = await llm_service.get_embeddings(texts=[query])
-        
-        if not embedding_response.get('success'):
-            raise RuntimeError("向量生成失败")
-        
-        query_vector = embedding_response['embeddings'][0]
-        
+
         # 获取租户ID（优先从全局上下文，其次从输入数据）
         tenant_id = (
             (context.global_context or {}).get("tenant_id")
@@ -859,6 +856,16 @@ class WorkflowExecutionEngine:
         )
         if tenant_id is None:
             raise RuntimeError("缺少租户ID，无法执行RAG检索节点")
+
+        # 生成查询向量
+        embedding_response = await llm_service.get_embeddings(
+            texts=[query], tenant_id=tenant_id
+        )
+
+        if not embedding_response.get('success'):
+            raise RuntimeError("向量生成失败")
+
+        query_vector = embedding_response['embeddings'][0]
 
         # 向量搜索（按租户隔离集合）
         collection_name = f"tenant_{tenant_id}_{knowledge_base}"
@@ -902,12 +909,6 @@ class WorkflowExecutionEngine:
         if not query:
             return {'documents': [], 'query': '', 'total_results': 0}
 
-        # 生成查询向量
-        embedding_response = await llm_service.get_embeddings(texts=[query])
-        if not embedding_response.get('success'):
-            raise RuntimeError("向量生成失败")
-        query_vector = embedding_response['embeddings'][0]
-
         # 获取租户ID
         tenant_id = (
             (context.global_context or {}).get('tenant_id')
@@ -915,6 +916,14 @@ class WorkflowExecutionEngine:
         )
         if tenant_id is None:
             raise RuntimeError("缺少租户ID，无法执行混合检索")
+
+        # 生成查询向量
+        embedding_response = await llm_service.get_embeddings(
+            texts=[query], tenant_id=tenant_id
+        )
+        if not embedding_response.get('success'):
+            raise RuntimeError("向量生成失败")
+        query_vector = embedding_response['embeddings'][0]
 
         tenant_collection_name = f"tenant_{tenant_id}_{knowledge_base}"
         tenant_index_name = tenant_collection_name
@@ -1078,12 +1087,17 @@ class WorkflowExecutionEngine:
         
         # 构建分类提示
         prompt = f"将以下文本分类到这些类别中的一个：{', '.join(classes)}\n\n文本：{text}\n\n类别："
-        
+
+        tenant_id = (
+            (context.global_context or {}).get('tenant_id')
+            or (context.input_data or {}).get('tenant_id')
+        )
         response = await llm_service.chat(
             message=prompt,
             model=config.get('model', 'qwen-turbo'),
             temperature=0.1,
-            max_tokens=50
+            max_tokens=50,
+            tenant_id=tenant_id,
         )
         
         if response.get('success'):
@@ -1262,9 +1276,16 @@ class WorkflowExecutionEngine:
         config = node.config
         text = input_data.get('text', '')
         model = config.get('model', 'text-embedding-v2')
-        
+
+        tenant_id = (
+            (context.global_context or {}).get('tenant_id')
+            or (context.input_data or {}).get('tenant_id')
+        )
+
         # 生成嵌入
-        response = await llm_service.get_embeddings(texts=[text])
+        response = await llm_service.get_embeddings(
+            texts=[text], model=model, tenant_id=tenant_id
+        )
         
         if response.get('success'):
             return {
@@ -1357,11 +1378,16 @@ class WorkflowExecutionEngine:
         }
         provider = provider_map.get(provider_str, RerankingProvider.BGE)
 
+        tenant_id = (
+            (context.global_context or {}).get("tenant_id")
+            or (context.input_data or {}).get("tenant_id")
+        )
         reranked_docs = await reranking_service.rerank_documents(
             query=query,
             documents=documents,
             provider=provider,
-            top_k=top_k
+            top_k=top_k,
+            tenant_id=tenant_id,
         )
 
         # 提供两个键位以兼容不同工作流配置
