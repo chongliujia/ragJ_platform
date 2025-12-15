@@ -32,7 +32,9 @@ async def get_current_user_optional(
             email="dev@example.com",
             full_name="Development User",
             is_active=True,
-            role="user"
+            role="super_admin",
+            tenant_id=1,
+            is_verified=True,
         )
     
     if not credentials:
@@ -65,7 +67,9 @@ async def get_current_user(
             email="dev@example.com",
             full_name="Development User",
             is_active=True,
-            role="user"
+            role="super_admin",
+            tenant_id=1,
+            is_verified=True,
         )
     
     credentials_exception = HTTPException(

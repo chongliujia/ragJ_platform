@@ -9,18 +9,22 @@ from enum import Enum
 from abc import ABC, abstractmethod
 
 # LangChain splitters were moved to langchain_text_splitters in newer versions.
-# Try new import first, fallback to old path for compatibility.
-try:
-    from langchain_text_splitters import (
-        RecursiveCharacterTextSplitter,
-        CharacterTextSplitter,
-    )
-except ImportError:  # pragma: no cover
-    from langchain.text_splitter import (
-        RecursiveCharacterTextSplitter,
-        CharacterTextSplitter,
-    )
-from app.services.llm_service import llm_service
+# In minimal docker/dev images LangChain might be absent entirely; keep the app bootable by using a fallback splitter.
+RecursiveCharacterTextSplitter = None  # type: ignore
+_LANGCHAIN_SPLITTERS_AVAILABLE = False
+try:  # pragma: no cover
+    from langchain_text_splitters import RecursiveCharacterTextSplitter as _RCTS  # type: ignore
+
+    RecursiveCharacterTextSplitter = _RCTS  # type: ignore
+    _LANGCHAIN_SPLITTERS_AVAILABLE = True
+except Exception:  # pragma: no cover
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter as _RCTS  # type: ignore
+
+        RecursiveCharacterTextSplitter = _RCTS  # type: ignore
+        _LANGCHAIN_SPLITTERS_AVAILABLE = True
+    except Exception:
+        _LANGCHAIN_SPLITTERS_AVAILABLE = False
 
 # Try to import Rust text processor for enhanced performance
 try:
@@ -64,18 +68,107 @@ class BaseChunker(ABC):
 class RecursiveChunker(BaseChunker):
     """递归字符分片器"""
 
+    def _fallback_split(
+        self,
+        text: str,
+        chunk_size: int,
+        chunk_overlap: int,
+        separators: list[str],
+    ) -> List[str]:
+        text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+        if not text.strip():
+            return []
+
+        chunk_size = max(int(chunk_size or 1000), 1)
+        chunk_overlap = max(int(chunk_overlap or 0), 0)
+        if chunk_overlap >= chunk_size:
+            chunk_overlap = max(chunk_size - 1, 0)
+
+        pieces: list[str] = [text]
+        for sep in separators:
+            next_pieces: list[str] = []
+            for piece in pieces:
+                if len(piece) <= chunk_size:
+                    next_pieces.append(piece)
+                    continue
+                if sep == "":
+                    next_pieces.extend(
+                        [piece[i : i + chunk_size] for i in range(0, len(piece), chunk_size)]
+                    )
+                    continue
+                if sep in piece:
+                    parts = piece.split(sep)
+                    for i, part in enumerate(parts):
+                        if not part:
+                            continue
+                        # Preserve separator for better readability/structure.
+                        if i < len(parts) - 1:
+                            part = part + sep
+                        next_pieces.append(part)
+                else:
+                    next_pieces.append(piece)
+            pieces = next_pieces
+
+        # Merge into chunks with overlap while preserving order.
+        chunks: list[str] = []
+        current = ""
+
+        def _flush() -> None:
+            nonlocal current
+            if current.strip():
+                chunks.append(current.strip())
+            current = ""
+
+        for piece in pieces:
+            if not piece or not piece.strip():
+                continue
+
+            # If a single piece is still huge, hard-split it.
+            if len(piece) > chunk_size:
+                _flush()
+                step = max(chunk_size - chunk_overlap, 1)
+                for i in range(0, len(piece), step):
+                    chunk = piece[i : i + chunk_size]
+                    if chunk.strip():
+                        chunks.append(chunk.strip())
+                continue
+
+            if len(current) + len(piece) <= chunk_size:
+                current += piece
+                continue
+
+            # Flush current and start a new one with overlap from the tail of current.
+            prev = current
+            _flush()
+            if chunk_overlap > 0 and prev:
+                overlap_text = prev[-chunk_overlap:] if len(prev) > chunk_overlap else prev
+                current = overlap_text + piece
+            else:
+                current = piece
+
+        _flush()
+        return chunks
+
     def chunk_text(
         self, text: str, chunk_size: int = 1000, chunk_overlap: int = 200, **kwargs
     ) -> List[str]:
         """递归分片策略"""
-        splitter = RecursiveCharacterTextSplitter(
+        separators = ["\n\n", "\n", " ", ""]
+        if _LANGCHAIN_SPLITTERS_AVAILABLE and RecursiveCharacterTextSplitter is not None:
+            splitter = RecursiveCharacterTextSplitter(  # type: ignore[misc]
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                length_function=len,
+                is_separator_regex=False,
+                separators=separators,
+            )
+            return splitter.split_text(text)
+        return self._fallback_split(
+            text=text,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            length_function=len,
-            is_separator_regex=False,
-            separators=["\n\n", "\n", " ", ""],
+            separators=separators,
         )
-        return splitter.split_text(text)
 
 
 class SemanticChunker(BaseChunker):

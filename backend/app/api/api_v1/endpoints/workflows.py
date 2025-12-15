@@ -906,6 +906,12 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
             category="llm",
             inputs=[
                 NodeInputSchema(
+                    name="data",
+                    type=DataType.OBJECT,
+                    description="输入数据对象（可选，用于透传上下文）",
+                    required=False
+                ),
+                NodeInputSchema(
                     name="prompt",
                     type=DataType.STRING,
                     description="输入提示",
@@ -966,6 +972,12 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
             category="data",
             inputs=[
                 NodeInputSchema(
+                    name="data",
+                    type=DataType.OBJECT,
+                    description="输入数据对象（可选，用于透传 query 等字段）",
+                    required=False
+                ),
+                NodeInputSchema(
                     name="query",
                     type=DataType.STRING,
                     description="查询文本",
@@ -978,7 +990,19 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     type=DataType.ARRAY,
                     description="检索到的文档",
                     required=True
-                )
+                ),
+                NodeOutputSchema(
+                    name="query",
+                    type=DataType.STRING,
+                    description="实际使用的 query",
+                    required=False
+                ),
+                NodeOutputSchema(
+                    name="total_results",
+                    type=DataType.NUMBER,
+                    description="结果数量",
+                    required=False
+                ),
             ]
         ),
         'data_transformer': NodeFunctionSignature(
@@ -1062,10 +1086,16 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
             category="control",
             inputs=[
                 NodeInputSchema(
+                    name="data",
+                    type=DataType.OBJECT,
+                    description="输入数据对象（可选）",
+                    required=False
+                ),
+                NodeInputSchema(
                     name="value",
-                    type=DataType.STRING,
-                    description="待评估的值",
-                    required=True
+                    type=DataType.OBJECT,
+                    description="待评估的值（可选；若为空则使用 field_path 从 data 中取值）",
+                    required=False
                 )
             ],
             outputs=[
@@ -1074,6 +1104,12 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     type=DataType.BOOLEAN,
                     description="条件结果",
                     required=True
+                ),
+                NodeOutputSchema(
+                    name="data",
+                    type=DataType.OBJECT,
+                    description="透传数据（用于分支继续处理）",
+                    required=False
                 )
             ]
         ),
@@ -1088,6 +1124,24 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     type=DataType.OBJECT,
                     description="输入数据",
                     required=True
+                ),
+                NodeOutputSchema(
+                    name="prompt",
+                    type=DataType.STRING,
+                    description="常用字段：prompt（可选）",
+                    required=False
+                ),
+                NodeOutputSchema(
+                    name="query",
+                    type=DataType.STRING,
+                    description="常用字段：query（可选）",
+                    required=False
+                ),
+                NodeOutputSchema(
+                    name="text",
+                    type=DataType.STRING,
+                    description="常用字段：text（可选）",
+                    required=False
                 )
             ]
         ),
@@ -1101,6 +1155,12 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     type=DataType.OBJECT,
                     description="输出数据",
                     required=True
+                ),
+                NodeInputSchema(
+                    name="input",
+                    type=DataType.OBJECT,
+                    description="兼容字段：input（可选）",
+                    required=False
                 )
             ],
             outputs=[
@@ -1117,6 +1177,12 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
             description="生成文本嵌入向量",
             category="ai",
             inputs=[
+                NodeInputSchema(
+                    name="data",
+                    type=DataType.OBJECT,
+                    description="输入数据对象（可选）",
+                    required=False
+                ),
                 NodeInputSchema(
                     name="text",
                     type=DataType.STRING,

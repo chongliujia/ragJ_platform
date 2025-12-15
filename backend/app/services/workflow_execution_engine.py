@@ -7,6 +7,7 @@ import asyncio
 import json
 import time
 import uuid
+import ast
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from datetime import datetime
 import structlog
@@ -534,6 +535,21 @@ class WorkflowExecutionEngine:
             if predecessor in node_data:
                 source_payload = node_data[predecessor]
 
+                # 条件边：若 condition 表达式为 false，则跳过该边的数据传递
+                try:
+                    cond = getattr(edge_data, "condition", None)
+                    if cond and isinstance(cond, str) and cond.strip():
+                        ok = self._evaluate_edge_condition(
+                            cond,
+                            source_payload=source_payload,
+                            context=context,
+                        )
+                        if not ok:
+                            continue
+                except Exception:
+                    # 条件表达式异常时，默认不阻断执行（按 true 处理）
+                    pass
+
                 # 解析源节点输出别名
                 source_node: WorkflowNode = graph.nodes[predecessor]['node']
                 source_outputs = [out.name for out in source_node.function_signature.outputs]
@@ -588,6 +604,82 @@ class WorkflowExecutionEngine:
             pass
 
         return input_data
+
+    def _evaluate_edge_condition(
+        self,
+        expr: str,
+        *,
+        source_payload: Any,
+        context: WorkflowExecutionContext,
+    ) -> bool:
+        """Evaluate edge condition safely (no calls/attributes/imports).
+
+        Variables:
+          - value: predecessor node output payload (usually a dict)
+          - input: workflow input_data
+          - context: workflow global_context
+        """
+        raw = (expr or "").strip()
+        if not raw:
+            return True
+        if raw.lower() in ("true", "yes", "y", "1"):
+            return True
+        if raw.lower() in ("false", "no", "n", "0"):
+            return False
+
+        variables = {
+            "value": source_payload,
+            "input": context.input_data,
+            "context": context.global_context,
+        }
+
+        tree = ast.parse(raw, mode="eval")
+
+        allowed = (
+            ast.Expression,
+            ast.BoolOp,
+            ast.UnaryOp,
+            ast.Compare,
+            ast.Name,
+            ast.Load,
+            ast.Constant,
+            ast.Subscript,
+            ast.Slice,
+            ast.Tuple,
+            ast.List,
+            ast.Dict,
+        )
+        allowed_ops = (
+            ast.And,
+            ast.Or,
+            ast.Not,
+            ast.Eq,
+            ast.NotEq,
+            ast.In,
+            ast.NotIn,
+            ast.Gt,
+            ast.GtE,
+            ast.Lt,
+            ast.LtE,
+            ast.Is,
+            ast.IsNot,
+        )
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) or isinstance(node, ast.Attribute):
+                raise ValueError("Calls/attributes are not allowed in condition expressions")
+            if isinstance(node, ast.BinOp):
+                raise ValueError("Binary operations are not allowed in condition expressions")
+            if isinstance(node, ast.Await) or isinstance(node, ast.Lambda):
+                raise ValueError("Unsupported syntax in condition expressions")
+            if not isinstance(node, allowed + allowed_ops):
+                # Explicitly forbid anything else (e.g., comprehension, f-string, etc.)
+                raise ValueError(f"Unsupported syntax in condition expressions: {type(node).__name__}")
+            if isinstance(node, ast.Name) and node.id not in variables:
+                raise ValueError(f"Unknown name in condition expressions: {node.id}")
+
+        code = compile(tree, "<edge_condition>", "eval")
+        return bool(eval(code, {"__builtins__": {}}, variables))
     
     async def _apply_data_transform(
         self,
@@ -771,7 +863,7 @@ class WorkflowExecutionEngine:
         config = node.config
         
         # 处理输入数据 - 更智能的数据提取
-        actual_data = input_data
+        actual_data = self._normalize_input_payload(input_data)
         
         # 如果数据被多层包装，逐层解包
         while 'data' in actual_data and isinstance(actual_data['data'], dict) and len(actual_data) == 1:
@@ -818,7 +910,8 @@ class WorkflowExecutionEngine:
         )
         response = await llm_service.chat(
             message=full_prompt,
-            model=config.get('model', 'qwen-turbo'),
+            # Treat empty/absent model as "use active per-tenant chat model"
+            model=(config.get('model') or None),
             temperature=config.get('temperature', 0.7),
             max_tokens=config.get('max_tokens', 1000),
             tenant_id=tenant_id,
@@ -829,7 +922,7 @@ class WorkflowExecutionEngine:
                 'content': response['message'],
                 'metadata': {
                     'tokens_used': response.get('usage', {}).get('total_tokens', 0),
-                    'model': config.get('model', 'qwen-turbo'),
+                    'model': response.get('model') or (config.get('model') or 'active'),
                     'finish_reason': response.get('finish_reason', 'stop')
                 }
             }
@@ -845,7 +938,14 @@ class WorkflowExecutionEngine:
         """执行RAG检索节点"""
         
         config = node.config
-        query = input_data.get('query', '')
+        actual_data = self._normalize_input_payload(input_data)
+        query = (
+            actual_data.get('query')
+            or actual_data.get('prompt')
+            or actual_data.get('text')
+            or actual_data.get('input')
+            or ''
+        )
         knowledge_base = config.get('knowledge_base', '')
         top_k = config.get('top_k', 5)
 
@@ -1128,8 +1228,13 @@ class WorkflowExecutionEngine:
         condition_value = config.get('condition_value', '')
         field_path = config.get('field_path', 'value')
         
-        # 从输入数据中获取值
-        value = self._get_nested_value(input_data, field_path)
+        actual_data = self._normalize_input_payload(input_data)
+
+        # 支持直接传入 value；否则从 field_path 提取
+        if 'value' in actual_data and actual_data.get('value') is not None:
+            value = actual_data.get('value')
+        else:
+            value = self._get_nested_value(actual_data, field_path)
         
         # 评估条件
         if condition_type == 'equals':
@@ -1147,7 +1252,9 @@ class WorkflowExecutionEngine:
             'condition_result': result,
             'evaluated_value': value,
             'condition_type': condition_type,
-            'condition_value': condition_value
+            'condition_value': condition_value,
+            # 透传数据，便于分支继续处理
+            'data': actual_data,
         }
     
     async def _execute_code_node(
@@ -1225,7 +1332,8 @@ class WorkflowExecutionEngine:
         template = config.get('template', '')
 
         # 兼容 'data' 包装
-        payload = input_data.get('data', input_data)
+        actual_data = self._normalize_input_payload(input_data)
+        payload = actual_data.get('data', actual_data)
 
         if template:
             # 使用模板格式化输出，避免缺失键报错
@@ -1274,8 +1382,15 @@ class WorkflowExecutionEngine:
         """执行嵌入节点"""
         
         config = node.config
-        text = input_data.get('text', '')
-        model = config.get('model', 'text-embedding-v2')
+        actual_data = self._normalize_input_payload(input_data)
+        text = (
+            actual_data.get('text')
+            or actual_data.get('prompt')
+            or actual_data.get('query')
+            or ''
+        )
+        # Treat empty/absent model as "use active per-tenant embedding model"
+        model = config.get('model') or None
 
         tenant_id = (
             (context.global_context or {}).get('tenant_id')
@@ -1291,7 +1406,7 @@ class WorkflowExecutionEngine:
             return {
                 'embedding': response['embeddings'][0],
                 'dimensions': len(response['embeddings'][0]),
-                'model': model,
+                'model': model or 'active',
                 'text': text
             }
         else:
@@ -1364,8 +1479,9 @@ class WorkflowExecutionEngine:
         """执行重排序节点（接入 reranking_service）"""
         
         config = node.config or {}
-        query = input_data.get('query', '')
-        documents = input_data.get('documents', [])
+        actual_data = self._normalize_input_payload(input_data)
+        query = actual_data.get('query') or actual_data.get('prompt') or ''
+        documents = actual_data.get('documents', []) or []
         top_k = int(config.get('top_k', 5))
 
         provider_str = str(config.get('provider', 'bge')).lower()
@@ -1397,6 +1513,24 @@ class WorkflowExecutionEngine:
             'query': query,
             'total_results': len(reranked_docs)
         }
+
+    def _normalize_input_payload(self, input_data: Any) -> Dict[str, Any]:
+        """Normalize input payload to a dict; unwrap/merge common 'data' wrapper."""
+        if input_data is None:
+            return {}
+        if isinstance(input_data, dict):
+            actual = input_data
+            # 如果数据被多层包装，逐层解包
+            while 'data' in actual and isinstance(actual['data'], dict) and len(actual) == 1:
+                actual = actual['data']
+            # 如果还有data键但不是唯一键，则优先使用data内的数据，但保持其他键
+            if 'data' in actual and isinstance(actual['data'], dict):
+                merged = {**actual}
+                merged.update(actual['data'])
+                actual = merged
+            return actual
+        # 非 dict 统一包一层，便于 downstream 取值
+        return {'value': input_data, 'data': input_data}
     
     def _calculate_similarity(self, query: str, text: str) -> float:
         """计算文本相似度（简单实现）"""

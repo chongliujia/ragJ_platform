@@ -1,5 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { Dialog, DialogTitle, DialogContent, DialogActions, Button, Box, Typography, CircularProgress, List, ListItem, ListItemText, IconButton, Tooltip } from '@mui/material';
+import {
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Button,
+  Box,
+  Typography,
+  CircularProgress,
+  List,
+  ListItem,
+  ListItemText,
+  IconButton,
+  Tooltip,
+  Divider,
+  TablePagination,
+} from '@mui/material';
 import { Close as CloseIcon, ContentCopy as CopyIcon, Refresh as RefreshIcon } from '@mui/icons-material';
 import { documentApi } from '../services/api';
 
@@ -9,6 +25,7 @@ interface DocumentChunksDialogProps {
   knowledgeBaseId: string;
   documentId: string;
   filename?: string;
+  totalChunks?: number;
 }
 
 interface ChunkItem {
@@ -17,42 +34,33 @@ interface ChunkItem {
   text: string;
 }
 
-const PAGE_SIZE = 100;
+const DEFAULT_ROWS_PER_PAGE = 100;
 
-const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({ open, onClose, knowledgeBaseId, documentId, filename }) => {
+const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
+  open,
+  onClose,
+  knowledgeBaseId,
+  documentId,
+  filename,
+  totalChunks,
+}) => {
   const [loading, setLoading] = useState(false);
   const [chunks, setChunks] = useState<ChunkItem[]>([]);
-  const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
 
-  const loadPage = async (reset = false) => {
+  const loadPage = async (nextPage: number, nextRowsPerPage: number) => {
     try {
       setLoading(true);
       setError(null);
-      const currentOffset = reset ? 0 : offset;
-      const res = await documentApi.getChunks(knowledgeBaseId, documentId, { offset: currentOffset, limit: PAGE_SIZE });
+      const currentOffset = Math.max(0, nextPage * nextRowsPerPage);
+      const res = await documentApi.getChunks(knowledgeBaseId, documentId, { offset: currentOffset, limit: nextRowsPerPage });
       const items: ChunkItem[] = Array.isArray(res.data) ? res.data : [];
-      if (reset) {
-        // reset list
-        setChunks(items);
-      } else {
-        // append with de-duplication by id+chunk_index
-        setChunks(prev => {
-          const seen = new Set(prev.map(x => `${x.id}-${x.chunk_index}`));
-          const merged: ChunkItem[] = [...prev];
-          for (const it of items) {
-            const key = `${it.id}-${it.chunk_index}`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              merged.push(it);
-            }
-          }
-          return merged;
-        });
-      }
-      setOffset(currentOffset + items.length);
-      setHasMore(items.length === PAGE_SIZE);
+      setChunks(items);
+      setHasMore(items.length === nextRowsPerPage);
+      setPage(nextPage);
     } catch (e: any) {
       setError(e?.response?.data?.detail || e?.message || '加载分片失败');
     } finally {
@@ -63,9 +71,9 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({ open, onClo
   useEffect(() => {
     if (open) {
       setChunks([]);
-      setOffset(0);
       setHasMore(true);
-      loadPage(true);
+      setPage(0);
+      loadPage(0, rowsPerPage);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, knowledgeBaseId, documentId]);
@@ -77,6 +85,9 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({ open, onClo
       // ignore
     }
   };
+
+  const count = typeof totalChunks === 'number' && totalChunks >= 0 ? totalChunks : -1;
+  const canNext = count === -1 ? hasMore : page < Math.ceil(count / rowsPerPage) - 1;
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
@@ -90,9 +101,11 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({ open, onClo
               </IconButton>
             </Tooltip>
             <Tooltip title="刷新">
-              <IconButton size="small" onClick={() => loadPage(true)} disabled={loading}>
-                <RefreshIcon fontSize="small" />
-              </IconButton>
+              <span>
+                <IconButton size="small" onClick={() => loadPage(page, rowsPerPage)} disabled={loading}>
+                  <RefreshIcon fontSize="small" />
+                </IconButton>
+              </span>
             </Tooltip>
             <IconButton size="small" onClick={onClose}>
               <CloseIcon fontSize="small" />
@@ -104,6 +117,34 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({ open, onClo
         {error && (
           <Typography color="error" sx={{ mb: 2 }}>{error}</Typography>
         )}
+        <Box sx={{ mb: 1 }}>
+          <TablePagination
+            component="div"
+            count={count}
+            page={page}
+            onPageChange={(_, next) => {
+              if (loading) return;
+              if (count === -1 && next > page && !hasMore) return;
+              loadPage(next, rowsPerPage);
+            }}
+            rowsPerPage={rowsPerPage}
+            onRowsPerPageChange={(e) => {
+              const next = Number(e.target.value);
+              const safe = Number.isFinite(next) && next > 0 ? next : DEFAULT_ROWS_PER_PAGE;
+              setRowsPerPage(safe);
+              loadPage(0, safe);
+            }}
+            rowsPerPageOptions={[25, 50, 100, 200]}
+            labelRowsPerPage="每页"
+            labelDisplayedRows={({ from, to, count }) =>
+              count === -1 ? `${from}-${to}` : `${from}-${to} / ${count}`
+            }
+            backIconButtonProps={{ disabled: loading || page === 0 }}
+            nextIconButtonProps={{ disabled: loading || !canNext }}
+          />
+          <Divider />
+        </Box>
+
         {chunks.length === 0 && loading ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
             <CircularProgress />
@@ -124,11 +165,6 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({ open, onClo
               </ListItem>
             ))}
           </List>
-        )}
-        {hasMore && !loading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
-            <Button onClick={() => loadPage(false)}>加载更多</Button>
-          </Box>
         )}
         {loading && chunks.length > 0 && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>

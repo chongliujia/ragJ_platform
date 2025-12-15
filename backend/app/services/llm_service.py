@@ -5,6 +5,7 @@ Currently supports Qwen (通义千问) API for testing
 
 import asyncio
 import json
+import re
 from typing import Optional, Dict, Any, AsyncGenerator
 import structlog
 import httpx
@@ -348,11 +349,11 @@ class DeepSeekAPIService:
             logger.error("DeepSeek chat completion failed", error=str(e))
             return {"success": False, "error": str(e)}
 
-    async def get_embeddings(self, texts: list[str]) -> dict[str, Any]:
+    async def get_embeddings(
+        self, texts: list[str], model: str | None = None
+    ) -> dict[str, Any]:
         """
         Generate text embeddings using DeepSeek API
-        Note: DeepSeek may not have a dedicated embedding endpoint,
-        so this is a placeholder that returns mock embeddings for testing
         """
         if not self.api_key:
             return {"success": False, "error": "DEEPSEEK_API_KEY not configured"}
@@ -360,29 +361,262 @@ class DeepSeekAPIService:
         if not texts:
             return {"success": True, "embeddings": []}
 
-        # DeepSeek doesn't have a dedicated embedding API, so we'll generate mock embeddings
-        # In a real implementation, you might want to use a different embedding service
-        # or implement a workaround
-        logger.warning(
-            "DeepSeek doesn't provide embedding API, generating mock embeddings for testing"
-        )
-
-        import random
-
-        mock_embeddings = []
-        for text in texts:
-            # Generate a deterministic mock embedding based on text hash
-            random.seed(hash(text) % (2**32))
-            embedding = [
-                random.random() for _ in range(1536)
-            ]  # 1536 dimensions like OpenAI
-            mock_embeddings.append(embedding)
-
         return {
-            "success": True,
-            "embeddings": mock_embeddings,
-            "usage": {"total_tokens": sum(len(text.split()) for text in texts)},
+            "success": False,
+            "error": "DeepSeek embedding is not supported; configure an embedding provider (e.g., SiliconFlow/OpenAI/Qwen/Local).",
         }
+
+
+class CohereAPIService:
+    """Service for Cohere API integration"""
+
+    def __init__(self):
+        self.api_key = getattr(settings, "COHERE_API_KEY", None)
+        self.base_url = "https://api.cohere.ai/v1"
+
+    async def test_connection(self) -> Dict[str, Any]:
+        if not self.api_key:
+            return {
+                "success": False,
+                "error": "COHERE_API_KEY not configured",
+                "message": "Please set COHERE_API_KEY in environment variables",
+            }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    f"{self.base_url}/models",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                )
+            if resp.status_code == 200:
+                return {"success": True, "message": "Cohere API connection successful"}
+            return {
+                "success": False,
+                "error": f"API error {resp.status_code}",
+                "details": resp.text,
+            }
+        except Exception as e:
+            logger.error("Cohere API connection test failed", error=str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Failed to connect to Cohere API",
+            }
+
+    async def chat_completion(
+        self,
+        message: str,
+        model: str = "command-r",
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> Dict[str, Any]:
+        if not self.api_key:
+            return {"success": False, "error": "COHERE_API_KEY not configured"}
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.base_url}/chat",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "message": message,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                )
+            if resp.status_code == 200:
+                obj = resp.json()
+                text = obj.get("text") or ""
+                return {
+                    "success": True,
+                    "message": text,
+                    "model": model,
+                    "usage": obj.get("usage", {}),
+                }
+            return {
+                "success": False,
+                "error": f"API error {resp.status_code}",
+                "details": resp.text,
+            }
+        except Exception as e:
+            logger.error("Cohere chat completion failed", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def get_embeddings(
+        self, texts: list[str], model: str = "embed-multilingual-v3.0"
+    ) -> dict[str, Any]:
+        if not self.api_key:
+            return {"success": False, "error": "COHERE_API_KEY not configured"}
+
+        if not texts:
+            return {"success": True, "embeddings": []}
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.base_url}/embed",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "texts": texts,
+                        "input_type": "search_document",
+                    },
+                )
+            if resp.status_code == 200:
+                obj = resp.json()
+                embeddings = obj.get("embeddings") or []
+                return {"success": True, "embeddings": embeddings}
+            return {
+                "success": False,
+                "error": f"API error {resp.status_code}",
+                "details": resp.text,
+            }
+        except Exception as e:
+            logger.error("Cohere embedding generation failed", error=str(e))
+            return {"success": False, "error": str(e)}
+
+
+class LocalOpenAICompatibleService:
+    """Service for local/self-hosted OpenAI-compatible endpoints (e.g., Ollama, vLLM)."""
+
+    def __init__(self):
+        self.api_key: Optional[str] = getattr(settings, "LOCAL_MODEL_API_KEY", None)
+        self.base_url: str = getattr(settings, "LOCAL_MODEL_ENDPOINT", None) or "http://localhost:11434/v1"
+
+    async def test_connection(self) -> Dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{self.base_url.rstrip('/')}/models",
+                    headers=({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}),
+                )
+            if resp.status_code == 200:
+                return {"success": True, "message": "Local OpenAI-compatible endpoint reachable"}
+            return {"success": False, "error": f"API error {resp.status_code}", "details": resp.text}
+        except Exception as e:
+            return {"success": False, "error": str(e), "message": "Failed to reach local endpoint"}
+
+    async def chat_completion(
+        self,
+        message: str,
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> Dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers={
+                        **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}),
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": message}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                )
+            if resp.status_code == 200:
+                obj = resp.json()
+                return {
+                    "success": True,
+                    "message": obj["choices"][0]["message"]["content"],
+                    "model": model,
+                    "usage": obj.get("usage", {}),
+                    "request_id": obj.get("id", ""),
+                }
+            return {"success": False, "error": f"API error {resp.status_code}", "details": resp.text}
+        except Exception as e:
+            logger.error("Local chat completion failed", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def get_embeddings(self, texts: list[str], model: str) -> dict[str, Any]:
+        if not texts:
+            return {"success": True, "embeddings": []}
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    f"{self.base_url.rstrip('/')}/embeddings",
+                    headers={
+                        **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}),
+                        "Content-Type": "application/json",
+                    },
+                    json={"model": model, "input": texts},
+                )
+            if resp.status_code == 200:
+                obj = resp.json()
+                embeddings = [item["embedding"] for item in obj.get("data", [])]
+                return {"success": True, "embeddings": embeddings, "usage": obj.get("usage", {})}
+            return {"success": False, "error": f"API error {resp.status_code}", "details": resp.text}
+        except Exception as e:
+            logger.error("Local embedding generation failed", error=str(e))
+            return {"success": False, "error": str(e)}
+
+    async def stream_chat_completion(
+        self,
+        message: str,
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream chat completion using OpenAI-compatible SSE from a local/self-hosted endpoint."""
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    headers={
+                        **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}),
+                        "Content-Type": "application/json",
+                        "Accept": "text/event-stream",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": message}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "stream": True,
+                    },
+                ) as response:
+                    if response.status_code != 200:
+                        body = await response.aread()
+                        yield {
+                            "success": False,
+                            "error": f"API error {response.status_code}",
+                            "details": body.decode(errors="ignore"),
+                        }
+                        return
+
+                    async for line in response.aiter_lines():
+                        if not line:
+                            continue
+                        if line.startswith("data: "):
+                            data = line[6:].strip()
+                            if data == "[DONE]":
+                                break
+                            try:
+                                obj = json.loads(data)
+                            except Exception:
+                                continue
+                            delta = (
+                                obj.get("choices", [{}])[0]
+                                .get("delta", {})
+                                .get("content")
+                            )
+                            if delta:
+                                yield {"success": True, "content": delta}
+        except Exception as e:
+            logger.error("Local streaming chat failed", error=str(e))
+            yield {"success": False, "error": str(e)}
 
 
 class QwenAPIService:
@@ -595,12 +829,15 @@ class QwenAPIService:
             logger.error("Streaming chat failed", error=str(e))
             yield {"success": False, "error": str(e)}
 
-    async def get_embeddings(self, texts: list[str]) -> dict[str, Any]:
+    async def get_embeddings(
+        self, texts: list[str], model: str | None = None
+    ) -> dict[str, Any]:
         """
         Generate text embeddings using the Qwen embedding model.
 
         Args:
             texts: A list of text strings to embed.
+            model: Optional embedding model name (defaults to settings.QWEN_EMBEDDING_MODEL).
 
         Returns:
             A dictionary containing the embedding results or an error.
@@ -620,7 +857,7 @@ class QwenAPIService:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": settings.QWEN_EMBEDDING_MODEL,
+                        "model": model or settings.QWEN_EMBEDDING_MODEL,
                         "input": {"texts": texts},
                     },
                     timeout=60.0,
@@ -653,7 +890,7 @@ class QwenAPIService:
             return {"success": False, "error": str(e)}
 
     async def rerank(
-        self, query: str, documents: list[str], top_n: int = 5
+        self, query: str, documents: list[str], top_n: int = 5, model: str | None = None
     ) -> dict[str, Any]:
         """
         Reranks a list of documents based on a query using the Qwen rerank model.
@@ -681,7 +918,7 @@ class QwenAPIService:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": settings.QWEN_RERANK_MODEL,
+                        "model": model or settings.QWEN_RERANK_MODEL,
                         "query": query,
                         "documents": documents,
                         "top_n": top_n,
@@ -780,6 +1017,80 @@ class SiliconFlowAPIService:
                 "message": "Please set SILICONFLOW_API_KEY in environment variables",
             }
 
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"model": "BAAI/bge-large-zh-v1.5", "input": ["ping"]},
+                    timeout=30.0,
+                )
+                if response.status_code == 200:
+                    return {
+                        "success": True,
+                        "message": "SiliconFlow API connection successful",
+                    }
+                return {
+                    "success": False,
+                    "error": f"API error {response.status_code}",
+                    "details": response.text,
+                }
+        except Exception as e:
+            logger.error("SiliconFlow API connection test failed", error=str(e))
+            return {
+                "success": False,
+                "error": str(e),
+                "message": "Failed to connect to SiliconFlow API",
+            }
+
+    async def chat_completion(
+        self,
+        message: str,
+        model: str = "deepseek-ai/DeepSeek-V2.5",
+        temperature: float = 0.7,
+        max_tokens: int = 1000,
+    ) -> Dict[str, Any]:
+        """Generate chat completion using SiliconFlow (OpenAI-compatible)."""
+        if not self.api_key:
+            return {"success": False, "error": "SILICONFLOW_API_KEY not configured"}
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": message}],
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                    timeout=60.0,
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    return {
+                        "success": True,
+                        "message": result["choices"][0]["message"]["content"],
+                        "model": model,
+                        "usage": result.get("usage", {}),
+                        "request_id": result.get("id", ""),
+                    }
+                return {
+                    "success": False,
+                    "error": f"API error {response.status_code}",
+                    "details": response.text,
+                }
+        except Exception as e:
+            logger.error("SiliconFlow chat completion failed", error=str(e))
+            return {"success": False, "error": str(e)}
+
     async def stream_chat_completion(
         self,
         message: str,
@@ -849,6 +1160,131 @@ class LLMService:
         self.deepseek = DeepSeekAPIService()
         self.openai = OpenAIAPIService()
         self.siliconflow = SiliconFlowAPIService()
+        self.cohere = CohereAPIService()
+        self.local = LocalOpenAICompatibleService()
+
+    def _estimate_tokens_rough(self, text: str) -> int:
+        """Heuristic token estimator (no tokenizer deps).
+
+        We slightly over-estimate to avoid providers rejecting requests due to hard token limits.
+        """
+        if not text:
+            return 0
+        cjk = len(re.findall(r"[\u4e00-\u9fff]", text))
+        ascii_chars = len(re.findall(r"[\x00-\x7F]", text))
+        # Conservative: ~2 ASCII chars per token (avoid under-estimation for dense PDFs).
+        ascii_tokens = ascii_chars // 2 if ascii_chars else 0
+        words = len(re.findall(r"[A-Za-z0-9_]+", text))
+        base = int(cjk + max(ascii_tokens, words))
+        # Extra safety: some providers tokenize closer to "non-whitespace characters".
+        try:
+            non_space = len(re.sub(r"\s+", "", text))
+            base = max(base, non_space)
+        except Exception:
+            pass
+        return int(base)
+
+    def _split_text_to_token_limit(self, text: str, max_tokens: int) -> list[str]:
+        text = (text or "").strip()
+        if not text:
+            return []
+        if max_tokens <= 0:
+            return [text]
+        if self._estimate_tokens_rough(text) <= max_tokens:
+            return [text]
+
+        # Sentence-like split first.
+        units = re.split(r"(?<=[。！？!?；;\n])", text)
+        units = [u for u in (u.strip() for u in units) if u]
+        if len(units) <= 1:
+            units = [text]
+
+        out: list[str] = []
+        buf = ""
+        buf_tokens = 0
+
+        def _flush():
+            nonlocal buf, buf_tokens
+            if buf.strip():
+                out.append(buf.strip())
+            buf = ""
+            buf_tokens = 0
+
+        for u in units:
+            u_tokens = self._estimate_tokens_rough(u)
+            if u_tokens <= max_tokens:
+                if buf and buf_tokens + u_tokens <= max_tokens:
+                    buf = f"{buf} {u}".strip()
+                    buf_tokens = self._estimate_tokens_rough(buf)
+                else:
+                    _flush()
+                    buf = u
+                    buf_tokens = u_tokens
+                continue
+
+            # Oversized unit: hard split by shrinking window.
+            _flush()
+            start = 0
+            while start < len(u):
+                remaining = u[start:]
+                remaining_tokens = max(self._estimate_tokens_rough(remaining), 1)
+                guess_len = max(64, int(len(remaining) * (max_tokens / remaining_tokens)))
+                end = min(len(u), start + guess_len)
+                part = u[start:end]
+                while end - start > 32 and self._estimate_tokens_rough(part) > max_tokens:
+                    end = start + max(32, (end - start) // 2)
+                    part = u[start:end]
+                if part.strip():
+                    out.append(part.strip())
+                start = end
+
+        _flush()
+        return [x for x in out if x.strip()]
+
+    def _enforce_embedding_token_limit(self, texts: list[str], max_tokens: int) -> list[str]:
+        if not texts:
+            return []
+        if max_tokens <= 0:
+            return texts
+        out: list[str] = []
+        for t in texts:
+            out.extend(self._split_text_to_token_limit(t, max_tokens=max_tokens))
+        return out
+
+    def _resolve_provider_for_model(
+        self, model: str, tenant_id: int | None, model_type: str
+    ) -> str:
+        """
+        Resolve provider by looking up the tenant's provider model lists first, then fallback to heuristics.
+        model_type: "chat" | "embedding" | "reranking"
+        Returns provider string (e.g., "openai").
+        """
+        try:
+            from app.services.model_config_service import model_config_service, ModelType
+
+            mt = ModelType(model_type)
+            providers = model_config_service.get_providers(tenant_id=tenant_id)
+            for p_type, p_cfg in providers.items():
+                names = (p_cfg.models or {}).get(mt, []) or []
+                if model in names:
+                    return p_type.value
+        except Exception:
+            pass
+
+        # Fallback heuristics
+        if model.startswith("deepseek"):
+            return "deepseek"
+        if model.startswith("qwen") or model.startswith("gte-"):
+            return "qwen"
+        if model.startswith("gpt"):
+            return "openai"
+        if model.startswith("command"):
+            return "cohere"
+        if model_type == "embedding":
+            return settings.EMBEDDING_MODEL_PROVIDER
+        if model_type == "reranking":
+            return settings.RERANK_MODEL_PROVIDER
+        return settings.CHAT_MODEL_PROVIDER
 
     async def test_all_connections(self) -> Dict[str, Any]:
         """
@@ -878,6 +1314,16 @@ class LLMService:
         logger.info("Testing SiliconFlow API connection...")
         siliconflow_result = await self.siliconflow.test_connection()
         results["siliconflow"] = siliconflow_result
+
+        # Test Cohere API
+        logger.info("Testing Cohere API connection...")
+        cohere_result = await self.cohere.test_connection()
+        results["cohere"] = cohere_result
+
+        # Test Local endpoint
+        logger.info("Testing Local OpenAI-compatible endpoint...")
+        local_result = await self.local.test_connection()
+        results["local"] = local_result
 
         # Current configuration
         results["current_config"] = {
@@ -965,6 +1411,21 @@ class LLMService:
                             self.openai.api_key = chat_config.api_key
                         if chat_config.api_base:
                             self.openai.base_url = chat_config.api_base
+                    elif provider == "siliconflow":
+                        if chat_config.api_key:
+                            self.siliconflow.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.siliconflow.base_url = chat_config.api_base
+                    elif provider == "cohere":
+                        if chat_config.api_key:
+                            self.cohere.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.cohere.base_url = chat_config.api_base
+                    elif provider == "local":
+                        if chat_config.api_key:
+                            self.local.api_key = chat_config.api_key
+                        if chat_config.api_base:
+                            self.local.base_url = chat_config.api_base
 
                     # 使用用户保存的默认推理参数（如有）
                     if chat_config.temperature is not None:
@@ -986,65 +1447,59 @@ class LLMService:
         else:
             # 当指定了具体模型时，根据模型名称确定提供商，但需要加载API密钥配置
             logger.info(f"Using specified model: {model}")
-            if model.startswith("deepseek"):
-                provider = "deepseek"
-            elif model.startswith("qwen"):
-                provider = "qwen" 
-            elif model.startswith("gpt"):
-                provider = "openai"
-            else:
-                # 对于未知模型，尝试从配置服务获取默认提供商
-                try:
-                    from app.services.model_config_service import (
-                        model_config_service,
-                        ModelType,
-                    )
-                    chat_config = model_config_service.get_active_model(
-                        ModelType.CHAT, tenant_id=tenant_id
-                    )
-                    if chat_config:
-                        provider = chat_config.provider.value
-                        logger.info(f"Unknown model '{model}', using default provider: {provider}")
-                    else:
-                        provider = settings.CHAT_MODEL_PROVIDER
-                        logger.info(f"Unknown model '{model}', fallback to settings provider: {provider}")
-                except Exception:
-                    provider = settings.CHAT_MODEL_PROVIDER
-                    logger.info(f"Unknown model '{model}', fallback to settings provider: {provider}")
+            provider = self._resolve_provider_for_model(model, tenant_id=tenant_id, model_type="chat")
             
-            # 为指定的模型加载API密钥配置，但不覆盖模型名称
+            # 为指定的模型加载该 provider 的配置（优先租户 provider-level 配置）
             try:
                 from app.services.model_config_service import (
                     model_config_service,
                     ModelType,
+                    ProviderType,
                 )
-                chat_config = model_config_service.get_active_model(
-                    ModelType.CHAT, tenant_id=tenant_id
+                p_cfg = None
+                try:
+                    p_cfg = model_config_service.get_provider(
+                        ProviderType(provider), tenant_id=tenant_id
+                    )
+                except Exception:
+                    p_cfg = None
+
+                if provider == "deepseek":
+                    if p_cfg and p_cfg.api_key:
+                        self.deepseek.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.deepseek.base_url = p_cfg.api_base
+                    self.deepseek.model = model
+                elif provider == "qwen":
+                    if p_cfg and p_cfg.api_key:
+                        self.qwen.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.qwen.base_url = p_cfg.api_base
+                    self.qwen.model = model
+                elif provider == "openai":
+                    if p_cfg and p_cfg.api_key:
+                        self.openai.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.openai.base_url = p_cfg.api_base
+                elif provider == "siliconflow":
+                    if p_cfg and p_cfg.api_key:
+                        self.siliconflow.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.siliconflow.base_url = p_cfg.api_base
+                elif provider == "cohere":
+                    if p_cfg and p_cfg.api_key:
+                        self.cohere.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.cohere.base_url = p_cfg.api_base
+                elif provider == "local":
+                    if p_cfg and p_cfg.api_key:
+                        self.local.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.local.base_url = p_cfg.api_base
+
+                logger.info(
+                    f"Loaded provider config for '{provider}' with specified model '{model}'"
                 )
-                if chat_config and chat_config.provider.value == provider:
-                    # 只有当配置服务的提供商与推断的提供商一致时，才使用其API密钥
-                    if provider == "deepseek":
-                        if chat_config.api_key:
-                            self.deepseek.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.deepseek.base_url = chat_config.api_base
-                        # 设置指定的模型名称而不是配置服务的默认模型
-                        self.deepseek.model = model
-                    elif provider == "qwen":
-                        if chat_config.api_key:
-                            self.qwen.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.qwen.base_url = chat_config.api_base
-                        # 设置指定的模型名称而不是配置服务的默认模型
-                        self.qwen.model = model
-                    elif provider == "openai":
-                        if chat_config.api_key:
-                            self.openai.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.openai.base_url = chat_config.api_base
-                    logger.info(f"Loaded API keys for provider '{provider}' with specified model '{model}'")
-                else:
-                    logger.warning(f"No matching API config found for provider '{provider}', using environment variables")
             except Exception as e:
                 logger.warning(f"Failed to load API keys for specified model: {e}")
 
@@ -1061,11 +1516,23 @@ class LLMService:
                 return await self.openai.chat_completion(
                     message, model, temperature, max_tokens
                 )
+            elif provider == "siliconflow":
+                return await self.siliconflow.chat_completion(
+                    message, model, temperature, max_tokens
+                )
+            elif provider == "cohere":
+                return await self.cohere.chat_completion(
+                    message, model, temperature, max_tokens
+                )
+            elif provider == "local":
+                return await self.local.chat_completion(
+                    message, model, temperature, max_tokens
+                )
             else:
                 return {
                     "success": False,
                     "error": f"Provider {provider} not supported",
-                    "message": "Supported providers: deepseek, qwen, openai",
+                    "message": "Supported providers: deepseek, qwen, openai, siliconflow, cohere, local",
                 }
         except Exception as e:
             logger.error(
@@ -1101,6 +1568,7 @@ class LLMService:
                 from app.services.model_config_service import (
                     model_config_service,
                     ModelType,
+                    ProviderType,
                 )
 
                 chat_config = model_config_service.get_active_model(
@@ -1111,23 +1579,49 @@ class LLMService:
                     provider = chat_config.provider.value
                     model = chat_config.model_name
 
+                    # 允许 model-level api_key 为空（回退到 provider-level）
+                    p_cfg = None
+                    try:
+                        p_cfg = model_config_service.get_provider(
+                            ProviderType(provider), tenant_id=tenant_id
+                        )
+                    except Exception:
+                        p_cfg = None
+                    api_key = chat_config.api_key or (p_cfg.api_key if p_cfg else None)
+                    api_base = chat_config.api_base or (p_cfg.api_base if p_cfg else None)
+
                     if provider == "deepseek":
-                        if chat_config.api_key:
-                            self.deepseek.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.deepseek.base_url = chat_config.api_base
+                        if api_key:
+                            self.deepseek.api_key = api_key
+                        if api_base:
+                            self.deepseek.base_url = api_base
                         self.deepseek.model = model
                     elif provider == "qwen":
-                        if chat_config.api_key:
-                            self.qwen.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.qwen.base_url = chat_config.api_base
+                        if api_key:
+                            self.qwen.api_key = api_key
+                        if api_base:
+                            self.qwen.base_url = api_base
                         self.qwen.model = model
                     elif provider == "openai":
-                        if chat_config.api_key:
-                            self.openai.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.openai.base_url = chat_config.api_base
+                        if api_key:
+                            self.openai.api_key = api_key
+                        if api_base:
+                            self.openai.base_url = api_base
+                    elif provider == "siliconflow":
+                        if api_key:
+                            self.siliconflow.api_key = api_key
+                        if api_base:
+                            self.siliconflow.base_url = api_base
+                    elif provider == "cohere":
+                        if api_key:
+                            self.cohere.api_key = api_key
+                        if api_base:
+                            self.cohere.base_url = api_base
+                    elif provider == "local":
+                        if api_key:
+                            self.local.api_key = api_key
+                        if api_base:
+                            self.local.base_url = api_base
 
                     # 使用用户保存的默认推理参数（如有）
                     if chat_config.temperature is not None:
@@ -1146,15 +1640,55 @@ class LLMService:
                 model = settings.CHAT_MODEL_NAME
                 logger.info(f"Exception fallback chat model for streaming: {provider}/{model}")
         else:
-            # Determine provider from model name
-            if model.startswith("deepseek"):
-                provider = "deepseek"
-            elif model.startswith("qwen"):
-                provider = "qwen"
-            elif model.startswith("gpt"):
-                provider = "openai"
-            else:
-                provider = settings.CHAT_MODEL_PROVIDER
+            provider = self._resolve_provider_for_model(
+                model, tenant_id=tenant_id, model_type="chat"
+            )
+
+            # 为指定模型注入 provider-level 配置
+            try:
+                from app.services.model_config_service import model_config_service, ProviderType
+                p_cfg = None
+                try:
+                    p_cfg = model_config_service.get_provider(
+                        ProviderType(provider), tenant_id=tenant_id
+                    )
+                except Exception:
+                    p_cfg = None
+
+                if provider == "deepseek":
+                    if p_cfg and p_cfg.api_key:
+                        self.deepseek.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.deepseek.base_url = p_cfg.api_base
+                    self.deepseek.model = model
+                elif provider == "qwen":
+                    if p_cfg and p_cfg.api_key:
+                        self.qwen.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.qwen.base_url = p_cfg.api_base
+                    self.qwen.model = model
+                elif provider == "openai":
+                    if p_cfg and p_cfg.api_key:
+                        self.openai.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.openai.base_url = p_cfg.api_base
+                elif provider == "siliconflow":
+                    if p_cfg and p_cfg.api_key:
+                        self.siliconflow.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.siliconflow.base_url = p_cfg.api_base
+                elif provider == "cohere":
+                    if p_cfg and p_cfg.api_key:
+                        self.cohere.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.cohere.base_url = p_cfg.api_base
+                elif provider == "local":
+                    if p_cfg and p_cfg.api_key:
+                        self.local.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.local.base_url = p_cfg.api_base
+            except Exception:
+                pass
 
         logger.info(f"Using streaming chat provider: {provider}, model: {model}")
 
@@ -1195,6 +1729,11 @@ class LLMService:
                     message, model, temperature, max_tokens
                 ):
                     yield chunk
+            elif provider == "local":
+                async for chunk in self.local.stream_chat_completion(
+                    message, model, temperature, max_tokens
+                ):
+                    yield chunk
             else:
                 # For other non-streaming providers, fallback to regular chat
                 logger.warning(f"Streaming not supported for provider {provider}, falling back to regular chat")
@@ -1216,12 +1755,14 @@ class LLMService:
         Get text embeddings using configured provider.
         """
         # Use configured provider and model if not specified
+        embedding_custom_params: dict[str, Any] | None = None
         if model is None:
             # 优先使用模型配置文件中的设置
             try:
                 from app.services.model_config_service import (
                     model_config_service,
                     ModelType,
+                    ProviderType,
                 )
                 
                 embedding_config = model_config_service.get_active_model(
@@ -1230,22 +1771,55 @@ class LLMService:
                 if embedding_config:
                     provider = embedding_config.provider.value
                     model = embedding_config.model_name
+                    embedding_custom_params = (
+                        embedding_config.custom_params
+                        if isinstance(embedding_config.custom_params, dict)
+                        else None
+                    )
+
+                    # 若 model-level 未配置 api_key，则允许回退到 provider-level 的 api_key/api_base
+                    p_cfg = None
+                    try:
+                        p_cfg = model_config_service.get_provider(
+                            ProviderType(provider), tenant_id=tenant_id
+                        )
+                    except Exception:
+                        p_cfg = None
                     
                     # 如果配置中有API密钥和基础URL，临时更新服务实例
-                    if provider == "siliconflow" and embedding_config.api_key:
-                        self.siliconflow.api_key = embedding_config.api_key
-                        if embedding_config.api_base:
-                            self.siliconflow.base_url = embedding_config.api_base
-                    elif provider == "openai" and embedding_config.api_key:
-                        self.openai.api_key = embedding_config.api_key
-                        if embedding_config.api_base:
-                            self.openai.base_url = embedding_config.api_base
-                    elif provider == "qwen" and embedding_config.api_key:
-                        self.qwen.api_key = embedding_config.api_key
-                    elif provider == "deepseek" and embedding_config.api_key:
-                        self.deepseek.api_key = embedding_config.api_key
-                        if embedding_config.api_base:
-                            self.deepseek.base_url = embedding_config.api_base
+                    api_key = embedding_config.api_key or (p_cfg.api_key if p_cfg else None)
+                    api_base = embedding_config.api_base or (p_cfg.api_base if p_cfg else None)
+
+                    if provider == "siliconflow":
+                        if api_key:
+                            self.siliconflow.api_key = api_key
+                        if api_base:
+                            self.siliconflow.base_url = api_base
+                    elif provider == "openai":
+                        if api_key:
+                            self.openai.api_key = api_key
+                        if api_base:
+                            self.openai.base_url = api_base
+                    elif provider == "qwen":
+                        if api_key:
+                            self.qwen.api_key = api_key
+                        if api_base:
+                            self.qwen.base_url = api_base
+                    elif provider == "deepseek":
+                        if api_key:
+                            self.deepseek.api_key = api_key
+                        if api_base:
+                            self.deepseek.base_url = api_base
+                    elif provider == "cohere":
+                        if api_key:
+                            self.cohere.api_key = api_key
+                        if api_base:
+                            self.cohere.base_url = api_base
+                    elif provider == "local":
+                        if api_key:
+                            self.local.api_key = api_key
+                        if api_base:
+                            self.local.base_url = api_base
                     
                     logger.info(f"Using configured embedding model: {provider}/{model}")
                 else:
@@ -1258,34 +1832,240 @@ class LLMService:
                 provider = settings.EMBEDDING_MODEL_PROVIDER
                 model = settings.EMBEDDING_MODEL_NAME
         else:
-            # Determine provider from model name
-            if "deepseek" in model:
-                provider = "deepseek"
-            elif "qwen" in model or "text-embedding" in model:
-                provider = "qwen"
-            elif "text-embedding-3" in model or "text-embedding-ada" in model:
-                provider = "openai"
-            elif "BAAI/bge" in model or "sentence-transformers" in model:
-                provider = "siliconflow"
-            else:
-                provider = settings.EMBEDDING_MODEL_PROVIDER
+            provider = self._resolve_provider_for_model(
+                model, tenant_id=tenant_id, model_type="embedding"
+            )
 
-        logger.info(f"Using embedding provider: {provider}, model: {model}")
+            # 对指定 model，也加载 provider-level 配置（便于 key/base 复用）
+            try:
+                from app.services.model_config_service import model_config_service, ProviderType
+                p_cfg = None
+                try:
+                    p_cfg = model_config_service.get_provider(
+                        ProviderType(provider), tenant_id=tenant_id
+                    )
+                except Exception:
+                    p_cfg = None
+
+                if provider == "siliconflow":
+                    if p_cfg and p_cfg.api_key:
+                        self.siliconflow.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.siliconflow.base_url = p_cfg.api_base
+                elif provider == "openai":
+                    if p_cfg and p_cfg.api_key:
+                        self.openai.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.openai.base_url = p_cfg.api_base
+                elif provider == "qwen":
+                    if p_cfg and p_cfg.api_key:
+                        self.qwen.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.qwen.base_url = p_cfg.api_base
+                elif provider == "deepseek":
+                    if p_cfg and p_cfg.api_key:
+                        self.deepseek.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.deepseek.base_url = p_cfg.api_base
+                elif provider == "cohere":
+                    if p_cfg and p_cfg.api_key:
+                        self.cohere.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.cohere.base_url = p_cfg.api_base
+                elif provider == "local":
+                    if p_cfg and p_cfg.api_key:
+                        self.local.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.local.base_url = p_cfg.api_base
+            except Exception:
+                pass
+
+        # Enforce per-input max token limit for some providers (e.g. SiliconFlow bge: 512 tokens).
+        texts_to_embed = list(texts or [])
+        max_input_tokens: int | None = None
+        if provider == "siliconflow":
+            max_input_tokens = 512
+        if embedding_custom_params:
+            v = embedding_custom_params.get("max_input_tokens") or embedding_custom_params.get(
+                "max_input_tokens_per_item"
+            )
+            if v is not None:
+                try:
+                    max_input_tokens = int(v)
+                except Exception:
+                    pass
+        if max_input_tokens:
+            texts_to_embed = self._enforce_embedding_token_limit(texts_to_embed, max_input_tokens)
+
+        logger.info(
+            f"Using embedding provider: {provider}, model: {model}",
+            inputs=len(texts_to_embed),
+        )
 
         try:
-            if provider == "openai":
-                return await self.openai.get_embeddings(texts, model)
-            elif provider == "qwen":
-                return await self.qwen.get_embeddings(texts)
-            elif provider == "deepseek":
-                return await self.deepseek.get_embeddings(texts)
-            elif provider == "siliconflow":
-                return await self.siliconflow.get_embeddings(texts, model)
-            else:
+            async def _call_provider(batch: list[str]) -> dict[str, Any]:
+                if provider == "openai":
+                    return await self.openai.get_embeddings(batch, model)
+                if provider == "qwen":
+                    return await self.qwen.get_embeddings(batch, model=model)
+                if provider == "deepseek":
+                    return await self.deepseek.get_embeddings(batch)
+                if provider == "siliconflow":
+                    return await self.siliconflow.get_embeddings(batch, model)
+                if provider == "cohere":
+                    return await self.cohere.get_embeddings(batch, model)
+                if provider == "local":
+                    return await self.local.get_embeddings(batch, model)
                 logger.warning(
                     f"Unsupported embedding provider: {provider}. Falling back to OpenAI."
                 )
-                return await self.openai.get_embeddings(texts, model)
+                return await self.openai.get_embeddings(batch, model)
+
+            # Provider-side batch limits exist (e.g., SiliconFlow max batch size=32).
+            # Keep batches modest to avoid hard failures while preserving ordering.
+            batch_size = 32 if provider == "siliconflow" else 128
+            if len(texts_to_embed) <= batch_size:
+                resp = await _call_provider(texts_to_embed)
+                if resp.get("success"):
+                    resp["provider"] = provider
+                    resp["model"] = model
+                    resp["input_texts"] = texts_to_embed
+                    return resp
+
+                # Retry once if provider reports a token limit error
+                details = resp.get("details")
+                m = re.search(r"less than\\s+(\\d+)\\s+tokens", str(details), re.IGNORECASE)
+                if m:
+                    limit = int(m.group(1))
+                    # Apply a small safety margin to reduce the chance of still hitting the hard limit.
+                    retry_limit = max(64, limit - 16)
+                    retry_texts = self._enforce_embedding_token_limit(list(texts or []), retry_limit)
+                    retry = await _call_provider(retry_texts)
+                    if retry.get("success"):
+                        retry["provider"] = provider
+                        retry["model"] = model
+                        retry["input_texts"] = retry_texts
+                        return retry
+
+                    # Last resort for SiliconFlow: split more aggressively and retry once.
+                    if provider == "siliconflow":
+                        retry2_limit = max(64, (retry_limit * 3) // 4)
+                        retry2_texts = self._enforce_embedding_token_limit(list(texts or []), retry2_limit)
+                        retry2 = await _call_provider(retry2_texts)
+                        if retry2.get("success"):
+                            retry2["provider"] = provider
+                            retry2["model"] = model
+                            retry2["input_texts"] = retry2_texts
+                        return retry2
+                    return retry
+
+                return {
+                    "success": False,
+                    "error": resp.get("error") or "Embedding generation failed",
+                    "details": details,
+                    "provider": provider,
+                    "model": model,
+                    "input_texts": texts_to_embed,
+                }
+
+            all_embeddings: list[Any] = []
+            usage_total: dict[str, Any] = {}
+
+            def _merge_usage(total: dict[str, Any], part: dict[str, Any]) -> dict[str, Any]:
+                merged = dict(total or {})
+                for k, v in (part or {}).items():
+                    if isinstance(v, (int, float)) and isinstance(merged.get(k), (int, float)):
+                        merged[k] = merged[k] + v
+                    elif isinstance(v, (int, float)) and k not in merged:
+                        merged[k] = v
+                return merged
+
+            for start in range(0, len(texts_to_embed), batch_size):
+                batch = texts_to_embed[start : start + batch_size]
+                resp = await _call_provider(batch)
+                if not resp.get("success"):
+                    # Retry once if provider reports a token limit error
+                    details = resp.get("details")
+                    m = re.search(r"less than\\s+(\\d+)\\s+tokens", str(details), re.IGNORECASE)
+                    if m:
+                        limit = int(m.group(1))
+                        retry_limit = max(64, limit - 16)
+                        retry_texts = self._enforce_embedding_token_limit(list(texts or []), retry_limit)
+                        all_embeddings = []
+                        usage_total = {}
+                        for start2 in range(0, len(retry_texts), batch_size):
+                            batch2 = retry_texts[start2 : start2 + batch_size]
+                            resp2 = await _call_provider(batch2)
+                            if not resp2.get("success"):
+                                # Last resort for SiliconFlow: split more aggressively and retry once.
+                                if provider == "siliconflow":
+                                    retry2_limit = max(64, (retry_limit * 3) // 4)
+                                    retry2_texts = self._enforce_embedding_token_limit(list(texts or []), retry2_limit)
+                                    all_embeddings = []
+                                    usage_total = {}
+                                    for start3 in range(0, len(retry2_texts), batch_size):
+                                        batch3 = retry2_texts[start3 : start3 + batch_size]
+                                        resp3 = await _call_provider(batch3)
+                                        if not resp3.get("success"):
+                                            return {
+                                                "success": False,
+                                                "error": resp3.get("error") or "Embedding generation failed",
+                                                "details": resp3.get("details"),
+                                                "provider": provider,
+                                                "model": model,
+                                                "failed_batch": {"start": start3, "size": len(batch3)},
+                                                "input_texts": retry2_texts,
+                                            }
+                                        all_embeddings.extend(resp3.get("embeddings") or [])
+                                        usage_total = _merge_usage(usage_total, resp3.get("usage") or {})
+                                    return {
+                                        "success": True,
+                                        "embeddings": all_embeddings,
+                                        "usage": usage_total,
+                                        "provider": provider,
+                                        "model": model,
+                                        "input_texts": retry2_texts,
+                                    }
+                                return {
+                                    "success": False,
+                                    "error": resp2.get("error") or "Embedding generation failed",
+                                    "details": resp2.get("details"),
+                                    "provider": provider,
+                                    "model": model,
+                                    "failed_batch": {"start": start2, "size": len(batch2)},
+                                    "input_texts": retry_texts,
+                                }
+                            all_embeddings.extend(resp2.get("embeddings") or [])
+                            usage_total = _merge_usage(usage_total, resp2.get("usage") or {})
+                        return {
+                            "success": True,
+                            "embeddings": all_embeddings,
+                            "usage": usage_total,
+                            "provider": provider,
+                            "model": model,
+                            "input_texts": retry_texts,
+                        }
+
+                    return {
+                        "success": False,
+                        "error": resp.get("error") or "Embedding generation failed",
+                        "details": details,
+                        "provider": provider,
+                        "model": model,
+                        "failed_batch": {"start": start, "size": len(batch)},
+                        "input_texts": texts_to_embed,
+                    }
+                all_embeddings.extend(resp.get("embeddings") or [])
+                usage_total = _merge_usage(usage_total, resp.get("usage") or {})
+
+            return {
+                "success": True,
+                "embeddings": all_embeddings,
+                "usage": usage_total,
+                "provider": provider,
+                "model": model,
+                "input_texts": texts_to_embed,
+            }
         except Exception as e:
             logger.error(
                 f"Embedding generation failed with provider {provider}", error=str(e)
@@ -1338,13 +2118,12 @@ class LLMService:
 
         try:
             if provider == "qwen":
-                # 若Qwen服务支持选择模型，可在服务内读取 settings 或扩展函数参数
-                return await self.qwen.rerank(query, documents, top_n)
+                return await self.qwen.rerank(query, documents, top_n, model=model)
             else:
                 logger.warning(
                     f"Unsupported rerank provider: {provider}. Falling back to Qwen."
                 )
-                return await self.qwen.rerank(query, documents, top_n)
+                return await self.qwen.rerank(query, documents, top_n, model=model)
         except Exception as e:
             logger.error(f"Reranking failed with provider {provider}", error=str(e))
             return {"success": False, "error": str(e)}

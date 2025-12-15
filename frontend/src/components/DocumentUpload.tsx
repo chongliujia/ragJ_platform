@@ -59,6 +59,17 @@ interface FileUploadStatus {
 const ALLOWED_EXTS = ['pdf','docx','txt','md','html'];
 const MAX_SIZE_MB = Number((import.meta as any).env?.VITE_MAX_UPLOAD_MB || 100);
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+const PARAM_LABELS: Record<string, string> = {
+  chunk_size: '分片长度（字符）',
+  chunk_overlap: '重叠长度（字符）',
+  window_size: '窗口大小（字符）',
+  step_size: '步长（字符）',
+  target_chunk_size: '目标分片长度（字符）',
+  sentences_per_chunk: '每段句子数',
+  tokens_per_chunk: '每段 Token 数（近似）',
+  overlap_tokens: '重叠 Token 数（近似）',
+  breakpoint_threshold_type: '断点阈值类型',
+};
 
 const DocumentUpload: React.FC<DocumentUploadProps> = ({
   open,
@@ -289,33 +300,63 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
 
   // 渲染参数控件
   const renderParamControl = (paramName: string, paramConfig: any) => {
-    const value = strategyParams[paramName] || paramConfig.default;
+    const value = (strategyParams[paramName] ?? paramConfig.default);
+    const label =
+      PARAM_LABELS[paramName] ||
+      paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 
     if (paramConfig.type === 'number') {
+      const min = typeof paramConfig.min === 'number' ? paramConfig.min : undefined;
+      const max = typeof paramConfig.max === 'number' ? paramConfig.max : undefined;
+      const clamp = (n: number) => {
+        if (Number.isNaN(n)) return n;
+        if (typeof min === 'number') n = Math.max(min, n);
+        if (typeof max === 'number') n = Math.min(max, n);
+        return n;
+      };
+
       return (
         <TextField
           key={paramName}
           type="number"
-          label={paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+          label={label}
           value={value}
-          onChange={(e) => handleParamChange(paramName, parseInt(e.target.value))}
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (raw === '') return;
+            const n = Number(raw);
+            if (Number.isFinite(n)) {
+              handleParamChange(paramName, clamp(n));
+            }
+          }}
+          onBlur={() => {
+            const n = Number(value);
+            if (Number.isFinite(n)) {
+              handleParamChange(paramName, clamp(n));
+            }
+          }}
           inputProps={{
-            min: paramConfig.min,
-            max: paramConfig.max,
+            min,
+            max,
+            step: 1,
           }}
           size="small"
           fullWidth
-          sx={{ mb: 2 }}
+          helperText={
+            (typeof min === 'number' || typeof max === 'number')
+              ? `范围：${typeof min === 'number' ? min : '-'} ~ ${typeof max === 'number' ? max : '-'}`
+              : undefined
+          }
         />
       );
     } else if (paramConfig.type === 'select') {
       return (
-        <FormControl key={paramName} size="small" fullWidth sx={{ mb: 2 }}>
-          <InputLabel>{paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</InputLabel>
+        <FormControl key={paramName} size="small" fullWidth>
+          <InputLabel>{label}</InputLabel>
           <Select
             value={value}
             onChange={(e) => handleParamChange(paramName, e.target.value)}
-            label={paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+            label={label}
           >
             {paramConfig.options?.map((option: string) => (
               <MenuItem key={option} value={option}>
@@ -399,7 +440,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
         </Paper>
 
         {/* 上传说明 */}
-        <Accordion sx={{ mb: 3 }}>
+        <Accordion sx={{ mb: 2 }} disableGutters elevation={0} variant="outlined">
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <InfoIcon />
@@ -409,22 +450,28 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
             </Box>
           </AccordionSummary>
           <AccordionDetails>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {t('document.upload.help.supportedTypes', { types: ALLOWED_EXTS.map(ext => ext.toUpperCase()).join(', ') })}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {t('document.upload.help.maxSize', { size: MAX_SIZE_MB })}
-            </Typography>
-            <Divider sx={{ my: 1.5 }} />
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
-              {t('document.upload.help.chunkingTitle')}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
-              {t('document.upload.help.chunkingDesc')}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              {t('document.upload.help.tip')}
-            </Typography>
+            <Box component="ul" sx={{ pl: 2, m: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Box component="li">
+                <Typography variant="body2" color="text.secondary">
+                  {t('document.upload.help.supportedTypes', { types: ALLOWED_EXTS.map(ext => ext.toUpperCase()).join(', ') })}
+                </Typography>
+              </Box>
+              <Box component="li">
+                <Typography variant="body2" color="text.secondary">
+                  {t('document.upload.help.maxSize', { size: MAX_SIZE_MB })}
+                </Typography>
+              </Box>
+              <Box component="li">
+                <Typography variant="body2" color="text.secondary">
+                  {t('document.upload.help.chunkingDesc')}
+                </Typography>
+              </Box>
+              <Box component="li">
+                <Typography variant="body2" color="text.secondary">
+                  提示：部分嵌入模型会限制单条输入（例如 ≤ 512 tokens）。系统会自动拆分超限分片，但建议适当减小“分片长度”以减少拆分与成本。
+                </Typography>
+              </Box>
+            </Box>
           </AccordionDetails>
         </Accordion>
 
@@ -531,7 +578,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
             <CircularProgress />
           </Box>
         ) : (
-          <Accordion defaultExpanded>
+          <Accordion defaultExpanded disableGutters elevation={0} variant="outlined">
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <SettingsIcon />

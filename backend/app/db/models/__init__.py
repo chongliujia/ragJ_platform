@@ -9,6 +9,7 @@ from .user_tenant import UserTenant, UserTenantRole, MemberType
 from .team_invitation import TeamInvitation
 from .knowledge_base import KnowledgeBase
 from .document import Document, DocumentStatus
+from .document_chunk import DocumentChunk
 from .permission import Permission, RolePermission
 from .workflow import (
     WorkflowDefinition,
@@ -37,6 +38,7 @@ __all__ = [
     "KnowledgeBase",
     "Document",
     "DocumentStatus",
+    "DocumentChunk",
     "Permission",
     "RolePermission",
     "WorkflowDefinition",

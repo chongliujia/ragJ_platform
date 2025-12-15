@@ -43,6 +43,8 @@ import {
   Schedule as PendingIcon,
   Refresh as RefreshIcon,
   SelectAll as SelectAllIcon,
+  ContentCopy as CopyIcon,
+  InfoOutlined as InfoOutlinedIcon,
 } from '@mui/icons-material';
 import { documentApi, knowledgeBaseApi } from '../services/api';
 import DocumentChunksDialog from './DocumentChunksDialog';
@@ -52,6 +54,7 @@ interface Document {
   filename: string;
   size: number;
   upload_time: string;
+  processed_at?: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   chunks_count?: number;
   error_message?: string;
@@ -87,6 +90,8 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   const [deletingDocuments, setDeletingDocuments] = useState<string[]>([]);
   const [chunksDialogOpen, setChunksDialogOpen] = useState(false);
   const [activeDocForChunks, setActiveDocForChunks] = useState<Document | null>(null);
+  const [errorDialogOpen, setErrorDialogOpen] = useState(false);
+  const [activeDocForError, setActiveDocForError] = useState<Document | null>(null);
 
   // 获取文档列表（真实 API，做字段映射以复用现有表格）
   const fetchDocuments = async (silent: boolean = false) => {
@@ -100,6 +105,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
         filename: d.filename,
         size: Number(d.file_size || 0),
         upload_time: d.created_at || new Date().toISOString(),
+        processed_at: d.processed_at || undefined,
         status: d.status || 'pending',
         chunks_count: d.total_chunks || 0,
         error_message: d.error_message || undefined,
@@ -228,7 +234,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
     const statusConfig = config[status as keyof typeof config] || config.pending;
     
     return (
-      <Tooltip title={error || ''}>
+      <Tooltip title={error || ''} disableInteractive={!error}>
         <Chip
           icon={statusConfig.icon}
           label={statusConfig.label}
@@ -238,6 +244,19 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
         />
       </Tooltip>
     );
+  };
+
+  const openErrorDialog = (doc: Document) => {
+    setActiveDocForError(doc);
+    setErrorDialogOpen(true);
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // ignore
+    }
   };
 
   // 格式化文件大小
@@ -449,6 +468,34 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                       <TableCell>
                         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
                           {getStatusChip(doc.status, doc.error_message)}
+                          {doc.status === 'failed' && doc.error_message && (
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, maxWidth: 360 }}>
+                              <Typography
+                                variant="caption"
+                                color="error"
+                                sx={{
+                                  display: '-webkit-box',
+                                  WebkitLineClamp: 2,
+                                  WebkitBoxOrient: 'vertical',
+                                  overflow: 'hidden',
+                                  wordBreak: 'break-word',
+                                }}
+                              >
+                                {doc.error_message}
+                              </Typography>
+                              <Tooltip title="查看/复制错误详情">
+                                <span>
+                                  <IconButton
+                                    size="small"
+                                    onClick={() => openErrorDialog(doc)}
+                                    disabled={!doc.error_message}
+                                  >
+                                    <InfoOutlinedIcon fontSize="small" />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+                            </Box>
+                          )}
                           {(doc.status === 'processing' || doc.status === 'pending') && (
                             <Box>
                               {typeof doc.progress?.percentage === 'number' ? (
@@ -464,33 +511,58 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                                 </>
                               ) : (
                                 <>
-                                  {doc.progress?.stage && (
-                                    <Typography variant="caption" color="text.secondary">
-                                      {doc.progress.stage}
-                                    </Typography>
-                                  )}
+                                  <Typography variant="caption" color="text.secondary">
+                                    {doc.progress?.stage || (doc.status === 'pending' ? '等待处理…' : '处理中…')}
+                                  </Typography>
                                   <LinearProgress sx={{ mt: 0.5, width: 120, height: 6, borderRadius: 3 }} />
                                 </>
                               )}
                             </Box>
                           )}
+                          {doc.status === 'completed' && doc.processed_at && (
+                            <Typography variant="caption" color="text.secondary">
+                              已处理：{formatTime(doc.processed_at)}
+                            </Typography>
+                          )}
                         </Box>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">
-                          {doc.chunks_count || '-'}
-                        </Typography>
+                        {typeof doc.chunks_count === 'number' ? (
+                          <Tooltip title={doc.chunks_count > 0 ? '点击查看分片' : '暂无分片'}>
+                            <span>
+                              <Chip
+                                size="small"
+                                label={String(doc.chunks_count)}
+                                clickable={doc.chunks_count > 0}
+                                onClick={() => {
+                                  if (doc.chunks_count > 0) {
+                                    setActiveDocForChunks(doc);
+                                    setChunksDialogOpen(true);
+                                  }
+                                }}
+                                variant={doc.chunks_count > 0 ? 'outlined' : 'filled'}
+                                color={doc.chunks_count > 0 ? 'primary' : 'default'}
+                              />
+                            </span>
+                          </Tooltip>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">-</Typography>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <IconButton
-                          size="small"
-                          onClick={() => { setActiveDocForChunks(doc); setChunksDialogOpen(true); }}
-                          disabled={doc.status !== 'completed' || (doc.chunks_count ?? 0) === 0}
-                          color="primary"
-                          sx={{ mr: 1 }}
-                        >
-                          <ViewIcon />
-                        </IconButton>
+                        <Tooltip title={(doc.chunks_count ?? 0) > 0 ? '查看分片' : '无分片可查看'}>
+                          <span>
+                            <IconButton
+                              size="small"
+                              onClick={() => { setActiveDocForChunks(doc); setChunksDialogOpen(true); }}
+                              disabled={(doc.chunks_count ?? 0) === 0}
+                              color="primary"
+                              sx={{ mr: 1 }}
+                            >
+                              <ViewIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
                         <IconButton
                           size="small"
                           onClick={() => deleteDocuments([doc.id])}
@@ -558,6 +630,72 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
         </Button>
       </DialogActions>
 
+      {/* 错误详情对话框 */}
+      {activeDocForError && (
+        <Dialog
+          open={errorDialogOpen}
+          onClose={() => { setErrorDialogOpen(false); setActiveDocForError(null); }}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="h6" noWrap>处理失败原因</Typography>
+                <Typography variant="caption" color="text.secondary" noWrap>
+                  {activeDocForError.filename}
+                </Typography>
+              </Box>
+              <Tooltip title="复制错误信息">
+                <span>
+                  <IconButton
+                    size="small"
+                    onClick={() => copyText(activeDocForError.error_message || '')}
+                    disabled={!activeDocForError.error_message}
+                  >
+                    <CopyIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Box>
+          </DialogTitle>
+          <DialogContent dividers>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+              {getStatusChip(activeDocForError.status, activeDocForError.error_message)}
+              <Chip size="small" label={`分片：${activeDocForError.chunks_count ?? 0}`} variant="outlined" />
+              {activeDocForError.processed_at && (
+                <Chip size="small" label={`完成：${formatTime(activeDocForError.processed_at)}`} variant="outlined" />
+              )}
+            </Box>
+            <Paper
+              variant="outlined"
+              sx={{
+                p: 2,
+                bgcolor: (t) => t.palette.mode === 'dark' ? 'rgba(255,255,255,0.03)' : 'grey.50',
+              }}
+            >
+              <Typography
+                component="pre"
+                sx={{
+                  m: 0,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace',
+                  fontSize: 13,
+                  lineHeight: 1.5,
+                }}
+              >
+                {activeDocForError.error_message || '无错误信息'}
+              </Typography>
+            </Paper>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => { setErrorDialogOpen(false); setActiveDocForError(null); }}>关闭</Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
       {/* 分片查看对话框 */}
       {activeDocForChunks && (
         <DocumentChunksDialog
@@ -566,6 +704,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
           knowledgeBaseId={knowledgeBaseId}
           documentId={activeDocForChunks.id}
           filename={activeDocForChunks.filename}
+          totalChunks={activeDocForChunks.chunks_count}
         />
       )}
     </Dialog>

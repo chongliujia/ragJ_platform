@@ -3,6 +3,7 @@
 """
 
 import logging
+import httpx
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
@@ -38,6 +39,7 @@ class ProviderConfigResponse(BaseModel):
     display_name: str
     api_base: str
     has_api_key: bool
+    requires_api_key: bool
     enabled: bool
     available_models: Dict[str, List[str]]
     description: str
@@ -58,7 +60,7 @@ class UpdateModelConfigRequest(BaseModel):
 class UpdateProviderRequest(BaseModel):
     """更新提供商请求"""
 
-    api_key: str
+    api_key: str = ""  # 允许为空，保持现有密钥
     api_base: str = None
     enabled: bool = True
 
@@ -77,6 +79,7 @@ async def get_providers(tenant_id: int = Depends(get_tenant_id)):
                     display_name=provider_config.display_name,
                     api_base=provider_config.api_base,
                     has_api_key=bool(provider_config.api_key),
+                    requires_api_key=bool(getattr(provider_config, "requires_api_key", True)),
                     enabled=provider_config.enabled,
                     available_models={
                         model_type.value: models
@@ -213,7 +216,7 @@ async def update_active_model(
 
         # 验证模型是否在提供商的可用模型列表中（允许自定义模型名称）
         available_models = model_config_service.get_available_models(
-            provider_enum, model_type_enum
+            provider_enum, model_type_enum, tenant_id=tenant_id
         )
         
         # 如果模型名称不在预设列表中，记录警告但仍允许使用（支持自定义模型）
@@ -228,21 +231,33 @@ async def update_active_model(
             model_type_enum, tenant_id=tenant_id
         )
         
-        # 如果API密钥为空或者是掩码，则保持原有API密钥
+        # 如果API密钥为空或者是掩码：
+        # - 若仍为同一 provider，则保持原有 model-level key
+        # - 否则尝试使用 provider-level key；若也没有则要求用户输入
         api_key = request.api_key
+        if isinstance(api_key, str):
+            api_key = api_key.strip()
         if not api_key or "*" in api_key:
-            if existing_config and existing_config.api_key:
+            if (
+                existing_config
+                and existing_config.api_key
+                and existing_config.provider == provider_enum
+            ):
                 api_key = existing_config.api_key
             else:
-                # Allow using provider-level key if configured
                 p_cfg = model_config_service.get_provider(provider_enum, tenant_id=tenant_id)
-                if p_cfg and p_cfg.api_key:
+                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
+                if p_cfg and (p_cfg.api_key or not requires_key):
                     api_key = None
                 else:
                     raise HTTPException(
                         status_code=400,
                         detail="API key is required for new configuration",
                     )
+        if isinstance(api_key, str):
+            api_key = api_key.strip()
+            if not api_key:
+                api_key = None
 
         # 创建新的模型配置
         config = ModelConfig(
@@ -290,9 +305,22 @@ async def update_provider(
 
         # 更新配置
         provider_config = provider_config.copy(deep=True)
-        provider_config.api_key = request.api_key
+        api_key = request.api_key
+        if isinstance(api_key, str):
+            api_key = api_key.strip()
+        if not api_key or "*" in api_key:
+            api_key = provider_config.api_key
+        if not api_key and bool(getattr(provider_config, "requires_api_key", True)):
+            raise HTTPException(status_code=400, detail="API key is required")
+        provider_config.api_key = api_key
         if request.api_base:
-            provider_config.api_base = request.api_base
+            api_base = request.api_base.strip()
+            # Normalize OpenAI-compatible base URL: ensure it ends with /v1
+            if provider_enum in (ProviderType.LOCAL, ProviderType.OPENAI, ProviderType.SILICONFLOW, ProviderType.DEEPSEEK):
+                api_base = api_base.rstrip("/")
+                if api_base and not api_base.endswith("/v1"):
+                    api_base = api_base + "/v1"
+            provider_config.api_base = api_base
         provider_config.enabled = request.enabled
 
         model_config_service.update_provider(provider_enum, provider_config, tenant_id=tenant_id)
@@ -329,19 +357,83 @@ async def test_provider_connection(
         provider_enum = ProviderType(provider)
         provider_config = model_config_service.get_provider(provider_enum, tenant_id=tenant_id)
 
-        if not provider_config or not provider_config.api_key:
+        if not provider_config:
             raise HTTPException(
-                status_code=400, detail="Provider not configured or missing API key"
+                status_code=400, detail="Provider not configured"
             )
+        if not provider_config.enabled:
+            raise HTTPException(status_code=400, detail="Provider is disabled")
+        requires_key = bool(getattr(provider_config, "requires_api_key", True))
+        if requires_key and not provider_config.api_key:
+            raise HTTPException(status_code=400, detail="Provider missing API key")
 
-        # 这里可以添加实际的连接测试逻辑
-        # 目前返回成功，在实际实现中应该调用对应的API进行测试
+        # Choose a lightweight test per provider.
+        # NOTE: This runs from backend container; ensure it has outbound network access.
+        chat_models = (provider_config.models or {}).get(ModelType.CHAT, []) or []
+        probe_chat_model = chat_models[0] if chat_models else None
 
-        return {
-            "provider": provider,
-            "status": "connected",
-            "message": "Connection test successful",
-        }
+        if provider_enum in {ProviderType.OPENAI, ProviderType.SILICONFLOW, ProviderType.LOCAL}:
+            base = (provider_config.api_base or "").rstrip("/")
+            url = f"{base}/models" if base else ""
+            if not url:
+                raise HTTPException(status_code=400, detail="Provider api_base not configured")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.get(
+                    url,
+                    headers=(
+                        {"Authorization": f"Bearer {provider_config.api_key}"}
+                        if provider_config.api_key
+                        else {}
+                    ),
+                )
+            if resp.status_code != 200:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Provider test failed ({resp.status_code}): {resp.text}",
+                )
+            return {"provider": provider, "status": "connected", "message": "Connection test successful"}
+
+        if provider_enum == ProviderType.DEEPSEEK:
+            base = (provider_config.api_base or "").rstrip("/")
+            if not base:
+                raise HTTPException(status_code=400, detail="Provider api_base not configured")
+            model_name = probe_chat_model or "deepseek-chat"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{base}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {provider_config.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model_name,
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 5,
+                    },
+                )
+            if resp.status_code != 200:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Provider test failed ({resp.status_code}): {resp.text}",
+                )
+            return {"provider": provider, "status": "connected", "message": "Connection test successful"}
+
+        if provider_enum == ProviderType.QWEN:
+            # DashScope native API via QwenAPIService
+            from app.services.llm_service import QwenAPIService
+
+            svc = QwenAPIService()
+            svc.api_key = provider_config.api_key
+            if provider_config.api_base:
+                svc.base_url = provider_config.api_base
+            if probe_chat_model:
+                svc.model = probe_chat_model
+            result = await svc.test_connection()
+            if not result.get("success"):
+                raise HTTPException(status_code=400, detail=str(result))
+            return {"provider": provider, "status": "connected", "message": "Connection test successful"}
+
+        raise HTTPException(status_code=501, detail=f"Provider '{provider}' test not implemented")
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid provider: {e}")
@@ -435,7 +527,7 @@ async def get_model_presets():
 
 @router.get("/available-chat-models")
 async def get_available_chat_models(tenant_id: int = Depends(get_tenant_id)):
-    """获取可用的聊天模型列表（只返回已配置API密钥的模型）"""
+    """获取可用的聊天模型列表（返回已可用的提供商/模型；本地提供商可无密钥）。"""
     try:
         available_models = []
         
@@ -445,50 +537,70 @@ async def get_available_chat_models(tenant_id: int = Depends(get_tenant_id)):
         )
         logger.info(f"DEBUG: Current chat config: {chat_config}")
         
-        if chat_config and chat_config.api_key:
-            # 如果有活跃的聊天模型配置，返回该配置
-            available_models.append({
-                "model_name": chat_config.model_name,
-                "provider": chat_config.provider.value,
-                "provider_display_name": model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id).display_name if model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id) else chat_config.provider.value,
-                "model_display_name": f"{model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id).display_name if model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id) else chat_config.provider.value} - {chat_config.model_name}"
-            })
-            
-            # 获取同一提供商的其他可用模型
-            provider_config = model_config_service.get_provider(chat_config.provider, tenant_id=tenant_id)
-            if provider_config:
+        if chat_config:
+            provider_config = model_config_service.get_provider(
+                chat_config.provider, tenant_id=tenant_id
+            )
+            provider_display_name = (
+                provider_config.display_name
+                if provider_config is not None
+                else chat_config.provider.value
+            )
+            requires_key = bool(getattr(provider_config, "requires_api_key", True))
+            has_effective_key = bool(chat_config.api_key) or bool(
+                provider_config.api_key if provider_config is not None else False
+            ) or (not requires_key)
+
+            # 如果活跃配置可用，返回该配置
+            if has_effective_key and (provider_config is None or provider_config.enabled):
+                available_models.append({
+                    "model_name": chat_config.model_name,
+                    "provider": chat_config.provider.value,
+                    "provider_display_name": provider_display_name,
+                    "model_display_name": f"{provider_display_name} - {chat_config.model_name}"
+                })
+
+            # 额外返回同一提供商的其他可用 chat 模型（若提供商可用）
+            if provider_config and provider_config.enabled and (provider_config.api_key or not requires_key):
                 chat_models = provider_config.models.get(ModelType.CHAT, [])
                 logger.info(f"DEBUG: Provider {chat_config.provider.value} has models: {chat_models}")
-                
                 for model_name in chat_models:
-                    # 避免重复添加已经添加的当前活跃模型
                     if model_name != chat_config.model_name:
                         available_models.append({
                             "model_name": model_name,
                             "provider": chat_config.provider.value,
-                            "provider_display_name": provider_config.display_name,
-                            "model_display_name": f"{provider_config.display_name} - {model_name}"
+                            "provider_display_name": provider_display_name,
+                            "model_display_name": f"{provider_display_name} - {model_name}"
                         })
         else:
-            # 如果没有活跃配置，检查所有有API密钥的提供商
+            provider_config = None
+
+        if not available_models:
+            # 如果没有可用的活跃配置，检查所有可用的提供商（有 key 或不需要 key）
             providers = model_config_service.get_providers(tenant_id=tenant_id)
             logger.info(f"DEBUG: No active chat config, checking {len(providers)} providers")
             
-            for provider_type, provider_config in providers.items():
-                logger.info(f"DEBUG: Provider {provider_type.value}: api_key={bool(provider_config.api_key)}, enabled={provider_config.enabled}")
+            for provider_type, p_cfg in providers.items():
+                requires_key = bool(getattr(p_cfg, "requires_api_key", True))
+                logger.info(
+                    f"DEBUG: Provider {provider_type.value}: requires_key={requires_key}, api_key={bool(p_cfg.api_key)}, enabled={p_cfg.enabled}"
+                )
                 
-                if provider_config.api_key and provider_config.enabled:
-                    chat_models = provider_config.models.get(ModelType.CHAT, [])
-                    logger.info(f"DEBUG: Provider {provider_type.value} has {len(chat_models)} chat models: {chat_models}")
-                    
-                    for model_name in chat_models:
-                        available_models.append({
-                            "model_name": model_name,
-                            "provider": provider_type.value,
-                            "provider_display_name": provider_config.display_name,
-                            "model_display_name": f"{provider_config.display_name} - {model_name}"
-                        })
-        
+                if not p_cfg.enabled:
+                    continue
+                if requires_key and not p_cfg.api_key:
+                    continue
+
+                chat_models = p_cfg.models.get(ModelType.CHAT, [])
+                logger.info(f"DEBUG: Provider {provider_type.value} has {len(chat_models)} chat models: {chat_models}")
+                for model_name in chat_models:
+                    available_models.append({
+                        "model_name": model_name,
+                        "provider": provider_type.value,
+                        "provider_display_name": p_cfg.display_name,
+                        "model_display_name": f"{p_cfg.display_name} - {model_name}"
+                    })
+
         logger.info(f"Found {len(available_models)} available chat models: {[m['model_name'] for m in available_models]}")
         return {"models": available_models}
         

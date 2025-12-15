@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     # Hugging Face配置
     HUGGINGFACE_API_KEY: Optional[str] = None
     LOCAL_MODEL_ENDPOINT: Optional[str] = None
+    LOCAL_MODEL_API_KEY: Optional[str] = None
 
     # JWT配置
     JWT_ALGORITHM: str = "HS256"
@@ -140,26 +141,24 @@ class Settings(BaseSettings):
         return [p for p in parts if p]
 
 
-def _detect_env_files() -> List[Path]:
-    """按优先级寻找可能的 .env 文件路径。
+def _detect_env_file() -> Optional[Path]:
+    """按优先级寻找一个 .env 文件路径（避免多文件覆盖导致配置意外变化）。
 
     优先级：
-    1. backend/.env
-    2. 项目根目录 /.env
-    3. backend/.env.dev（仅作为兜底）
+    1. `backend/.env`
+    2. 项目根目录 `/.env`
+    3. `backend/.env.dev`（仅作为兜底）
     """
     here = Path(__file__).resolve()
     backend_dir = here.parents[2]  # backend/
     project_root = here.parents[3]  # 仓库根目录
 
-    candidates = [
-        backend_dir / ".env",
-        project_root / ".env",
-        backend_dir / ".env.dev",
-    ]
-    return [p for p in candidates if p.exists()]
+    for p in (backend_dir / ".env", project_root / ".env", backend_dir / ".env.dev"):
+        if p.exists():
+            return p
+    return None
 
 
-# 全局配置实例（支持多候选 .env）
-_env_files = _detect_env_files()
-settings = Settings(_env_file=_env_files or None)
+# 全局配置实例（按优先级选择单一 env 文件）
+_env_file = _detect_env_file()
+settings = Settings(_env_file=str(_env_file) if _env_file else None)

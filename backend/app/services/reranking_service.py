@@ -85,21 +85,34 @@ class BGEReranker(BaseReranker):
                 ModelType.RERANKING, tenant_id=tenant_id
             )
             if rerank_config and rerank_config.provider == ProviderType.SILICONFLOW:
-                return (
-                    rerank_config.api_base or "https://api.siliconflow.cn/v1",
-                    rerank_config.api_key,
+                # 允许 model-level api_key 为空（回退到 provider-level）
+                p_cfg = None
+                try:
+                    p_cfg = model_config_service.get_provider(
+                        ProviderType.SILICONFLOW, tenant_id=tenant_id
+                    )
+                except Exception:
+                    p_cfg = None
+
+                api_base = (
+                    rerank_config.api_base
+                    or (p_cfg.api_base if p_cfg else None)
+                    or "https://api.siliconflow.cn/v1"
                 )
+                api_key = rerank_config.api_key or (p_cfg.api_key if p_cfg else None)
+                model_name = rerank_config.model_name or self.model_name
+                return (api_base, api_key, model_name)
 
             # 回退到环境变量或默认值
             api_url = getattr(
                 settings, "SILICONFLOW_API_URL", "https://api.siliconflow.cn/v1"
             )
             api_key = getattr(settings, "SILICONFLOW_API_KEY", None)
-            return api_url, api_key
+            return api_url, api_key, self.model_name
 
         except Exception:
             # 最终回退
-            return "https://api.siliconflow.cn/v1", None
+            return "https://api.siliconflow.cn/v1", None, self.model_name
 
     async def rerank(
         self,
@@ -111,7 +124,7 @@ class BGEReranker(BaseReranker):
         """使用BGE重排器重排文档"""
         try:
             # 动态获取配置
-            api_url, api_key = self._get_config(tenant_id=tenant_id)
+            api_url, api_key, model_name = self._get_config(tenant_id=tenant_id)
             
             logger.info(f"BGE reranking configuration - API URL: {api_url}, has API key: {bool(api_key)}")
 
@@ -126,7 +139,7 @@ class BGEReranker(BaseReranker):
 
             # 构造重排请求（按SiliconFlow API格式）
             payload = {
-                "model": self.model_name,
+                "model": model_name,
                 "query": query,
                 "documents": doc_texts,
             }
@@ -225,13 +238,32 @@ class CohereReranker(BaseReranker):
                 ModelType.RERANKING, tenant_id=tenant_id
             )
             if rerank_config and rerank_config.provider == ProviderType.COHERE:
-                return rerank_config.api_key
+                p_cfg = None
+                try:
+                    p_cfg = model_config_service.get_provider(
+                        ProviderType.COHERE, tenant_id=tenant_id
+                    )
+                except Exception:
+                    p_cfg = None
+
+                api_key = rerank_config.api_key or (p_cfg.api_key if p_cfg else None)
+                api_base = (
+                    rerank_config.api_base
+                    or (p_cfg.api_base if p_cfg else None)
+                    or "https://api.cohere.ai/v1"
+                )
+                model_name = rerank_config.model_name or self.model_name
+                return api_key, api_base, model_name
 
             # 回退到环境变量
-            return getattr(settings, "COHERE_API_KEY", None)
+            return (
+                getattr(settings, "COHERE_API_KEY", None),
+                "https://api.cohere.ai/v1",
+                self.model_name,
+            )
 
         except Exception:
-            return None
+            return None, "https://api.cohere.ai/v1", self.model_name
 
     async def rerank(
         self,
@@ -241,7 +273,7 @@ class CohereReranker(BaseReranker):
         tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """使用Cohere重排器重排文档"""
-        api_key = self._get_config(tenant_id=tenant_id)
+        api_key, api_base, model_name = self._get_config(tenant_id=tenant_id)
 
         if not api_key:
             logger.warning(
@@ -254,7 +286,7 @@ class CohereReranker(BaseReranker):
             doc_texts = [doc.get("text", "") for doc in documents]
 
             payload = {
-                "model": self.model_name,
+                "model": model_name,
                 "query": query,
                 "documents": doc_texts,
                 "top_k": min(top_k, len(documents)),
@@ -265,9 +297,8 @@ class CohereReranker(BaseReranker):
                 "Content-Type": "application/json",
             }
 
-            response = requests.post(
-                self.api_url, headers=headers, json=payload, timeout=30
-            )
+            rerank_url = f"{api_base.rstrip('/')}/rerank"
+            response = requests.post(rerank_url, headers=headers, json=payload, timeout=30)
 
             if response.status_code == 200:
                 result = response.json()
@@ -317,13 +348,32 @@ class QwenReranker(BaseReranker):
                 ModelType.RERANKING, tenant_id=tenant_id
             )
             if rerank_config and rerank_config.provider == ProviderType.QWEN:
-                return rerank_config.api_key
+                p_cfg = None
+                try:
+                    p_cfg = model_config_service.get_provider(
+                        ProviderType.QWEN, tenant_id=tenant_id
+                    )
+                except Exception:
+                    p_cfg = None
+
+                api_key = rerank_config.api_key or (p_cfg.api_key if p_cfg else None)
+                api_base = (
+                    rerank_config.api_base
+                    or (p_cfg.api_base if p_cfg else None)
+                    or "https://dashscope.aliyuncs.com/api/v1"
+                )
+                model_name = rerank_config.model_name or self.model_name
+                return api_key, api_base, model_name
 
             # 回退到环境变量
-            return getattr(settings, "DASHSCOPE_API_KEY", None)
+            return (
+                getattr(settings, "DASHSCOPE_API_KEY", None),
+                "https://dashscope.aliyuncs.com/api/v1",
+                self.model_name,
+            )
 
         except Exception:
-            return None
+            return None, "https://dashscope.aliyuncs.com/api/v1", self.model_name
 
     async def rerank(
         self,
@@ -333,68 +383,57 @@ class QwenReranker(BaseReranker):
         tenant_id: int = None,
     ) -> List[Dict[str, Any]]:
         """使用Qwen重排器重排文档"""
-        api_key = self._get_config(tenant_id=tenant_id)
+        api_key, api_base, model_name = self._get_config(tenant_id=tenant_id)
 
         if not api_key:
             logger.warning("Qwen API key not configured, falling back to no reranking")
             return await NoReranker().rerank(query, documents, top_k)
 
         try:
-            # 使用简单的文本相似度计算作为Qwen重排的替代方案
-            # 实际实现中应该调用Qwen的重排API
             doc_texts = [doc.get("text", "") for doc in documents]
 
-            # 使用现有的嵌入服务计算相似度
-            embedding_response = await llm_service.get_embeddings(
-                texts=[query] + doc_texts,
-                tenant_id=tenant_id,
+            # 注入 per-tenant 配置后调用真实 Qwen rerank API
+            llm_service.qwen.api_key = api_key
+            llm_service.qwen.base_url = api_base
+            resp = await llm_service.qwen.rerank(
+                query=query, documents=doc_texts, top_n=min(top_k, len(doc_texts)), model=model_name
             )
-
-            if not embedding_response.get("success"):
-                logger.error("Failed to get embeddings for reranking")
+            if not resp.get("success"):
+                logger.error(f"Qwen rerank API failed: {resp}")
                 return await NoReranker().rerank(query, documents, top_k)
 
-            embeddings = embedding_response.get("embeddings", [])
-            if len(embeddings) < len(doc_texts) + 1:
-                logger.error("Insufficient embeddings for reranking")
-                return await NoReranker().rerank(query, documents, top_k)
+            items = resp.get("documents") or []
+            reranked_docs: List[Dict[str, Any]] = []
+            for item in items:
+                index = item.get("index")
+                if index is None:
+                    index = item.get("document_index")
+                try:
+                    index = int(index)
+                except Exception:
+                    continue
 
-            query_embedding = embeddings[0]
-            doc_embeddings = embeddings[1:]
-
-            # 计算余弦相似度
-            reranked_docs = []
-            for i, doc in enumerate(documents):
-                if i < len(doc_embeddings):
-                    similarity = self._cosine_similarity(
-                        query_embedding, doc_embeddings[i]
-                    )
-                    doc_copy = doc.copy()
-                    doc_copy["rerank_score"] = similarity
-                    doc_copy["original_score"] = doc.get("score", 0)
-                    doc_copy["score"] = similarity
+                score = (
+                    item.get("relevance_score")
+                    if item.get("relevance_score") is not None
+                    else item.get("score", 0)
+                )
+                if 0 <= index < len(documents):
+                    doc_copy = documents[index].copy()
+                    doc_copy["rerank_score"] = score
+                    doc_copy["original_score"] = doc_copy.get("score", 0)
+                    doc_copy["score"] = score
                     reranked_docs.append(doc_copy)
 
-            # 按重排分数排序
+            if not reranked_docs:
+                return await NoReranker().rerank(query, documents, top_k)
+
             reranked_docs.sort(key=lambda x: x.get("rerank_score", 0), reverse=True)
             return reranked_docs[:top_k]
 
         except Exception as e:
             logger.error(f"Qwen reranking error: {e}")
             return await NoReranker().rerank(query, documents, top_k)
-
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        """计算余弦相似度"""
-        import math
-
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
-        magnitude_a = math.sqrt(sum(a * a for a in vec1))
-        magnitude_b = math.sqrt(sum(b * b for b in vec2))
-
-        if magnitude_a == 0 or magnitude_b == 0:
-            return 0.0
-
-        return dot_product / (magnitude_a * magnitude_b)
 
 
 class LocalReranker(BaseReranker):

@@ -28,6 +28,27 @@
 
 ## 🚀 快速启动
 
+### 方式A：Docker Compose（推荐，前后端+MySQL+Milvus+ES 一键启动）
+
+```bash
+docker compose -f docker-compose.dev.yml up -d
+```
+
+访问：
+- 前端：http://localhost:5173
+- 后端：http://localhost:8000/api/v1/docs
+
+MySQL（宿主机端口映射为 `3307`）：
+- Host: `127.0.0.1`
+- Port: `3307`
+- User: `root`
+- Password: `12345678`
+- Database: `ragj_platform`
+
+常见问题：
+- MySQL 日志出现 `--initialize specified but the data directory has files in it`：这是初始化未完成导致的脏数据卷，执行 `docker compose -f docker-compose.dev.yml down -v` 清理卷后再 `up -d`。
+- 前端请求报 `ECONNREFUSED ...:8000` 或 `500`：通常是后端启动失败（数据库未就绪/依赖缺失），先看 `docker logs -n 200 ragj_backend`。
+
 ### 步骤1: 克隆并设置项目
 
 ```bash

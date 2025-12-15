@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, List
 from enum import Enum
 from pydantic import BaseModel
 from app.core.config import settings
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,9 @@ class ProviderConfig(BaseModel):
     display_name: str
     api_base: str
     api_key: Optional[str] = None
+    # Whether this provider requires an API key to work.
+    # For local/OpenAI-compatible self-hosted endpoints, this can be False.
+    requires_api_key: bool = True
     enabled: bool = True
     models: Dict[ModelType, List[str]] = {}
     description: str = ""
@@ -70,6 +74,20 @@ class ModelConfigService:
 
     def _load_default_providers(self):
         """加载默认的提供商配置"""
+        def _in_docker() -> bool:
+            # Common marker file for Docker containers
+            try:
+                return Path("/.dockerenv").exists()
+            except Exception:
+                return False
+
+        def _default_local_api_base() -> str:
+            # In docker-compose dev, backend runs in a container; "localhost" points to the container itself.
+            # Docker Desktop provides host access via host.docker.internal.
+            if _in_docker():
+                return "http://host.docker.internal:11434/v1"
+            return "http://localhost:11434/v1"
+
         default_providers = {
             ProviderType.OPENAI: ProviderConfig(
                 provider=ProviderType.OPENAI,
@@ -107,7 +125,8 @@ class ModelConfigService:
             ProviderType.QWEN: ProviderConfig(
                 provider=ProviderType.QWEN,
                 display_name="通义千问",
-                api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                # Use DashScope native API base (matches QwenAPIService endpoints)
+                api_base="https://dashscope.aliyuncs.com/api/v1",
                 description="阿里云通义千问全系列模型",
                 models={
                     ModelType.CHAT: [
@@ -180,9 +199,10 @@ class ModelConfigService:
             ),
             ProviderType.LOCAL: ProviderConfig(
                 provider=ProviderType.LOCAL,
-                display_name="本地模型",
-                api_base="http://localhost:11434/v1",
-                description="本地部署的开源模型（如Ollama）",
+                display_name="本地(OpenAI兼容)",
+                api_base=_default_local_api_base(),
+                description="本地/自建 OpenAI-Compatible 接口（/v1/chat/completions, /v1/embeddings, /v1/models）",
+                requires_api_key=False,
                 models={
                     ModelType.CHAT: ["llama3:8b", "qwen2:7b", "deepseek-coder:6.7b"],
                     ModelType.EMBEDDING: ["nomic-embed-text", "bge-large"],
@@ -216,7 +236,7 @@ class ModelConfigService:
                 provider=ProviderType.QWEN,
                 model_name="gte-rerank",
                 api_key=getattr(settings, "DASHSCOPE_API_KEY", None),
-                api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                api_base="https://dashscope.aliyuncs.com/api/v1",
             ),
         }
 
@@ -285,6 +305,13 @@ class ModelConfigService:
 
         db = SessionLocal()
         try:
+            # Normalize api_base for local/OpenAI-compatible endpoints: ensure it ends with /v1.
+            if provider == ProviderType.LOCAL and config.api_base:
+                base = (config.api_base or "").strip().rstrip("/")
+                if base and not base.endswith("/v1"):
+                    base = base + "/v1"
+                config.api_base = base or config.api_base
+
             row = (
                 db.query(TenantProviderConfig)
                 .filter(
@@ -463,8 +490,8 @@ class ModelConfigService:
         if config.provider not in self.providers:
             return False
 
-        # 检查API密钥
-        if not config.api_key:
+        # 检查API密钥（本地模型可不需要）
+        if config.provider != ProviderType.LOCAL and not config.api_key:
             return False
 
         # 可以添加更多验证逻辑

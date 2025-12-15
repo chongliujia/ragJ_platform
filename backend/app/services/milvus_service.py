@@ -524,13 +524,82 @@ class MilvusService:
         try:
             collection = Collection(name=collection_name, using=self.alias)
             expr_ids = ",".join(str(int(i)) for i in ids)
-            expr = f"pk in [{expr_ids}]"
-            rows = collection.query(expr=expr, output_fields=["pk", "text"])
+
+            # Primary key field name may differ across legacy collections ("pk" vs "id").
+            pk_field = "pk"
+            try:
+                pk_field = collection.schema.primary_field.name  # type: ignore[attr-defined]
+            except Exception:
+                pk_field = "pk"
+
+            # Text/content field name may differ across legacy collections ("text" vs "content"/"chunk_text"...).
+            content_field = "text"
+            try:
+                field_names = {f.name for f in (collection.schema.fields or [])}  # type: ignore[attr-defined]
+                preferred = [
+                    "text",
+                    "chunk_text",
+                    "content",
+                    "chunk",
+                    "document_text",
+                    "raw_text",
+                ]
+                for cand in preferred:
+                    if cand in field_names:
+                        content_field = cand
+                        break
+                else:
+                    # Pick the "largest" VARCHAR field that doesn't look like metadata.
+                    exclude = {pk_field, "pk", "id", "vector", "tenant_id", "user_id", "document_name", "knowledge_base"}
+                    best = None
+                    for f in (collection.schema.fields or []):  # type: ignore[attr-defined]
+                        try:
+                            if f.name in exclude:
+                                continue
+                            if f.dtype != DataType.VARCHAR:
+                                continue
+                            ml = int(getattr(f, "max_length", 0) or 0)
+                            if best is None or ml > best[0]:
+                                best = (ml, f.name)
+                        except Exception:
+                            continue
+                    if best:
+                        content_field = best[1]
+                if content_field != "text":
+                    logger.info(
+                        f"Using fallback content field '{content_field}' for collection '{collection_name}'"
+                    )
+            except Exception:
+                content_field = "text"
+
+            def _query_with_pk(field_name: str) -> list[dict]:
+                expr = f"{field_name} in [{expr_ids}]"
+                return collection.query(expr=expr, output_fields=[field_name, content_field])
+
+            try:
+                rows = _query_with_pk(pk_field)
+            except Exception:
+                # Fallbacks for older schemas
+                if pk_field != "pk":
+                    try:
+                        rows = _query_with_pk("pk")
+                    except Exception:
+                        rows = _query_with_pk("id")
+                else:
+                    try:
+                        rows = _query_with_pk("id")
+                    except Exception:
+                        rows = _query_with_pk("pk")
+
             results = []
             for row in rows:
                 # row may be a dict with keys matching output_fields
-                rid = int(row.get("pk")) if "pk" in row else int(row.get("id", 0))
-                results.append({"id": rid, "text": row.get("text", "")})
+                rid = (
+                    int(row.get(pk_field))
+                    if pk_field in row and row.get(pk_field) is not None
+                    else (int(row.get("pk")) if row.get("pk") is not None else int(row.get("id", 0)))
+                )
+                results.append({"id": rid, "text": row.get(content_field, "")})
             return results
         except Exception as e:
             logger.error(f"Failed to query texts by ids from '{collection_name}': {e}", exc_info=True)

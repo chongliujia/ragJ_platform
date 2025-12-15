@@ -68,6 +68,17 @@ const ModelConfigManager: React.FC = () => {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [customModelName, setCustomModelName] = useState<string>('');
   const [showCustomInput, setShowCustomInput] = useState<boolean>(false);
+
+  // Provider 配置对话框（先配置提供商 key/base，再选模型）
+  const [providerDialogOpen, setProviderDialogOpen] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<{
+    provider: string;
+    display_name: string;
+    api_base: string;
+    api_key: string;
+    enabled: boolean;
+    has_api_key: boolean;
+  } | null>(null);
   
   // 测试状态
   const [testingProvider, setTestingProvider] = useState<string | null>(null);
@@ -209,13 +220,56 @@ const ModelConfigManager: React.FC = () => {
     try {
       const modelsResponse = await modelConfigApi.getProviderModels(provider, editingModel.type);
       setAvailableModels(modelsResponse.data.models);
-      
+
+      const providerBase = providers.find(p => p.provider === provider)?.api_base || '';
+      const providerRow = providers.find(p => p.provider === provider);
+      const providerHasKey = !!providerRow?.has_api_key;
+      const providerRequiresKey = providerRow ? providerRow.requires_api_key !== false : true;
+
       updateEditingConfig({
         provider,
-        model_name: modelsResponse.data.models[0] || ''
+        model_name: modelsResponse.data.models[0] || '',
+        // 切换 provider 时清空 model-level key，避免把旧 provider 的掩码 key 带过去
+        api_key: '',
+        api_base: providerBase || undefined,
+        enabled: true,
       });
+
+      if (!providerRequiresKey || providerHasKey) {
+        setSuccess(`${getProviderName(provider)} 已配置 API 密钥；模型配置可留空使用该密钥`);
+      }
     } catch (error) {
       console.error('Failed to get models for provider:', error);
+    }
+  };
+
+  const openProviderDialog = (p: ProviderConfig) => {
+    setEditingProvider({
+      provider: p.provider,
+      display_name: p.display_name,
+      api_base: p.api_base || '',
+      api_key: '',
+      enabled: p.enabled,
+      has_api_key: p.has_api_key,
+    });
+    setProviderDialogOpen(true);
+  };
+
+  const saveProviderConfig = async () => {
+    if (!editingProvider) return;
+    try {
+      await modelConfigApi.updateProvider(editingProvider.provider, {
+        api_key: editingProvider.api_key, // 允许为空：后端会保持不变（若已配置）
+        api_base: editingProvider.api_base || undefined,
+        enabled: editingProvider.enabled,
+      });
+      setSuccess(`${editingProvider.display_name} 提供商配置已更新`);
+      setProviderDialogOpen(false);
+      setEditingProvider(null);
+      await loadData();
+    } catch (error: any) {
+      console.error('Failed to save provider config:', error);
+      setError(error.response?.data?.detail || '保存提供商配置失败');
     }
   };
 
@@ -282,6 +336,27 @@ const ModelConfigManager: React.FC = () => {
           {success}
         </Alert>
       )}
+
+      {/* 折叠说明区 */}
+      <Accordion sx={{ mb: 3 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <InfoIcon color="action" fontSize="small" />
+            <Typography sx={{ fontWeight: 600 }}>使用说明</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            推荐按 Dify/RAGFlow 的方式配置：先配置提供商，再选择每类模型的默认值（Chat/Embedding/Rerank）。
+          </Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2, color: 'text.secondary', fontSize: 14, lineHeight: 1.8 }}>
+            <li>先点「配置 API」：填写 API Base / API Key，并启用提供商。</li>
+            <li>再编辑「活跃模型」：选择该租户默认的聊天/向量/重排模型。</li>
+            <li>模型级 API Key 为空时，会自动复用提供商级 API Key（更安全，避免多处存储）。</li>
+            <li>「本地(OpenAI兼容)」要求提供 OpenAI-Compatible `/v1` 接口；可不填 Key，把 Base 指向你的服务地址即可（会自动补齐 `/v1`）。</li>
+          </Box>
+        </AccordionDetails>
+      </Accordion>
 
       {/* 预设配置 */}
       <Paper sx={{ p: 3, mb: 3 }}>
@@ -427,6 +502,13 @@ const ModelConfigManager: React.FC = () => {
                   </Box>
                 </CardContent>
                 <CardActions>
+                  <Button
+                    size="small"
+                    startIcon={<EditIcon />}
+                    onClick={() => openProviderDialog(provider)}
+                  >
+                    配置 API
+                  </Button>
                   {provider.has_api_key && (
                     <Button 
                       size="small" 
@@ -546,17 +628,35 @@ const ModelConfigManager: React.FC = () => {
                 type="password"
                 value={editingModel.config.api_key}
                 onChange={(e) => updateEditingConfig({ api_key: e.target.value })}
-                required={!editingModel.config.api_key || !editingModel.config.api_key.includes('*')}
+                required={
+                  (providers.find(p => p.provider === editingModel.config.provider)?.requires_api_key !== false) &&
+                  !providers.find(p => p.provider === editingModel.config.provider)?.has_api_key &&
+                  (!editingModel.config.api_key || !editingModel.config.api_key.includes('*'))
+                }
                 fullWidth
                 helperText={
-                  editingModel.config.api_key && editingModel.config.api_key.includes('*') 
-                    ? '已保存API密钥，留空保持不变或输入新的API密钥' 
-                    : '请输入有效的API密钥'
+                  (providers.find(p => p.provider === editingModel.config.provider)?.requires_api_key === false) ||
+                  providers.find(p => p.provider === editingModel.config.provider)?.has_api_key
+                    ? (
+                      editingModel.config.api_key && editingModel.config.api_key.includes('*')
+                        ? '已保存模型级 API 密钥；留空保持不变或输入新的 API 密钥'
+                        : '可留空使用该提供商已配置的 API 密钥，或输入模型级 API 密钥覆盖'
+                    )
+                    : (
+                      editingModel.config.api_key && editingModel.config.api_key.includes('*')
+                        ? '已保存API密钥，留空保持不变或输入新的API密钥'
+                        : '请输入有效的API密钥'
+                    )
                 }
                 placeholder={
-                  editingModel.config.api_key && editingModel.config.api_key.includes('*') 
-                    ? '留空保持原有API密钥' 
-                    : '请输入API密钥'
+                  editingModel.config.api_key && editingModel.config.api_key.includes('*')
+                    ? '留空保持原有API密钥'
+                    : (
+                      (providers.find(p => p.provider === editingModel.config.provider)?.requires_api_key === false) ||
+                      providers.find(p => p.provider === editingModel.config.provider)?.has_api_key
+                        ? '留空使用提供商密钥'
+                        : '请输入API密钥'
+                    )
                 }
               />
 
@@ -613,14 +713,92 @@ const ModelConfigManager: React.FC = () => {
             variant="contained"
             startIcon={<SaveIcon />}
             disabled={
-              !editingModel?.config.api_key || 
-              (!editingModel.config.api_key.includes('*') && editingModel.config.api_key.trim() === '') ||
+              !editingModel ||
+              (
+                (providers.find(p => p.provider === editingModel.config.provider)?.requires_api_key !== false) &&
+                !providers.find(p => p.provider === editingModel.config.provider)?.has_api_key &&
+                (!editingModel.config.api_key || (!editingModel.config.api_key.includes('*') && editingModel.config.api_key.trim() === ''))
+              ) ||
               !editingModel.config.model_name ||
               editingModel.config.model_name === '__custom__' ||
               editingModel.config.model_name.trim() === ''
             }
           >
             保存配置
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 编辑提供商配置对话框 */}
+      <Dialog
+        open={providerDialogOpen}
+        onClose={() => setProviderDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>
+          {editingProvider ? `配置 ${editingProvider.display_name}` : '配置提供商'}
+        </DialogTitle>
+        <DialogContent>
+          {editingProvider && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+              <TextField
+                label="API密钥"
+                type="password"
+                value={editingProvider.api_key}
+                onChange={(e) =>
+                  setEditingProvider({ ...editingProvider, api_key: e.target.value })
+                }
+                fullWidth
+                helperText={
+                  !providers.find(p => p.provider === editingProvider.provider)?.requires_api_key
+                    ? '本地/自建 OpenAI-compatible 端点可不填密钥'
+                    : (editingProvider.has_api_key ? '留空保持不变' : '请输入有效的API密钥')
+                }
+                placeholder={
+                  !providers.find(p => p.provider === editingProvider.provider)?.requires_api_key
+                    ? '可留空'
+                    : (editingProvider.has_api_key ? '留空保持原有API密钥' : '请输入API密钥')
+                }
+              />
+              <TextField
+                label="API端点 (可选)"
+                value={editingProvider.api_base}
+                onChange={(e) =>
+                  setEditingProvider({ ...editingProvider, api_base: e.target.value })
+                }
+                fullWidth
+                helperText="留空使用默认端点"
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={editingProvider.enabled}
+                    onChange={(e) =>
+                      setEditingProvider({ ...editingProvider, enabled: e.target.checked })
+                    }
+                  />
+                }
+                label="启用该提供商"
+              />
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setProviderDialogOpen(false)}>取消</Button>
+          <Button
+            onClick={saveProviderConfig}
+            variant="contained"
+            startIcon={<SaveIcon />}
+            disabled={
+              !editingProvider ||
+              (
+                (providers.find(p => p.provider === editingProvider.provider)?.requires_api_key !== false) &&
+                (!editingProvider.has_api_key && editingProvider.api_key.trim() === '')
+              )
+            }
+          >
+            保存
           </Button>
         </DialogActions>
       </Dialog>

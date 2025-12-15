@@ -6,6 +6,7 @@ export interface ProviderConfig {
   display_name: string;
   api_base: string;
   has_api_key: boolean;
+  requires_api_key: boolean;
   enabled: boolean;
   available_models: Record<string, string[]>;
   description: string;
@@ -37,7 +38,7 @@ export interface UpdateModelConfigRequest {
 
 // 更新提供商请求
 export interface UpdateProviderRequest {
-  api_key: string;
+  api_key?: string; // 允许为空，保持现有密钥（后端处理）
   api_base?: string;
   enabled?: boolean;
 }

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional
 import os
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi import UploadFile
 
 from app.services.llm_service import llm_service
@@ -19,6 +20,7 @@ from app.core.config import settings
 from app.db.database import SessionLocal
 from app.db.models.document import Document, DocumentStatus
 from app.db.models.knowledge_base import KnowledgeBase as KBModel
+from app.db.models.document_chunk import DocumentChunk
 
 logger = logging.getLogger(__name__)
 
@@ -189,10 +191,20 @@ class DocumentService:
             )
 
             if not embedding_response.get("success"):
+                details = embedding_response.get("details")
                 error_msg = f"Embedding generation failed: {embedding_response.get('error')}"
+                if details:
+                    # Provider may return useful JSON/text with reasons like invalid key/quota/model not allowed
+                    error_msg = f"{error_msg}; details: {details}"
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
                 logger.error(error_msg)
                 return
+
+            # If the embedding layer split inputs to satisfy provider constraints (e.g. max tokens),
+            # we must use the adjusted chunk list for downstream indexing.
+            adjusted_inputs = embedding_response.get("input_texts")
+            if isinstance(adjusted_inputs, list) and adjusted_inputs:
+                chunks = [str(x) for x in adjusted_inputs]
 
             embeddings = embedding_response.get("embeddings", [])
 
@@ -228,6 +240,65 @@ class DocumentService:
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
                 logger.error(error_msg)
                 return
+
+            # Persist chunks for UI display / pagination (source-of-truth for "查看分片").
+            # Keep it best-effort; failures should not invalidate a successful vector insert.
+            def _persist_chunks_once() -> None:
+                # Clear any existing chunks for this document (re-upload/replace cases)
+                db.query(DocumentChunk).filter(
+                    DocumentChunk.document_id == document_record.id,
+                    DocumentChunk.tenant_id == tenant_id,
+                ).delete(synchronize_session=False)
+                db.commit()
+
+                rows: list[DocumentChunk] = []
+                if isinstance(vector_ids, list) and len(vector_ids) == len(chunks):
+                    for i, (txt, pk) in enumerate(zip(chunks, vector_ids)):
+                        rows.append(
+                            DocumentChunk(
+                                tenant_id=tenant_id,
+                                document_id=document_record.id,
+                                knowledge_base_name=kb_name,
+                                chunk_index=int(i),
+                                text=str(txt or ""),
+                                milvus_pk=int(pk) if pk is not None else None,
+                            )
+                        )
+                else:
+                    for i, txt in enumerate(chunks):
+                        rows.append(
+                            DocumentChunk(
+                                tenant_id=tenant_id,
+                                document_id=document_record.id,
+                                knowledge_base_name=kb_name,
+                                chunk_index=int(i),
+                                text=str(txt or ""),
+                                milvus_pk=None,
+                            )
+                        )
+                if rows:
+                    db.bulk_save_objects(rows)
+                    db.commit()
+
+            try:
+                _persist_chunks_once()
+            except Exception as e:
+                db.rollback()
+                # Common case: table not created yet (dev hot-reload without restart).
+                # Try to create it once and retry.
+                try:
+                    DocumentChunk.__table__.create(bind=db.get_bind(), checkfirst=True)  # type: ignore[attr-defined]
+                    _persist_chunks_once()
+                except SQLAlchemyError as e2:
+                    db.rollback()
+                    logger.warning(
+                        f"Failed to persist document chunks for doc {document_record.id}: {e2}"
+                    )
+                except Exception as e2:
+                    db.rollback()
+                    logger.warning(
+                        f"Failed to persist document chunks for doc {document_record.id}: {e2}"
+                    )
 
             # Index documents in Elasticsearch with tenant isolation
             tenant_index_name = f"tenant_{tenant_id}_{kb_name}"

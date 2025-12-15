@@ -359,6 +359,18 @@ async def delete_document(
         except Exception as e:
             logger.warning(f"Failed to delete vectors for document {document_id}: {e}")
 
+        # Remove persisted chunks
+        try:
+            from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
+            db.query(DocumentChunkModel).filter(
+                DocumentChunkModel.document_id == document_id,
+                DocumentChunkModel.tenant_id == tenant_id,
+            ).delete(synchronize_session=False)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"Failed to delete persisted chunks for document {document_id}: {e}")
+
         # Remove from Elasticsearch
         try:
             from app.services.elasticsearch_service import get_elasticsearch_service
@@ -413,7 +425,7 @@ async def get_document_chunks(
 ):
     """
     Retrieve chunk texts for a specific document, ordered by original insertion order.
-    Uses stored Milvus primary key IDs in the document record to fetch chunk texts.
+    Prefer DB-persisted chunks for reliable pagination; fallback to Milvus by stored vector IDs.
     """
     try:
         document = db.query(Document).filter(
@@ -424,6 +436,112 @@ async def get_document_chunks(
 
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
+
+        # 1) Prefer DB-persisted chunks (stable, does not depend on Milvus schema).
+        try:
+            from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
+
+            q = (
+                db.query(DocumentChunkModel)
+                .filter(
+                    DocumentChunkModel.document_id == document_id,
+                    DocumentChunkModel.tenant_id == tenant_id,
+                )
+                .order_by(DocumentChunkModel.chunk_index.asc())
+            )
+            if offset < 0:
+                offset = 0
+            if limit <= 0:
+                limit = 100
+            rows = q.offset(offset).limit(limit).all()
+            if rows:
+                return [
+                    DocumentChunk(
+                        id=int(r.id),
+                        chunk_index=int(r.chunk_index),
+                        text=r.text or "",
+                    )
+                    for r in rows
+                ]
+        except Exception:
+            # Fall back to Milvus logic below
+            pass
+
+        # 1.5) If chunks are not persisted yet, try to backfill from stored file for UI display.
+        # This is best-effort and does not affect vector store; it only improves "查看分片" UX.
+        try:
+            import os
+            from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
+            from app.db.models.knowledge_base import KnowledgeBase as KBModel
+            from app.services import parser_service
+            from app.services.chunking_service import chunking_service, ChunkingStrategy
+            from app.core.config import settings
+
+            if document.file_path and os.path.exists(document.file_path):
+                kb_row = (
+                    db.query(KBModel)
+                    .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id)
+                    .first()
+                )
+                chunk_size = int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE)
+                chunk_overlap = int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP)
+
+                with open(document.file_path, "rb") as f:
+                    raw = f.read()
+                text = parser_service.parse_document(raw, document.filename)
+                chunks_all = await chunking_service.chunk_document(
+                    text=text,
+                    strategy=ChunkingStrategy.RECURSIVE,
+                    chunk_size=chunk_size,
+                    chunk_overlap=chunk_overlap,
+                )
+                if chunks_all:
+                    # Ensure table exists, then persist
+                    try:
+                        DocumentChunkModel.__table__.create(bind=db.get_bind(), checkfirst=True)  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    rows = [
+                        DocumentChunkModel(
+                            tenant_id=tenant_id,
+                            document_id=document_id,
+                            knowledge_base_name=kb_name,
+                            chunk_index=i,
+                            text=str(t or ""),
+                            milvus_pk=None,
+                        )
+                        for i, t in enumerate(chunks_all)
+                    ]
+                    db.bulk_save_objects(rows)
+                    db.commit()
+
+                    # Return requested page
+                    page_rows = (
+                        db.query(DocumentChunkModel)
+                        .filter(
+                            DocumentChunkModel.document_id == document_id,
+                            DocumentChunkModel.tenant_id == tenant_id,
+                        )
+                        .order_by(DocumentChunkModel.chunk_index.asc())
+                        .offset(offset)
+                        .limit(limit)
+                        .all()
+                    )
+                    if page_rows:
+                        return [
+                            DocumentChunk(
+                                id=int(r.id),
+                                chunk_index=int(r.chunk_index),
+                                text=r.text or "",
+                            )
+                            for r in page_rows
+                        ]
+        except Exception:
+            # If backfill fails, continue to Milvus fallback below.
+            try:
+                db.rollback()
+            except Exception:
+                pass
 
         vector_ids = document.vector_ids or []
         if not isinstance(vector_ids, list):
@@ -523,6 +641,16 @@ async def batch_delete_documents(
                     )
             except Exception as e:
                 logger.warning(f"Failed to delete vectors for document {doc.id}: {e}")
+
+            # Delete persisted chunks
+            try:
+                from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
+                db.query(DocumentChunkModel).filter(
+                    DocumentChunkModel.document_id == doc.id,
+                    DocumentChunkModel.tenant_id == tenant_id,
+                ).delete(synchronize_session=False)
+            except Exception as e:
+                logger.warning(f"Failed to delete persisted chunks for document {doc.id}: {e}")
 
             # Delete ES documents
             try:

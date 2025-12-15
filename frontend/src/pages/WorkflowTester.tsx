@@ -97,11 +97,44 @@ const WorkflowTester: React.FC = () => {
       {progress.map((p, i) => (
         <Box key={i} sx={{ mb: 1 }}>
           <Typography variant="caption" color="text.secondary">
-            {p?.node_id || p?.step || t('workflowTester.progress.step', { index: i + 1 })}
+            {(() => {
+              const stepLike: any = (p && (p.step ?? p.data ?? p)) || {};
+              const label =
+                stepLike.node_name ??
+                stepLike.nodeName ??
+                stepLike.node_id ??
+                stepLike.nodeId ??
+                stepLike.step_id ??
+                stepLike.stepId ??
+                stepLike.step ??
+                null;
+
+              if (typeof label === 'string' || typeof label === 'number') return String(label);
+              if (label && typeof label === 'object') {
+                // Avoid rendering raw objects in React children
+                return (
+                  stepLike.nodeName ||
+                  stepLike.node_name ||
+                  stepLike.id ||
+                  t('workflowTester.progress.step', { index: i + 1 })
+                );
+              }
+              return t('workflowTester.progress.step', { index: i + 1 });
+            })()}
           </Typography>
           <LinearProgress
             variant="determinate"
-            value={p?.percent || 0}
+            value={(() => {
+              const stepLike: any = (p && (p.step ?? p.data ?? p)) || {};
+              const v =
+                stepLike.percent ??
+                stepLike.progress ??
+                stepLike.percentage ??
+                stepLike.completed_percent ??
+                0;
+              const n = Number(v);
+              return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
+            })()}
             sx={{ height: 6, borderRadius: 3 }}
           />
         </Box>

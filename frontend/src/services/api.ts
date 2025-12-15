@@ -253,8 +253,13 @@ export const workflowApi = {
     description?: string; 
     nodes: any[]; 
     edges: any[]; 
+    global_config?: any;
+    // 兼容旧字段（历史代码使用 config）
     config?: any; 
-  }) => api.post('/api/v1/workflows/', data),
+  }) => api.post('/api/v1/workflows/', {
+    ...data,
+    global_config: (data as any).global_config ?? (data as any).config ?? {},
+  }),
   
   // 获取工作流列表
   getList: () => api.get('/api/v1/workflows/'),
@@ -268,8 +273,13 @@ export const workflowApi = {
     description?: string;
     nodes?: any[];
     edges?: any[];
+    global_config?: any;
+    // 兼容旧字段（历史代码使用 config）
     config?: any;
-  }) => api.put(`/api/v1/workflows/${id}`, data),
+  }) => api.put(`/api/v1/workflows/${id}`, {
+    ...data,
+    global_config: (data as any).global_config ?? (data as any).config,
+  }),
   
   // 删除工作流
   delete: (id: string) => api.delete(`/api/v1/workflows/${id}`),

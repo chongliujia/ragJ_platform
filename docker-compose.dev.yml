@@ -52,7 +52,9 @@ services:
     image: node:20-alpine
     working_dir: /app/frontend
     container_name: ragj_frontend
-    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0 --port 5173"
+    # Avoid re-running `npm ci` on every restart (it requires network and can fail),
+    # only install deps when node_modules is missing/empty.
+    command: sh -c "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 5173"
     volumes:
       - ./frontend:/app/frontend
       - /app/frontend/node_modules

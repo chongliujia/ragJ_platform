@@ -29,6 +29,7 @@ import {
   Palette as ThemeIcon,
   Language as LanguageIcon,
   Tune as TuneIcon,
+  Info as InfoIcon,
 } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 import { modelConfigApi } from '../services/modelConfigApi';
@@ -260,6 +261,27 @@ const UserSettings: React.FC = () => {
           {success}
         </Alert>
       )}
+
+      {/* 折叠说明区 */}
+      <Accordion sx={{ mb: 2 }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <InfoIcon fontSize="small" color="action" />
+            <Typography sx={{ fontWeight: 600 }}>参数说明</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            这些参数只影响当前账号（不会影响同租户其他用户）。若模型列表为空，请先在「系统设置 → 模型配置」里配置提供商 API。
+          </Typography>
+          <Box component="ul" sx={{ m: 0, pl: 2, color: 'text.secondary', fontSize: 14, lineHeight: 1.8 }}>
+            <li><b>Chat 模型</b>：对话回答使用的默认模型。</li>
+            <li><b>Embedding</b>：用于文档入库与检索向量化，建议选择稳定的向量模型。</li>
+            <li><b>Rerank</b>：用于对检索结果二次排序（可提升命中，但会增加耗时/费用）。</li>
+            <li><b>Chunk</b>：分片越大上下文越完整，但入库成本更高。</li>
+          </Box>
+        </AccordionDetails>
+      </Accordion>
 
       {/* AI 模型设置 */}
       <Accordion defaultExpanded>
