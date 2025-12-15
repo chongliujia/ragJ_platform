@@ -23,6 +23,7 @@ import { ExpandMore as ExpandMoreIcon } from '@mui/icons-material';
 import MonacoEditor from '@monaco-editor/react';
 import type { Edge, Node } from 'reactflow';
 import type { WorkflowEdgeData, WorkflowNodeData } from './types';
+import { NODE_SCHEMAS, type NodeFieldSchema, type SchemaOption } from './nodeSchemas';
 
 type InputEl = HTMLInputElement | HTMLTextAreaElement;
 
@@ -77,6 +78,13 @@ function rankTemplateSuggestion(item: string, query: string): number {
   return 9;
 }
 
+function normalizeTargetInput(raw: unknown): string {
+  const v = typeof raw === 'string' ? raw.trim() : '';
+  if (!v) return 'input';
+  if (v.startsWith('input')) return 'input';
+  return v;
+}
+
 type Props = {
   node: Node<WorkflowNodeData> | null;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
@@ -116,10 +124,16 @@ export default function NodeInspector({
   const [tplOpen, setTplOpen] = useState(false);
   const [tplItems, setTplItems] = useState<string[]>([]);
   const [tplActiveIdx, setTplActiveIdx] = useState(0);
+  const [tplMode, setTplMode] = useState<'autocomplete' | 'picker'>('autocomplete');
   const tplCtxRef = useRef<MustacheContext | null>(null);
 
   const cfg = node?.data.config || {};
   const kind = node?.data.kind;
+
+  const schema = useMemo(() => {
+    const k = kind as WorkflowNodeData['kind'] | undefined;
+    return (k ? NODE_SCHEMAS[k] : []) || [];
+  }, [kind]);
 
   const title = useMemo(() => {
     if (!node) return '属性面板';
@@ -160,25 +174,25 @@ export default function NodeInspector({
     return (allEdges || []).filter((e) => e.target === node.id);
   }, [allEdges, node]);
 
+  const incomingMappings = useMemo(() => {
+    if (!node) return [];
+    return incomingEdges.map((e) => {
+      const srcNode = allNodes.find((n) => n.id === e.source);
+      const srcName = srcNode?.data?.name || e.source;
+      const srcKind = srcNode?.data?.kind;
+      const sourceOutput = typeof e.data?.source_output === 'string' && e.data.source_output ? e.data.source_output : 'output';
+      const targetKey = normalizeTargetInput(e.data?.target_input);
+      return { edgeId: e.id, sourceId: e.source, srcName, srcKind, sourceOutput, targetKey };
+    });
+  }, [allNodes, incomingEdges, node]);
+
   const variableHints = useMemo(() => {
     if (!node) return [];
-    const mappedInputs = incomingEdges
-      .map((e) => e.data?.target_input)
-      .filter((x): x is string => typeof x === 'string' && x.length > 0);
-
-    const upstreamOutputs = incomingEdges.flatMap((e) => {
-      const src = allNodes.find((n) => n.id === e.source);
-      const srcKind = src?.data?.kind;
-      const fromKind = outputsForKind(srcKind);
-      const chosen = typeof e.data?.source_output === 'string' && e.data.source_output ? [e.data.source_output] : [];
-      return [...fromKind, ...chosen];
-    });
-
-    // Only include "connected" hints here. Global inputs are suggested separately.
-    const unique = Array.from(new Set([...mappedInputs, ...upstreamOutputs]));
+    // Only include keys that will actually appear in this node's input_data (derived from incoming edges).
+    const unique = Array.from(new Set(incomingMappings.map((m) => m.targetKey)));
     unique.sort();
     return unique;
-  }, [allNodes, incomingEdges, node]);
+  }, [incomingMappings, node]);
 
   const globalTemplateHints = useMemo(() => {
     // Global/runtime context (WorkflowTester provides prompt/query/text; backend supports {{context.*}})
@@ -192,32 +206,41 @@ export default function NodeInspector({
       if (!k) continue;
       out.add(k);
       out.add(`data.${k}`);
-      out.add(`input.${k}`);
     }
-    out.add('context.tenant_id');
-    out.add('context.user_id');
 
-    // common dotted paths for convenience (backend supports brackets)
-    if (out.has('documents') || out.has('data.documents') || out.has('input.documents')) {
-      out.add('documents[0].text');
-      out.add('documents[0].metadata');
-      out.add('documents[0].score');
-    }
-    if (out.has('metadata') || out.has('data.metadata') || out.has('input.metadata')) {
-      out.add('metadata.model');
-      out.add('metadata.usage.total_tokens');
-    }
-    if (out.has('result') || out.has('data.result') || out.has('input.result')) {
-      out.add('result.content');
-      out.add('result.text');
-    }
-    if (out.has('response_data') || out.has('data.response_data') || out.has('input.response_data')) {
-      out.add('response_data.data');
-      out.add('response_data.text');
+    // Expand suggestions based on edge mappings (shape hints).
+    for (const m of incomingMappings) {
+      const base = m.targetKey;
+      const basePrefix = base === 'data' ? 'data.data' : base;
+      const outputs = outputsForKind(m.srcKind);
+      const hintOutputs = Array.from(new Set([m.sourceOutput, ...outputs])).filter(Boolean);
+      for (const o of hintOutputs) {
+        if (!o) continue;
+        const root = `${basePrefix}.${o}`;
+        out.add(root);
+        if (o === 'documents') {
+          out.add(`${root}[0].text`);
+          out.add(`${root}[0].metadata`);
+          out.add(`${root}[0].score`);
+        }
+        if (o === 'metadata') {
+          out.add(`${root}.model`);
+          out.add(`${root}.usage.total_tokens`);
+        }
+        if (o === 'result') {
+          out.add(`${root}.content`);
+          out.add(`${root}.text`);
+        }
+        if (o === 'response_data') {
+          out.add(`${root}.data`);
+          out.add(`${root}.text`);
+        }
+      }
+      if (base === 'data') out.add('data.data');
     }
 
     return Array.from(out);
-  }, [globalTemplateHints, variableHints]);
+  }, [globalTemplateHints, incomingMappings, variableHints]);
 
   const referenceWarnings = useMemo(() => {
     if (!node) return [];
@@ -411,6 +434,7 @@ export default function NodeInspector({
       .slice(0, 12);
 
     tplCtxRef.current = ctx;
+    setTplMode('autocomplete');
     setTplItems(items);
     setTplActiveIdx(0);
     setTplOpen(items.length > 0);
@@ -421,7 +445,12 @@ export default function NodeInspector({
     const value = activeInputEl.value ?? getActiveValue();
     const cursor = activeInputEl.selectionStart ?? value.length;
     const ctx = getMustacheContext(value, cursor);
-    if (!ctx) return;
+    if (!ctx) {
+      // No {{...}} context: insert a complete {{expr}} token.
+      void insertTemplate(`{{${expr}}}`);
+      setTplOpen(false);
+      return;
+    }
 
     let next = value.slice(0, ctx.replaceFrom) + expr + value.slice(ctx.replaceTo);
     const insertPos = ctx.replaceFrom + expr.length;
@@ -440,7 +469,7 @@ export default function NodeInspector({
   };
 
   const onTemplateKeyDown = (e: React.KeyboardEvent) => {
-    if (!tplOpen || tplItems.length === 0) return;
+    if (!tplOpen || tplMode !== 'autocomplete' || tplItems.length === 0) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       setTplOpen(false);
@@ -507,6 +536,231 @@ export default function NodeInspector({
     }
   };
 
+  const openTemplatePicker = (field: string, el: InputEl | null) => {
+    if (!el) return;
+    setActiveEditing(field, el);
+    tplCtxRef.current = null;
+    const items = [...templateSuggestions].sort((a, b) => a.localeCompare(b)).slice(0, 50);
+    setTplItems(items);
+    setTplActiveIdx(0);
+    setTplMode('picker');
+    setTplOpen(true);
+    requestAnimationFrame(() => {
+      try {
+        el.focus();
+      } catch {}
+    });
+  };
+
+  const pickerGroups = useMemo(() => {
+    const groups: Array<{ label: string; items: string[] }> = [];
+    groups.push({ label: '全局', items: globalTemplateHints.slice() });
+
+    const byEdge = incomingMappings.map((m) => {
+      const items = new Set<string>();
+      items.add(m.targetKey);
+      items.add(`data.${m.targetKey}`);
+
+      if (m.targetKey === 'data') {
+        items.add('data.data');
+        items.add(`data.data.${m.sourceOutput}`);
+        if (m.sourceOutput === 'documents') {
+          items.add('data.data.documents[0].text');
+          items.add('data.data.documents[0].metadata');
+        }
+      } else if (m.targetKey === m.sourceOutput) {
+        if (m.sourceOutput === 'documents') {
+          items.add('documents[0].text');
+          items.add('documents[0].metadata');
+        }
+        if (m.sourceOutput === 'metadata') {
+          items.add('metadata.model');
+        }
+        if (m.sourceOutput === 'response_data') {
+          items.add('response_data.data');
+        }
+        if (m.sourceOutput === 'result') {
+          items.add('result.content');
+        }
+      }
+
+      const label = `${m.srcName}（${m.sourceOutput} → ${m.targetKey}）`;
+      return { label, items: Array.from(items).sort((a, b) => a.localeCompare(b)) };
+    });
+
+    for (const g of byEdge) {
+      if (g.items.length) groups.push(g);
+    }
+    return groups;
+  }, [globalTemplateHints, incomingMappings]);
+
+  const templateFieldProps = (field: 'system_prompt' | 'template' | 'condition_value' | 'url') => {
+    const refMap: Record<string, React.RefObject<HTMLInputElement | null>> = {
+      system_prompt: sysPromptRef,
+      template: outputTemplateRef,
+      condition_value: conditionValueRef,
+      url: urlRef,
+    };
+    const ref = refMap[field];
+    return {
+      inputRef: ref,
+      onFocus: (e: any) => {
+        const el = e.target as InputEl;
+        setActiveEditing(field, el);
+        refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
+      },
+      onChange: (e: any) => {
+        const el = e.target as InputEl;
+        updateConfig(field, el.value);
+        refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
+      },
+      onKeyDown: onTemplateKeyDown,
+      onClick: (e: any) => {
+        const el = e.target as InputEl;
+        refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
+      },
+      InputProps: {
+        endAdornment: (
+          <Button
+            size="small"
+            onMouseDown={(ev) => ev.preventDefault()}
+            onClick={() => openTemplatePicker(field, ref?.current)}
+          >
+            插入变量
+          </Button>
+        ),
+      },
+    };
+  };
+
+  const renderField = (f: NodeFieldSchema) => {
+    const val = (cfg as any)?.[f.key];
+    if (f.type === 'select') {
+      const opts: SchemaOption[] =
+        typeof f.options === 'function'
+          ? f.options({ knowledgeBases, availableChatModels })
+          : (f.options || []);
+      return (
+        <FormControl key={f.key} fullWidth size="small">
+          <InputLabel>{f.label}</InputLabel>
+          <Select value={String(val ?? '')} label={f.label} onChange={(e) => updateConfig(f.key, e.target.value)}>
+            {opts.map((o) => (
+              <MenuItem key={`${f.key}_${o.value}`} value={o.value}>
+                {o.label}
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      );
+    }
+    if (f.type === 'number') {
+      return (
+        <TextField
+          key={f.key}
+          fullWidth
+          size="small"
+          label={f.label}
+          type="number"
+          value={val ?? ''}
+          onChange={(e) => updateConfig(f.key, e.target.value === '' ? '' : Number(e.target.value))}
+          inputProps={f.inputProps}
+          helperText={f.helperText}
+        />
+      );
+    }
+    if (f.type === 'textarea') {
+      return (
+        <TextField
+          key={f.key}
+          fullWidth
+          size="small"
+          label={f.label}
+          value={String(val ?? '')}
+          onChange={(e) => updateConfig(f.key, e.target.value)}
+          helperText={f.helperText}
+          multiline
+          minRows={f.minRows ?? 3}
+        />
+      );
+    }
+    if (f.type === 'template') {
+      const fieldKey = f.key as any;
+      const bind =
+        fieldKey === 'system_prompt' || fieldKey === 'template' || fieldKey === 'condition_value' || fieldKey === 'url'
+          ? templateFieldProps(fieldKey)
+          : {};
+      return (
+        <TextField
+          key={f.key}
+          fullWidth
+          size="small"
+          label={f.label}
+          value={String(val ?? '')}
+          placeholder={f.placeholder}
+          helperText={f.helperText}
+          multiline={Boolean(f.minRows)}
+          minRows={f.minRows}
+          {...(bind as any)}
+        />
+      );
+    }
+    if (f.type === 'json_object') {
+      const key = f.key;
+      const raw = key === 'headers' ? httpHeadersRaw : key === 'params' ? httpParamsRaw : httpDataRaw;
+      const setRaw = key === 'headers' ? setHttpHeadersRaw : key === 'params' ? setHttpParamsRaw : setHttpDataRaw;
+      const err = key === 'headers' ? httpHeadersErr : key === 'params' ? httpParamsErr : httpDataErr;
+      const setErr = key === 'headers' ? setHttpHeadersErr : key === 'params' ? setHttpParamsErr : setHttpDataErr;
+      return (
+        <TextField
+          key={f.key}
+          fullWidth
+          size="small"
+          label={f.label}
+          value={raw}
+          onChange={(e) => setRaw(e.target.value)}
+          onBlur={() => {
+            const v = parseJsonObject(raw, setErr);
+            if (v) updateConfig(key, v);
+          }}
+          error={!!err}
+          helperText={err || f.helperText}
+          multiline
+          minRows={3}
+        />
+      );
+    }
+    if (f.type === 'code') {
+      return (
+        <Box key={f.key} sx={{ border: '1px solid rgba(255,255,255,0.12)', borderRadius: 1, overflow: 'hidden' }}>
+          <MonacoEditor
+            height="240px"
+            language="python"
+            theme="vs-dark"
+            value={String(val ?? '')}
+            onChange={(v) => updateConfig(f.key, v || '')}
+            options={{
+              minimap: { enabled: false },
+              fontSize: 13,
+              scrollBeyondLastLine: false,
+            }}
+          />
+        </Box>
+      );
+    }
+    return null;
+  };
+
+  const schemaByGroup = useMemo(() => {
+    const map = new Map<string, NodeFieldSchema[]>();
+    for (const f of schema) {
+      const g = f.group || '配置';
+      const list = map.get(g) || [];
+      list.push(f);
+      map.set(g, list);
+    }
+    return Array.from(map.entries());
+  }, [schema]);
+
   return (
     <Paper variant="outlined" sx={{ p: 2, height: '100%', overflow: 'auto' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
@@ -530,36 +784,74 @@ export default function NodeInspector({
           <Paper variant="outlined" sx={{ p: 0.5, width: 420, maxWidth: 'min(520px, 92vw)' }}>
             <Box sx={{ px: 1, py: 0.75, display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
               <Typography variant="caption" color="text.secondary">
-                输入 <code>{'{{'}</code> 自动联想（上下键选择，回车确认）
+                {tplMode === 'autocomplete'
+                  ? (
+                      <>
+                        输入 <code>{'{{'}</code> 自动联想（上下键选择，回车确认）
+                      </>
+                    )
+                  : '变量选择器（点击插入）'}
               </Typography>
               <Button size="small" onClick={() => setTplOpen(false)}>
                 关闭
               </Button>
             </Box>
-            <MenuList dense sx={{ maxHeight: 260, overflow: 'auto' }}>
-              {tplItems.map((it, idx) => (
-                <MenuItem
-                  key={it}
-                  selected={idx === tplActiveIdx}
-                  onMouseDown={(e) => {
-                    // prevent blur before click
-                    e.preventDefault();
-                  }}
-                  onClick={() => acceptTemplateSuggestion(it)}
-                >
-                  <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                    {it}
-                  </Typography>
-                </MenuItem>
-              ))}
-              {tplItems.length === 0 && (
-                <MenuItem disabled>
-                  <Typography variant="caption" color="text.secondary">
-                    暂无可用变量
-                  </Typography>
-                </MenuItem>
-              )}
-            </MenuList>
+            {tplMode === 'autocomplete' ? (
+              <MenuList dense sx={{ maxHeight: 260, overflow: 'auto' }}>
+                {tplItems.map((it, idx) => (
+                  <MenuItem
+                    key={it}
+                    selected={idx === tplActiveIdx}
+                    onMouseDown={(e) => {
+                      // prevent blur before click
+                      e.preventDefault();
+                    }}
+                    onClick={() => acceptTemplateSuggestion(it)}
+                  >
+                    <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                      {it}
+                    </Typography>
+                  </MenuItem>
+                ))}
+                {tplItems.length === 0 && (
+                  <MenuItem disabled>
+                    <Typography variant="caption" color="text.secondary">
+                      暂无可用变量
+                    </Typography>
+                  </MenuItem>
+                )}
+              </MenuList>
+            ) : (
+              <Box sx={{ maxHeight: 320, overflow: 'auto' }}>
+                {pickerGroups.map((g) => (
+                  <Box key={g.label} sx={{ px: 0.5, py: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ px: 0.5, display: 'block' }}>
+                      {g.label}
+                    </Typography>
+                    <MenuList dense disablePadding>
+                      {g.items.map((it) => (
+                        <MenuItem
+                          key={`${g.label}:${it}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => acceptTemplateSuggestion(it)}
+                        >
+                          <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+                            {it}
+                          </Typography>
+                        </MenuItem>
+                      ))}
+                      {g.items.length === 0 && (
+                        <MenuItem disabled>
+                          <Typography variant="caption" color="text.secondary">
+                            暂无
+                          </Typography>
+                        </MenuItem>
+                      )}
+                    </MenuList>
+                  </Box>
+                ))}
+              </Box>
+            )}
           </Paper>
         </ClickAwayListener>
       </Popper>
@@ -653,424 +945,90 @@ export default function NodeInspector({
         )}
       </Box>
 
-      {kind === 'llm' && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <FormControl fullWidth size="small">
-            <InputLabel>模型</InputLabel>
-            <Select
-              value={cfg.model || ''}
-              label="模型"
-              onChange={(e) => updateConfig('model', e.target.value)}
-            >
-              <MenuItem value="">
-                <em>（使用默认/按租户配置）</em>
-              </MenuItem>
-              {availableChatModels.map((m) => (
-                <MenuItem key={m} value={m}>
-                  {m}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <TextField
-            fullWidth
-            size="small"
-            label="temperature"
-            type="number"
-            value={cfg.temperature ?? 0.7}
-            onChange={(e) => updateConfig('temperature', Number(e.target.value))}
-            inputProps={{ step: 0.1, min: 0, max: 2 }}
-          />
-          <TextField
-            fullWidth
-            size="small"
-            label="max_tokens"
-            type="number"
-            value={cfg.max_tokens ?? 1000}
-            onChange={(e) => updateConfig('max_tokens', Number(e.target.value))}
-            inputProps={{ step: 50, min: 1 }}
-          />
-          <TextField
-            inputRef={sysPromptRef}
-            fullWidth
-            size="small"
-            label="system_prompt"
-            value={cfg.system_prompt || ''}
-            onChange={(e) => {
-              updateConfig('system_prompt', e.target.value);
-              const el = e.target as InputEl;
-              refreshTemplateAutocomplete(e.target.value, el.selectionStart ?? e.target.value.length);
-            }}
-            onFocus={(e) => {
-              const el = e.target as InputEl;
-              setActiveEditing('system_prompt', el);
-              refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
-            }}
-            onKeyDown={onTemplateKeyDown}
-            onClick={(e) => {
-              const el = e.target as InputEl;
-              refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
-            }}
-            multiline
-            minRows={4}
-          />
-          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-            <Button variant="outlined" size="small" onClick={() => quickFill('rag_to_llm')}>
-              一键：RAG→LLM 系统提示
-            </Button>
-            <Button variant="outlined" size="small" onClick={() => quickFill('docs_to_prompt')}>
-              一键：合成 prompt（overrides）
-            </Button>
-          </Box>
-          <Typography variant="caption" color="text.secondary">
-            支持模板语法：<code>{'{{变量}}'}</code>（后端会在运行时用当前节点输入替换）。
-          </Typography>
-        </Box>
+      {schema.length === 0 && (
+        <Alert severity="info" sx={{ mb: 1.5 }}>
+          当前节点没有可配置参数。
+        </Alert>
       )}
 
-      {kind === 'rag_retriever' && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <FormControl fullWidth size="small">
-            <InputLabel>知识库</InputLabel>
-            <Select
-              value={cfg.knowledge_base || ''}
-              label="知识库"
-              onChange={(e) => updateConfig('knowledge_base', e.target.value)}
-            >
-              <MenuItem value="">
-                <em>请选择</em>
-              </MenuItem>
-              {knowledgeBases.map((kb) => (
-                <MenuItem key={kb} value={kb}>
-                  {kb}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <TextField
-            fullWidth
-            size="small"
-            label="top_k"
-            type="number"
-            value={cfg.top_k ?? 5}
-            onChange={(e) => updateConfig('top_k', Number(e.target.value))}
-            inputProps={{ step: 1, min: 1, max: 50 }}
-          />
-        </Box>
-      )}
+      {schemaByGroup.map(([g, fields]) => {
+        const isSandbox = kind === 'code_executor' && g === 'Sandbox';
+        return (
+          <Box key={g} sx={{ mb: 2 }}>
+            {!isSandbox && (
+              <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1 }}>
+                {g}
+              </Typography>
+            )}
 
-      {kind === 'http_request' && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <FormControl fullWidth size="small">
-            <InputLabel>method</InputLabel>
-            <Select
-              value={String(cfg.method || 'GET').toUpperCase()}
-              label="method"
-              onChange={(e) => updateConfig('method', e.target.value)}
-            >
-              <MenuItem value="GET">GET</MenuItem>
-              <MenuItem value="POST">POST</MenuItem>
-              <MenuItem value="PUT">PUT</MenuItem>
-              <MenuItem value="PATCH">PATCH</MenuItem>
-              <MenuItem value="DELETE">DELETE</MenuItem>
-            </Select>
-          </FormControl>
-
-          <TextField
-            inputRef={urlRef}
-            fullWidth
-            size="small"
-            label="url"
-            value={cfg.url || ''}
-            onChange={(e) => {
-              updateConfig('url', e.target.value);
-              const el = e.target as InputEl;
-              refreshTemplateAutocomplete(e.target.value, el.selectionStart ?? e.target.value.length);
-            }}
-            onFocus={(e) => {
-              const el = e.target as InputEl;
-              setActiveEditing('url', el);
-              refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
-            }}
-            onKeyDown={onTemplateKeyDown}
-            onClick={(e) => {
-              const el = e.target as InputEl;
-              refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
-            }}
-            placeholder="https://example.com/api"
-            helperText="支持模板：{{变量}}（例如 {{query}}）"
-          />
-
-          <TextField
-            fullWidth
-            size="small"
-            label="timeout（秒）"
-            type="number"
-            value={cfg.timeout ?? 30}
-            onChange={(e) => updateConfig('timeout', Number(e.target.value))}
-            inputProps={{ step: 1, min: 1 }}
-          />
-
-          <TextField
-            fullWidth
-            size="small"
-            label="headers（JSON 对象，可选）"
-            value={httpHeadersRaw}
-            onChange={(e) => setHttpHeadersRaw(e.target.value)}
-            onBlur={() => {
-              const v = parseJsonObject(httpHeadersRaw, setHttpHeadersErr);
-              if (v) updateConfig('headers', v);
-            }}
-            error={!!httpHeadersErr}
-            helperText={httpHeadersErr || '例如：{"Authorization":"Bearer xxx"}'}
-            multiline
-            minRows={3}
-          />
-
-          <TextField
-            fullWidth
-            size="small"
-            label="params（JSON 对象，可选）"
-            value={httpParamsRaw}
-            onChange={(e) => setHttpParamsRaw(e.target.value)}
-            onBlur={() => {
-              const v = parseJsonObject(httpParamsRaw, setHttpParamsErr);
-              if (v) updateConfig('params', v);
-            }}
-            error={!!httpParamsErr}
-            helperText={httpParamsErr || 'GET 查询参数，例如：{"q":"{{query}}"}'}
-            multiline
-            minRows={3}
-          />
-
-          <TextField
-            fullWidth
-            size="small"
-            label="data（JSON 对象，可选，用作请求体）"
-            value={httpDataRaw}
-            onChange={(e) => setHttpDataRaw(e.target.value)}
-            onBlur={() => {
-              const v = parseJsonObject(httpDataRaw, setHttpDataErr);
-              if (v) updateConfig('data', v);
-            }}
-            error={!!httpDataErr}
-            helperText={httpDataErr || 'POST/PUT/PATCH 请求体，例如：{"text":"{{prompt}}"}'}
-            multiline
-            minRows={3}
-          />
-        </Box>
-      )}
-
-      {kind === 'condition' && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <TextField
-            fullWidth
-            size="small"
-            label="field_path"
-            value={cfg.field_path || 'value'}
-            onChange={(e) => updateConfig('field_path', e.target.value)}
-            helperText="支持嵌套路径，例如 data.class"
-          />
-          <FormControl fullWidth size="small">
-            <InputLabel>condition_type</InputLabel>
-            <Select
-              value={cfg.condition_type || 'equals'}
-              label="condition_type"
-              onChange={(e) => updateConfig('condition_type', e.target.value)}
-            >
-              <MenuItem value="equals">equals</MenuItem>
-              <MenuItem value="contains">contains</MenuItem>
-              <MenuItem value="greater_than">greater_than</MenuItem>
-              <MenuItem value="less_than">less_than</MenuItem>
-              <MenuItem value="truthy">truthy</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            inputRef={conditionValueRef}
-            fullWidth
-            size="small"
-            label="condition_value"
-            value={cfg.condition_value ?? ''}
-            onChange={(e) => {
-              updateConfig('condition_value', e.target.value);
-              const el = e.target as InputEl;
-              refreshTemplateAutocomplete(e.target.value, el.selectionStart ?? e.target.value.length);
-            }}
-            onFocus={(e) => {
-              const el = e.target as InputEl;
-              setActiveEditing('condition_value', el);
-              refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
-            }}
-            onKeyDown={onTemplateKeyDown}
-            onClick={(e) => {
-              const el = e.target as InputEl;
-              refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
-            }}
-          />
-          <Button
-            variant="outlined"
-            onClick={() => onCreateBranches?.()}
-            disabled={!onCreateBranches}
-          >
-            一键生成 True/False 分支
-          </Button>
-          <Typography variant="caption" color="text.secondary">
-            分支提示：从节点右侧的 <code>true</code>/<code>false</code> 句柄连线，会自动写入边条件并透传 <code>data</code>。
-          </Typography>
-        </Box>
-      )}
-
-      {kind === 'code_executor' && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <FormControl fullWidth size="small">
-            <InputLabel>language</InputLabel>
-            <Select
-              value={cfg.language || 'python'}
-              label="language"
-              onChange={(e) => updateConfig('language', e.target.value)}
-            >
-              <MenuItem value="python">python</MenuItem>
-            </Select>
-          </FormControl>
-          <Box sx={{ border: '1px solid rgba(255,255,255,0.12)', borderRadius: 1, overflow: 'hidden' }}>
-            <MonacoEditor
-              height="240px"
-              language="python"
-              theme="vs-dark"
-              value={cfg.code || ''}
-              onChange={(v) => updateConfig('code', v || '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                scrollBeyondLastLine: false,
-              }}
-            />
-          </Box>
-          <Typography variant="caption" color="text.secondary">
-            约定：在代码中设置变量 <code>result</code> 作为输出（例如 <code>result = &#123;&quot;content&quot;: &quot;...&quot;&#125;</code>）。
-          </Typography>
-
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography sx={{ fontWeight: 700 }}>Sandbox 限制</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
+            {isSandbox ? (
+              <Accordion>
+                <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                  <Typography sx={{ fontWeight: 700 }}>Sandbox 限制</Typography>
+                </AccordionSummary>
+                <AccordionDetails>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                    {fields.map(renderField)}
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => {
+                          updateConfig('timeout_sec', 3);
+                          updateConfig('max_memory_mb', 256);
+                          updateConfig('max_stdout_chars', 10000);
+                          updateConfig('max_input_bytes', 2000000);
+                          updateConfig('max_result_bytes', 2000000);
+                        }}
+                      >
+                        恢复默认
+                      </Button>
+                    </Box>
+                  </Box>
+                </AccordionDetails>
+              </Accordion>
+            ) : (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="timeout_sec（秒）"
-                  type="number"
-                  value={cfg.timeout_sec ?? 3}
-                  onChange={(e) => updateConfig('timeout_sec', Number(e.target.value))}
-                  inputProps={{ step: 0.1, min: 0.1, max: 30 }}
-                  helperText="超时会直接终止子进程（默认 3s）。"
-                />
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="max_memory_mb"
-                  type="number"
-                  value={cfg.max_memory_mb ?? 256}
-                  onChange={(e) => updateConfig('max_memory_mb', Number(e.target.value))}
-                  inputProps={{ step: 16, min: 16, max: 4096 }}
-                  helperText="内存限制（best-effort；不同平台可能不完全生效）。"
-                />
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="max_stdout_chars"
-                  type="number"
-                  value={cfg.max_stdout_chars ?? 10000}
-                  onChange={(e) => updateConfig('max_stdout_chars', Number(e.target.value))}
-                  inputProps={{ step: 1000, min: 1000, max: 200000 }}
-                  helperText="print 输出会被截断并写入执行详情 stdout。"
-                />
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="max_input_bytes"
-                  type="number"
-                  value={cfg.max_input_bytes ?? 2000000}
-                  onChange={(e) => updateConfig('max_input_bytes', Number(e.target.value))}
-                  inputProps={{ step: 10000, min: 10000, max: 50000000 }}
-                  helperText="限制 input_data + context 的 JSON 体积，避免爆内存/爆日志。"
-                />
-                <TextField
-                  fullWidth
-                  size="small"
-                  label="max_result_bytes"
-                  type="number"
-                  value={cfg.max_result_bytes ?? 2000000}
-                  onChange={(e) => updateConfig('max_result_bytes', Number(e.target.value))}
-                  inputProps={{ step: 10000, min: 10000, max: 50000000 }}
-                  helperText="限制 result 的 JSON 体积，超限会报错。"
-                />
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => {
-                      updateConfig('timeout_sec', 3);
-                      updateConfig('max_memory_mb', 256);
-                      updateConfig('max_stdout_chars', 10000);
-                      updateConfig('max_input_bytes', 2000000);
-                      updateConfig('max_result_bytes', 2000000);
-                    }}
-                  >
-                    恢复默认
-                  </Button>
-                </Box>
-              </Box>
-            </AccordionDetails>
-          </Accordion>
-        </Box>
-      )}
+                {fields.map(renderField)}
 
-      {kind === 'output' && (
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-          <FormControl fullWidth size="small">
-            <InputLabel>format</InputLabel>
-            <Select
-              value={cfg.format || 'json'}
-              label="format"
-              onChange={(e) => updateConfig('format', e.target.value)}
-            >
-              <MenuItem value="json">json</MenuItem>
-              <MenuItem value="text">text</MenuItem>
-              <MenuItem value="markdown">markdown</MenuItem>
-            </Select>
-          </FormControl>
-          <TextField
-            inputRef={outputTemplateRef}
-            fullWidth
-            size="small"
-            label="template（可选）"
-            value={cfg.template || ''}
-            onChange={(e) => {
-              updateConfig('template', e.target.value);
-              const el = e.target as InputEl;
-              refreshTemplateAutocomplete(e.target.value, el.selectionStart ?? el.value.length);
-            }}
-            onFocus={(e) => {
-              const el = e.target as InputEl;
-              setActiveEditing('template', el);
-              refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
-            }}
-            onKeyDown={onTemplateKeyDown}
-            onClick={(e) => {
-              const el = e.target as InputEl;
-              refreshTemplateAutocomplete(el.value, el.selectionStart ?? el.value.length);
-            }}
-            multiline
-            minRows={4}
-            helperText="留空则直接输出 input_data（兼容 data 包装）。"
-          />
-          <Typography variant="caption" color="text.secondary">
-            输出模板支持 <code>{'{{变量}}'}</code>（推荐）或 Python format <code>{'{content}'}</code>（兼容旧用法，模板不包含 <code>{'{{'}</code> 时启用）。
-          </Typography>
-        </Box>
-      )}
+                {kind === 'code_executor' && g === '代码' && (
+                  <Typography variant="caption" color="text.secondary">
+                    约定：在代码中设置变量 <code>result</code> 作为输出（例如 <code>result = &#123;&quot;content&quot;: &quot;...&quot;&#125;</code>）。
+                  </Typography>
+                )}
+
+                {kind === 'llm' && g === '提示词' && (
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    <Button variant="outlined" size="small" onClick={() => quickFill('rag_to_llm')}>
+                      一键：RAG→LLM 系统提示
+                    </Button>
+                    <Button variant="outlined" size="small" onClick={() => quickFill('docs_to_prompt')}>
+                      一键：合成 prompt（overrides）
+                    </Button>
+                  </Box>
+                )}
+
+                {kind === 'condition' && g === '基础配置' && (
+                  <>
+                    <Button variant="outlined" onClick={() => onCreateBranches?.()} disabled={!onCreateBranches}>
+                      一键生成 True/False 分支
+                    </Button>
+                    <Typography variant="caption" color="text.secondary">
+                      分支提示：从节点右侧的 <code>true</code>/<code>false</code> 句柄连线，会自动写入边条件并透传 <code>data</code>。
+                    </Typography>
+                  </>
+                )}
+
+                {kind === 'output' && g === '模板' && (
+                  <Typography variant="caption" color="text.secondary">
+                    输出模板支持 <code>{'{{变量}}'}</code>（推荐）或 Python format <code>{'{content}'}</code>（兼容旧用法，模板不包含 <code>{'{{'}</code> 时启用）。
+                  </Typography>
+                )}
+              </Box>
+            )}
+          </Box>
+        );
+      })}
 
       <Accordion sx={{ mt: 2 }}>
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
