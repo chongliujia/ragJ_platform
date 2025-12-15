@@ -440,12 +440,13 @@ const Chat: React.FC = () => {
                       }}>
                         <ReactMarkdown
                           components={{
-                            code({node, inline, className, children, ...props}) {
+                            code({ node, className, children, ...props }) {
                               const match = /language-(\w+)/.exec(className || '');
                               const codeString = String(children || '').replace(/\n$/, '');
                               const lang = match ? match[1] : 'plaintext';
                               const onCopy = () => navigator.clipboard.writeText(codeString).catch(()=>{});
-                              if (inline) {
+                              const isInline = !match;
+                              if (isInline) {
                                 return <code className={className} {...props}>{children}</code>;
                               }
                               return (

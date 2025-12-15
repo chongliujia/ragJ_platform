@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { Box, Chip, Paper, Typography, alpha, useTheme } from '@mui/material';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import type { WorkflowNodeData } from './types';

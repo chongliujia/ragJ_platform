@@ -171,6 +171,19 @@ class DocumentService:
                 content_preview=content_preview,
                 title=title
             )
+            # Store chunking config for future retries/debugging
+            try:
+                meta = dict(document_record.doc_metadata or {})
+                meta["chunking_strategy"] = getattr(chunking_strategy, "value", str(chunking_strategy))
+                meta["chunking_params"] = chunking_params or {}
+                document_record.doc_metadata = meta
+                db.add(document_record)
+                db.commit()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
             
             # Update status to PROCESSING
             self._update_document_status(db, document_record.id, DocumentStatus.PROCESSING)
@@ -187,7 +200,7 @@ class DocumentService:
 
             # Get embeddings for chunks
             embedding_response = await llm_service.get_embeddings(
-                texts=chunks, tenant_id=tenant_id
+                texts=chunks, tenant_id=tenant_id, user_id=user_id
             )
 
             if not embedding_response.get("success"):
@@ -355,6 +368,217 @@ class DocumentService:
                 except Exception:
                     pass
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
+        finally:
+            db.close()
+
+    async def reprocess_document(
+        self,
+        document_id: int,
+        tenant_id: int,
+        user_id: int,
+        chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE,
+        chunking_params: dict | None = None,
+    ) -> None:
+        """Retry processing for an existing document row (no re-upload)."""
+        db = SessionLocal()
+        try:
+            document = (
+                db.query(Document)
+                .filter(Document.id == document_id, Document.tenant_id == tenant_id)
+                .first()
+            )
+            if document is None:
+                raise ValueError("Document not found")
+            if document.status != DocumentStatus.FAILED.value:
+                raise ValueError("Only failed documents can be retried")
+            if not document.file_path or not os.path.exists(document.file_path):
+                raise ValueError("Document file not found on disk")
+
+            # best-effort cleanup previous artifacts (failed docs should have none, but be safe)
+            try:
+                from app.services.milvus_service import milvus_service
+
+                kb_name = document.knowledge_base_name
+                tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+                ids = []
+                if document.vector_ids:
+                    try:
+                        ids = [int(i) for i in (document.vector_ids or [])]
+                    except Exception:
+                        ids = []
+                if ids:
+                    milvus_service.delete_vectors(tenant_collection_name, ids)
+                else:
+                    milvus_service.delete_by_filters(
+                        tenant_collection_name,
+                        {
+                            "tenant_id": tenant_id,
+                            "document_name": document.filename,
+                            "knowledge_base": kb_name,
+                        },
+                    )
+            except Exception as e:
+                logger.warning(f"Retry cleanup milvus failed: {e}")
+
+            try:
+                from app.services.elasticsearch_service import get_elasticsearch_service
+
+                es_service = await get_elasticsearch_service()
+                if es_service is not None:
+                    kb_name = document.knowledge_base_name
+                    tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+                    await es_service.delete_by_query(
+                        index_name=tenant_index_name,
+                        term_filters={
+                            "tenant_id": tenant_id,
+                            "document_name": document.filename,
+                            "knowledge_base": kb_name,
+                        },
+                    )
+            except Exception as e:
+                logger.warning(f"Retry cleanup elasticsearch failed: {e}")
+
+            try:
+                db.query(DocumentChunk).filter(
+                    DocumentChunk.document_id == document.id,
+                    DocumentChunk.tenant_id == tenant_id,
+                ).delete(synchronize_session=False)
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Retry cleanup document_chunks failed: {e}")
+
+            # reset doc status/fields
+            document.status = DocumentStatus.PROCESSING.value
+            document.error_message = None
+            document.total_chunks = 0
+            document.vector_ids = []
+            document.processed_at = None
+            db.add(document)
+            db.commit()
+
+            if chunking_params is None:
+                chunking_params = {}
+
+            with open(document.file_path, "rb") as f:
+                content = f.read()
+
+            # Parse content
+            document_text = parser_service.parse_document(content, document.filename)
+            if not document_text:
+                raise Exception(f"Failed to parse text from {document.filename}")
+
+            chunks = await chunking_service.chunk_document(
+                text=document_text, strategy=chunking_strategy, **chunking_params
+            )
+
+            embedding_response = await llm_service.get_embeddings(
+                texts=chunks, tenant_id=tenant_id, user_id=user_id
+            )
+            if not embedding_response.get("success"):
+                details = embedding_response.get("details")
+                error_msg = f"Embedding generation failed: {embedding_response.get('error')}"
+                if details:
+                    error_msg = f"{error_msg}; details: {details}"
+                document.status = DocumentStatus.FAILED.value
+                document.error_message = error_msg
+                db.add(document)
+                db.commit()
+                return
+
+            adjusted_inputs = embedding_response.get("input_texts")
+            if isinstance(adjusted_inputs, list) and adjusted_inputs:
+                chunks = [str(x) for x in adjusted_inputs]
+
+            embeddings = embedding_response.get("embeddings", [])
+            if len(embeddings) != len(chunks):
+                error_msg = f"Number of embeddings ({len(embeddings)}) does not match chunks ({len(chunks)})"
+                document.status = DocumentStatus.FAILED.value
+                document.error_message = error_msg
+                db.add(document)
+                db.commit()
+                return
+
+            kb_name = document.knowledge_base_name
+            tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+            entities = [
+                {
+                    "text": chunk,
+                    "vector": vector,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "document_name": document.filename,
+                    "knowledge_base": kb_name,
+                }
+                for chunk, vector in zip(chunks, embeddings)
+            ]
+
+            vector_ids = milvus_service.insert(
+                collection_name=tenant_collection_name, entities=entities
+            )
+
+            # Persist chunks (best-effort)
+            try:
+                DocumentChunk.__table__.create(bind=db.get_bind(), checkfirst=True)  # type: ignore[attr-defined]
+                rows: list[DocumentChunk] = []
+                if isinstance(vector_ids, list) and len(vector_ids) == len(chunks):
+                    for i, (txt, pk) in enumerate(zip(chunks, vector_ids)):
+                        rows.append(
+                            DocumentChunk(
+                                tenant_id=tenant_id,
+                                document_id=document.id,
+                                knowledge_base_name=kb_name,
+                                chunk_index=int(i),
+                                text=str(txt or ""),
+                                milvus_pk=int(pk) if pk is not None else None,
+                            )
+                        )
+                else:
+                    for i, txt in enumerate(chunks):
+                        rows.append(
+                            DocumentChunk(
+                                tenant_id=tenant_id,
+                                document_id=document.id,
+                                knowledge_base_name=kb_name,
+                                chunk_index=int(i),
+                                text=str(txt or ""),
+                                milvus_pk=None,
+                            )
+                        )
+                if rows:
+                    db.bulk_save_objects(rows)
+                    db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Retry persist document_chunks failed: {e}")
+
+            # Update final fields
+            document.status = DocumentStatus.COMPLETED.value
+            document.error_message = None
+            document.vector_ids = vector_ids if isinstance(vector_ids, list) else []
+            document.total_chunks = len(document.vector_ids or [])
+            document.processed_at = datetime.utcnow()
+            db.add(document)
+            db.commit()
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            try:
+                document = (
+                    db.query(Document)
+                    .filter(Document.id == document_id, Document.tenant_id == tenant_id)
+                    .first()
+                )
+                if document is not None:
+                    document.status = DocumentStatus.FAILED.value
+                    document.error_message = f"Retry failed: {e}"
+                    db.add(document)
+                    db.commit()
+            except Exception:
+                pass
+            logger.error(f"Retry processing failed for document {document_id}: {e}", exc_info=True)
         finally:
             db.close()
 

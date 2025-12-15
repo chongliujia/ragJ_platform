@@ -3,9 +3,8 @@
  */
 
 import React, { useState } from 'react';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
-  Container,
   Paper,
   Box,
   TextField,
@@ -21,8 +20,8 @@ import {
   useTheme,
   IconButton,
   InputAdornment,
-  Grid,
 } from '@mui/material';
+import Grid from '@mui/material/Grid';
 import {
   Visibility,
   VisibilityOff,
@@ -56,7 +55,7 @@ function TabPanel(props: TabPanelProps) {
       aria-labelledby={`auth-tab-${index}`}
       {...other}
     >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
+      {value === index && <Box>{children}</Box>}
     </div>
   );
 }
@@ -92,7 +91,7 @@ const Login: React.FC = () => {
 
   const authManager = AuthManager.getInstance();
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
     setError(null);
     setSuccess(null);
@@ -226,7 +225,7 @@ const Login: React.FC = () => {
 	        >
 	          {/* 左侧品牌区域 - 桌面端显示 */}
 	          <Grid 
-	            size={{ md: 6 }}
+	            size={{ xs: 12, md: 6 }}
 	            sx={{ 
 	              display: { xs: 'none', md: 'flex' },
 	              alignItems: 'center',
@@ -281,9 +280,9 @@ const Login: React.FC = () => {
                       lineHeight: 1.2,
                       fontSize: { xs: '2rem', sm: '2.5rem', md: '3rem' },
                     }}
-                  >
-{t('nav.brandName')}
-                  </Typography>
+	                  >
+	                    {t('nav.brandName')}
+	                  </Typography>
                   <Typography
                     variant="h6"
                     sx={{
@@ -391,9 +390,9 @@ const Login: React.FC = () => {
                   fontWeight: 700,
                   color: 'white',
                 }}
-              >
-{t('nav.platformName')}
-              </Typography>
+	              >
+	                {t('nav.platformName')}
+	              </Typography>
             </Box>
           </Grid>
 
@@ -407,20 +406,37 @@ const Login: React.FC = () => {
 	              p: { xs: 2, md: 4 }
             }}
           >
-            <Paper
-              elevation={0}
-              sx={{
-                background: 'rgba(255, 255, 255, 0.98)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(0, 212, 255, 0.1)',
-                borderRadius: { xs: 3, sm: 4 },
-                overflow: 'hidden',
-                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)',
-                width: '100%',
-                maxWidth: { xs: '100%', sm: 480, md: 420 },
-                mx: 'auto',
-              }}
-            >
+	            <Paper
+	              elevation={0}
+	              sx={{
+	                background: 'rgba(255, 255, 255, 0.96)',
+	                backdropFilter: 'blur(20px)',
+	                border: '1px solid rgba(0, 212, 255, 0.1)',
+	                borderRadius: { xs: 3, sm: 4 },
+	                overflow: 'hidden',
+	                boxShadow: '0 20px 40px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(255, 255, 255, 0.05)',
+	                position: 'relative',
+	                transition: 'transform 200ms ease, box-shadow 200ms ease',
+	                '&::before': {
+	                  content: '""',
+	                  position: 'absolute',
+	                  top: 0,
+	                  left: 0,
+	                  right: 0,
+	                  height: 2,
+	                  background: 'linear-gradient(90deg, rgba(0, 212, 255, 0.9), rgba(255, 107, 53, 0.9))',
+	                  opacity: 0.85,
+	                },
+	                '&:hover': {
+	                  transform: { md: 'translateY(-2px)' },
+	                  boxShadow:
+	                    '0 24px 60px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(255, 255, 255, 0.06)',
+	                },
+	                width: '100%',
+	                maxWidth: { xs: '100%', sm: 520, md: 440 },
+	                mx: 'auto',
+	              }}
+	            >
               {/* 语言切换器 */}
               <Box sx={{ 
                 display: 'flex', 
@@ -632,13 +648,13 @@ const Login: React.FC = () => {
                 
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 2, mb: 3 }}>
                   <FormControlLabel
-                    control={
-                      <Checkbox
-                        value={rememberMe}
-                        onChange={(e) => setRememberMe(e.target.checked)}
-                        color="primary"
-                        sx={{
-                          '&.Mui-checked': {
+	                    control={
+	                      <Checkbox
+	                        checked={rememberMe}
+	                        onChange={(e) => setRememberMe(e.target.checked)}
+	                        color="primary"
+	                        sx={{
+	                          '&.Mui-checked': {
                             color: theme.palette.primary.main,
                           },
                         }}

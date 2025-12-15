@@ -153,6 +153,7 @@ class LangGraphChatService:
                     message=request.message,
                     model=request.model,
                     tenant_id=tenant_id,
+                    user_id=user_id,
                 ):
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
@@ -164,6 +165,7 @@ class LangGraphChatService:
                     message=request.message,
                     model=request.model,
                     tenant_id=tenant_id,
+                    user_id=user_id,
                 ):
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
@@ -176,6 +178,7 @@ class LangGraphChatService:
                     message=request.message,
                     model=request.model,
                     tenant_id=tenant_id,
+                    user_id=user_id,
                 ):
                     yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
@@ -186,6 +189,7 @@ class LangGraphChatService:
                 message=rag_prompt,
                 model=request.model,
                 tenant_id=tenant_id,
+                user_id=user_id,
             ):
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
@@ -231,6 +235,7 @@ class LangGraphChatService:
             embedding_response = await llm_service.get_embeddings(
                 texts=[state["query"]],
                 tenant_id=state["tenant_id"],
+                user_id=state.get("user_id"),
             )
             
             if embedding_response.get("success") and embedding_response.get("embeddings"):
@@ -422,6 +427,7 @@ class LangGraphChatService:
                 max_tokens=1500,  # 限制回答长度以提升速度
                 temperature=0.3,   # 降低temperature以提升生成速度
                 tenant_id=state["tenant_id"],
+                user_id=state.get("user_id"),
             )
             
             logger.info(f"LLM response received: success={llm_response.get('success')}, message_length={len(llm_response.get('message', ''))}")
@@ -468,6 +474,7 @@ class LangGraphChatService:
                 message=state["query"],
                 model=model,
                 tenant_id=state["tenant_id"],
+                user_id=state.get("user_id"),
             )
             
             if llm_response.get("success"):

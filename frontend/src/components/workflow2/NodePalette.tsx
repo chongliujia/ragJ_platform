@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Box, Divider, Paper, TextField, Typography, List, ListItemButton, ListItemText, Chip } from '@mui/material';
 import type { NodeTemplate } from './nodeTemplates';
 
@@ -81,4 +81,3 @@ export default function NodePalette({ templates, onAddClick }: Props) {
     </Paper>
   );
 }
-

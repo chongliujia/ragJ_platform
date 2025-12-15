@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, FC, MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from 'react';
 import { Paper, IconButton, TextField, Tooltip, Box, Typography } from '@mui/material';
 import ChatIcon from '@mui/icons-material/Chat';
 import CloseIcon from '@mui/icons-material/Close';
@@ -17,13 +18,12 @@ interface ChatTesterWidgetProps {
   onError?: (err: any) => void;
 }
 
-const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsureSaved, onProgress, onComplete, onError }) => {
+const ChatTesterWidget: FC<ChatTesterWidgetProps> = ({ workflowId, onEnsureSaved, onProgress, onComplete, onError }) => {
   const [open, setOpen] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [text, setText] = useState('');
   const [streaming, setStreaming] = useState(false);
-  const [thinking, setThinking] = useState(false);
-  const [currentStreamMessage, setCurrentStreamMessage] = useState('');
+  const [, setThinking] = useState(false);
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant'; content: string; streaming?: boolean }[]>([]);
   const chatRef = useRef<HTMLDivElement>(null);
   const [currentWorkflowId, setCurrentWorkflowId] = useState<string | undefined>(workflowId);
@@ -81,7 +81,7 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
     dragState.current = { offsetX: clientX - left, offsetY: clientY - top, dragging: true };
   };
 
-  const onMouseDownHeader = (e: React.MouseEvent) => {
+  const onMouseDownHeader = (e: ReactMouseEvent) => {
     if (collapsed) return; // 折叠状态禁用拖拽
     // 避免在点击图标按钮时触发拖拽
     const target = e.target as HTMLElement;
@@ -91,7 +91,7 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  const onTouchStartHeader = (e: React.TouchEvent) => {
+  const onTouchStartHeader = (e: ReactTouchEvent) => {
     if (collapsed) return; // 折叠状态禁用拖拽
     const touch = e.touches[0];
     startDrag(touch.clientX, touch.clientY);
@@ -110,13 +110,13 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
     setCustomPos({ left, top });
   };
 
-  const onMouseMove = (e: MouseEvent) => { applyMove(e.clientX, e.clientY); };
+  const onMouseMove = (e: globalThis.MouseEvent) => { applyMove(e.clientX, e.clientY); };
   const onMouseUp = () => {
     dragState.current.dragging = false;
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('mouseup', onMouseUp);
   };
-  const onTouchMove = (e: TouchEvent) => { const t = e.touches[0]; applyMove(t.clientX, t.clientY); };
+  const onTouchMove = (e: globalThis.TouchEvent) => { const t = e.touches[0]; applyMove(t.clientX, t.clientY); };
   const onTouchEnd = () => {
     dragState.current.dragging = false;
     window.removeEventListener('touchmove', onTouchMove);
@@ -156,7 +156,6 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
     setMessages(prev => [...prev, { role: 'user', content }]);
     setStreaming(true);
     setThinking(true);
-    setCurrentStreamMessage('');
     
     // 添加一个正在思考的助手消息
     setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true }]);
@@ -168,7 +167,6 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
     console.log('Chat testing - auth token exists:', !!token);
     console.log('Chat testing - auth token preview:', token ? token.substring(0, 20) + '...' : 'null');
 
-    let buffer = '';
     try {
       if (currentWorkflowId) {
         // 基于工作流的执行流式
@@ -277,7 +275,7 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
     }
   };
 
-  const positionStyle: React.CSSProperties = (() => {
+  const positionStyle: CSSProperties = (() => {
     const pad = 24;
     const safeBottom = 96; // 避开右下角 FAB（24 margin + 56按钮 + 16间距）
     if (customPos) {
@@ -293,7 +291,7 @@ const ChatTesterWidget: React.FC<ChatTesterWidgetProps> = ({ workflowId, onEnsur
   })();
 
   // 折叠时固定到右下角
-  const collapsedPositionStyle: React.CSSProperties = (() => {
+  const collapsedPositionStyle: CSSProperties = (() => {
     const pad = 24;
     const safeBottom = 24; // 折叠后仅标题栏，直接贴近右下角
     return { position: 'fixed', right: pad, bottom: safeBottom, zIndex: 1400 };

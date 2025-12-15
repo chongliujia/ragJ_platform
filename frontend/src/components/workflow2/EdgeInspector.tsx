@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Box, Button, Divider, Paper, TextField, Typography } from '@mui/material';
 import type { Edge } from 'reactflow';
 import type { WorkflowEdgeData } from './types';
@@ -88,4 +88,3 @@ export default function EdgeInspector({ edge, onChange, onDelete, sourceName, ta
     </Paper>
   );
 }
-

@@ -180,6 +180,30 @@ def require_permission(permission_name: str):
     return permission_checker
 
 
+def optional_permission(permission_name: str):
+    """Return True/False depending on whether current user has a permission (never raises 403)."""
+
+    def permission_checker(
+        current_user: User = Depends(get_current_active_user),
+        db: Session = Depends(get_db),
+    ) -> bool:
+        if current_user.role == "super_admin":
+            return True
+        user_permissions = (
+            db.query(Permission)
+            .join(RolePermission, Permission.id == RolePermission.permission_id)
+            .filter(
+                RolePermission.role == current_user.role,
+                Permission.name == permission_name,
+                Permission.is_active == True,
+            )
+            .first()
+        )
+        return bool(user_permissions)
+
+    return permission_checker
+
+
 def require_super_admin():
     """超级管理员权限检查"""
 

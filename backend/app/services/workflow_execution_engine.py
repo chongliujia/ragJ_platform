@@ -908,6 +908,10 @@ class WorkflowExecutionEngine:
             (context.global_context or {}).get("tenant_id")
             or (context.input_data or {}).get("tenant_id")
         )
+        user_id = (
+            (context.global_context or {}).get("user_id")
+            or (context.input_data or {}).get("user_id")
+        )
         response = await llm_service.chat(
             message=full_prompt,
             # Treat empty/absent model as "use active per-tenant chat model"
@@ -915,6 +919,7 @@ class WorkflowExecutionEngine:
             temperature=config.get('temperature', 0.7),
             max_tokens=config.get('max_tokens', 1000),
             tenant_id=tenant_id,
+            user_id=user_id,
         )
         
         if response.get('success'):
@@ -954,12 +959,51 @@ class WorkflowExecutionEngine:
             (context.global_context or {}).get("tenant_id")
             or (context.input_data or {}).get("tenant_id")
         )
+        user_id = (
+            (context.global_context or {}).get("user_id")
+            or (context.input_data or {}).get("user_id")
+        )
         if tenant_id is None:
             raise RuntimeError("缺少租户ID，无法执行RAG检索节点")
 
+        # Enforce KB read access (avoid workflow bypassing KB permissions)
+        try:
+            from app.db.database import SessionLocal
+            from app.db.models.knowledge_base import KnowledgeBase as KBModel
+            from app.db.models.user import User as UserModel
+
+            db = SessionLocal()
+            try:
+                kb_row = (
+                    db.query(KBModel)
+                    .filter(
+                        KBModel.name == knowledge_base,
+                        KBModel.tenant_id == tenant_id,
+                        KBModel.is_active == True,
+                    )
+                    .first()
+                )
+                if kb_row is None:
+                    raise RuntimeError("知识库不存在或不可用")
+                if user_id is not None:
+                    u = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
+                    if not u:
+                        raise RuntimeError("用户不存在")
+                    if u.role not in ("super_admin", "tenant_admin"):
+                        if kb_row.owner_id != u.id and not bool(getattr(kb_row, "is_public", False)):
+                            raise RuntimeError("无权访问该知识库")
+            finally:
+                db.close()
+        except RuntimeError:
+            raise
+        except Exception:
+            # If DB check fails unexpectedly, default to safe behavior when a user context exists.
+            if user_id is not None:
+                raise RuntimeError("知识库权限校验失败")
+
         # 生成查询向量
         embedding_response = await llm_service.get_embeddings(
-            texts=[query], tenant_id=tenant_id
+            texts=[query], tenant_id=tenant_id, user_id=user_id
         )
 
         if not embedding_response.get('success'):
@@ -1014,12 +1058,50 @@ class WorkflowExecutionEngine:
             (context.global_context or {}).get('tenant_id')
             or (context.input_data or {}).get('tenant_id')
         )
+        user_id = (
+            (context.global_context or {}).get("user_id")
+            or (context.input_data or {}).get("user_id")
+        )
         if tenant_id is None:
             raise RuntimeError("缺少租户ID，无法执行混合检索")
 
+        # Enforce KB read access (avoid workflow bypassing KB permissions)
+        try:
+            from app.db.database import SessionLocal
+            from app.db.models.knowledge_base import KnowledgeBase as KBModel
+            from app.db.models.user import User as UserModel
+
+            db = SessionLocal()
+            try:
+                kb_row = (
+                    db.query(KBModel)
+                    .filter(
+                        KBModel.name == knowledge_base,
+                        KBModel.tenant_id == tenant_id,
+                        KBModel.is_active == True,
+                    )
+                    .first()
+                )
+                if kb_row is None:
+                    raise RuntimeError("知识库不存在或不可用")
+                if user_id is not None:
+                    u = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
+                    if not u:
+                        raise RuntimeError("用户不存在")
+                    if u.role not in ("super_admin", "tenant_admin"):
+                        if kb_row.owner_id != u.id and not bool(getattr(kb_row, "is_public", False)):
+                            raise RuntimeError("无权访问该知识库")
+            finally:
+                db.close()
+        except RuntimeError:
+            raise
+        except Exception:
+            if user_id is not None:
+                raise RuntimeError("知识库权限校验失败")
+
         # 生成查询向量
         embedding_response = await llm_service.get_embeddings(
-            texts=[query], tenant_id=tenant_id
+            texts=[query], tenant_id=tenant_id, user_id=user_id
         )
         if not embedding_response.get('success'):
             raise RuntimeError("向量生成失败")
@@ -1192,12 +1274,17 @@ class WorkflowExecutionEngine:
             (context.global_context or {}).get('tenant_id')
             or (context.input_data or {}).get('tenant_id')
         )
+        user_id = (
+            (context.global_context or {}).get("user_id")
+            or (context.input_data or {}).get("user_id")
+        )
         response = await llm_service.chat(
             message=prompt,
             model=config.get('model', 'qwen-turbo'),
             temperature=0.1,
             max_tokens=50,
             tenant_id=tenant_id,
+            user_id=user_id,
         )
         
         if response.get('success'):
@@ -1396,10 +1483,14 @@ class WorkflowExecutionEngine:
             (context.global_context or {}).get('tenant_id')
             or (context.input_data or {}).get('tenant_id')
         )
+        user_id = (
+            (context.global_context or {}).get("user_id")
+            or (context.input_data or {}).get("user_id")
+        )
 
         # 生成嵌入
         response = await llm_service.get_embeddings(
-            texts=[text], model=model, tenant_id=tenant_id
+            texts=[text], model=model, tenant_id=tenant_id, user_id=user_id
         )
         
         if response.get('success'):

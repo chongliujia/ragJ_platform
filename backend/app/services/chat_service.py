@@ -63,6 +63,7 @@ class ChatService:
                 temperature=request.temperature,
                 max_tokens=request.max_tokens or 1000,
                 tenant_id=tenant_id,
+                user_id=user_id,
             )
 
             if not llm_response.get("success"):
@@ -70,6 +71,14 @@ class ChatService:
                     "LLM service failed: %s. Returning fallback message.",
                     llm_response.get("error"),
                 )
+                if llm_response.get("error", "").startswith("No ") or llm_response.get("message"):
+                    return ChatResponse(
+                        message=str(llm_response.get("message") or llm_response.get("error") or "模型未配置"),
+                        chat_id=request.chat_id or f"chat_{uuid.uuid4().hex[:8]}",
+                        model=request.model or settings.CHAT_MODEL_NAME,
+                        usage=llm_response.get("usage", {}),
+                        timestamp=datetime.now(),
+                    )
                 return ChatResponse(
                     message="抱歉，我暂时无法获取有效的回答，请稍后再试。",
                     chat_id=request.chat_id or f"chat_{uuid.uuid4().hex[:8]}",
@@ -111,6 +120,7 @@ class ChatService:
                 temperature=request.temperature,
                 max_tokens=request.max_tokens or 1000,
                 tenant_id=tenant_id,
+                user_id=user_id,
             ):
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 

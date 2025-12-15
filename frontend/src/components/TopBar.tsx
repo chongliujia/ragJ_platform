@@ -12,10 +12,7 @@ import {
   MenuItem,
   Avatar,
   Chip,
-  Divider,
   useMediaQuery,
-  Badge,
-  Tooltip,
   ListItemIcon,
   ListItemText,
 } from '@mui/material';
@@ -23,7 +20,6 @@ import {
   SmartToy as BotIcon,
   Settings as SettingsIcon,
   AccountTree as WorkflowIcon,
-  AccountCircle as AccountIcon,
   Logout as LogoutIcon,
   ExpandMore as ExpandIcon,
   AdminPanelSettings as AdminIcon,
@@ -46,7 +42,6 @@ const TopBar: React.FC = () => {
   const [workflowMenuAnchor, setWorkflowMenuAnchor] = useState<null | HTMLElement>(null);
   const [adminMenuAnchor, setAdminMenuAnchor] = useState<null | HTMLElement>(null);
   const isMobile = useMediaQuery('(max-width:768px)');
-  const isTablet = useMediaQuery('(max-width:1024px)');
   
   const authManager = AuthManager.getInstance();
   const permissions = usePermissions();
@@ -311,9 +306,9 @@ const TopBar: React.FC = () => {
                   fontWeight: 'bold',
                 }}
               >
-              {user?.name?.charAt(0) || user?.email?.charAt(0) || 'U'}
-            </Avatar>
-          </IconButton>
+	              {user?.full_name?.charAt(0) || user?.username?.charAt(0) || user?.email?.charAt(0) || 'U'}
+	            </Avatar>
+	          </IconButton>
         </Box>
 
         {/* 工作流菜单 */}
@@ -405,8 +400,8 @@ const TopBar: React.FC = () => {
         >
           <Box sx={{ p: 2, borderBottom: '1px solid rgba(0, 212, 255, 0.2)' }}>
             <Typography variant="subtitle1" sx={{ color: 'white', fontWeight: 600 }}>
-              {user?.name || user?.email}
-            </Typography>
+	              {user?.full_name || user?.username || user?.email}
+	            </Typography>
             {user?.role && (
               <Chip
                 label={user.role === 'super_admin' ? '超级管理员' : user.role === 'tenant_admin' ? '租户管理员' : '成员'}

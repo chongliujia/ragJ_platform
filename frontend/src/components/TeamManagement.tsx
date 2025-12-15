@@ -21,7 +21,6 @@ import {
   InputLabel,
   Alert,
   CircularProgress,
-  Divider,
   Chip,
   IconButton,
   List,
@@ -31,7 +30,6 @@ import {
 } from '@mui/material';
 import {
   Add as AddIcon,
-  Edit as EditIcon,
   Delete as DeleteIcon,
   PersonAdd as PersonAddIcon,
   ExitToApp as ExitIcon,
@@ -39,7 +37,7 @@ import {
 } from '@mui/icons-material';
 import { useTeam, useCreateTeam, useInviteUser, useJoinTeam } from '../hooks/useTeam';
 import { teamApi } from '../services/api';
-import type { Team, CreateTeamData, InviteUserData } from '../types';
+import type { CreateTeamData, InviteUserData } from '../types';
 import { TEAM_TYPES, MEMBER_TYPES } from '../types';
 
 export const TeamManagement: React.FC = () => {
@@ -51,8 +49,7 @@ export const TeamManagement: React.FC = () => {
     error, 
     refreshTeam, 
     refreshMembers,
-    isTeamOwner,
-    isTeamAdmin 
+    isTeamOwner
   } = useTeam();
   
   const { createTeam, loading: createLoading, error: createError } = useCreateTeam();
@@ -63,7 +60,6 @@ export const TeamManagement: React.FC = () => {
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false);
   const [joinDialogOpen, setJoinDialogOpen] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   // 表单数据
   const [createFormData, setCreateFormData] = useState<CreateTeamData>({
@@ -208,11 +204,6 @@ export const TeamManagement: React.FC = () => {
                     />
                   </Box>
                   <Box>
-                    {isTeamAdmin && (
-                      <IconButton onClick={() => setEditDialogOpen(true)}>
-                        <EditIcon />
-                      </IconButton>
-                    )}
                     {isTeamOwner && (
                       <IconButton onClick={handleLeaveTeam} color="error">
                         <DeleteIcon />

@@ -49,6 +49,9 @@ class PermissionType(enum.Enum):
     CONFIG_READ = "config_read"  # 读取配置
     CONFIG_UPDATE = "config_update"  # 更新配置
 
+    # 模型权限
+    MODEL_USE_SHARED = "model_use_shared"  # 允许使用租户共享的模型配置（否则仅可用个人配置）
+
 
 # 删除重复的Table定义，使用模型类代替
 
@@ -117,6 +120,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         # 配置权限
         "config_read",
         "config_update",
+        # 模型权限
+        "model_use_shared",
     ],
     "tenant_admin": [
         # 租户内用户管理权限
@@ -139,6 +144,8 @@ DEFAULT_ROLE_PERMISSIONS = {
         # 配置权限
         "config_read",
         "config_update",
+        # 模型权限
+        "model_use_shared",
     ],
     "user": [
         # 知识库权限（自己的）
@@ -158,5 +165,6 @@ DEFAULT_ROLE_PERMISSIONS = {
         # 配置权限
         "config_read",
         "config_update",
+        # 默认不允许使用租户共享模型（需要管理员分配角色权限）
     ],
 }

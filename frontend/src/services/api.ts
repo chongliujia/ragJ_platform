@@ -175,6 +175,10 @@ export const documentApi = {
   getStatus: (documentId: string | number) =>
     api.get(`/api/v1/documents/${documentId}/status`),
 
+  // 重试处理失败的文档（不重新上传）
+  retry: (knowledgeBaseId: string, documentId: string | number) =>
+    api.post(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/retry`),
+
   // 批量删除文档
   batchDelete: (
     knowledgeBaseId: string,

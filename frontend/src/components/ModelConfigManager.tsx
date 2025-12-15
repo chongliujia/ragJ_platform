@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
 import {
   Typography,
   Box,
@@ -21,11 +20,9 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  IconButton,
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Tooltip,
   Switch,
   FormControlLabel,
 } from '@mui/material';
@@ -48,9 +45,16 @@ import type {
   PresetConfig 
 } from '../services/modelConfigApi';
 
-const ModelConfigManager: React.FC = () => {
-  const { t } = useTranslation();
-  
+type ModelConfigScope = 'me' | 'tenant';
+
+interface ModelConfigManagerProps {
+  scope?: ModelConfigScope;
+}
+
+const MODEL_TYPES: Array<ModelConfig['model_type']> = ['chat', 'embedding', 'reranking'];
+
+const ModelConfigManager: React.FC<ModelConfigManagerProps> = ({ scope = 'me' }) => {
+  const scopedApi = scope === 'tenant' ? modelConfigApi.tenant : modelConfigApi;
   // 状态管理
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [activeModels, setActiveModels] = useState<ModelConfig[]>([]);
@@ -67,7 +71,6 @@ const ModelConfigManager: React.FC = () => {
   } | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [customModelName, setCustomModelName] = useState<string>('');
-  const [showCustomInput, setShowCustomInput] = useState<boolean>(false);
 
   // Provider 配置对话框（先配置提供商 key/base，再选模型）
   const [providerDialogOpen, setProviderDialogOpen] = useState(false);
@@ -90,13 +93,24 @@ const ModelConfigManager: React.FC = () => {
       setError(null);
       
       const [providersResponse, activeModelsResponse, presetsResponse] = await Promise.all([
-        modelConfigApi.getProviders(),
-        modelConfigApi.getActiveModels(),
+        scopedApi.getProviders(),
+        scopedApi.getActiveModels(),
         modelConfigApi.getPresets()
       ]);
       
       setProviders(providersResponse.data);
-      setActiveModels(activeModelsResponse.data);
+      const list = Array.isArray(activeModelsResponse.data) ? activeModelsResponse.data : [];
+      const byType = new Map(list.map((m) => [m.model_type, m]));
+      const fallbackProvider = providersResponse.data?.[0]?.provider || 'local';
+      setActiveModels(
+        MODEL_TYPES.map((t) => byType.get(t) || ({
+          model_type: t,
+          provider: fallbackProvider,
+          model_name: '',
+          has_api_key: false,
+          enabled: true,
+        } as ModelConfig))
+      );
       setPresets(presetsResponse.data.presets);
       
     } catch (error: any) {
@@ -137,33 +151,39 @@ const ModelConfigManager: React.FC = () => {
   const openEditDialog = async (modelType: string) => {
     try {
       const activeModel = activeModels.find(m => m.model_type === modelType);
-      if (!activeModel) return;
+      const initialProvider = activeModel?.provider || providers?.[0]?.provider || 'local';
 
-      // 获取模型配置详情（包含已保存的API密钥）
-      const [modelsResponse, detailsResponse] = await Promise.all([
-        modelConfigApi.getProviderModels(activeModel.provider, modelType),
-        modelConfigApi.getModelConfigDetails(modelType)
-      ]);
-      
-      setAvailableModels(modelsResponse.data.models);
+      const modelsResponse = await scopedApi.getProviderModels(initialProvider, modelType);
+      const models = modelsResponse.data?.models || [];
+      setAvailableModels(models);
 
-      // 设置编辑配置，使用已保存的值
+      let details: any = null;
+      try {
+        const detailsResponse = await scopedApi.getModelConfigDetails(modelType);
+        details = detailsResponse.data;
+      } catch {
+        details = null;
+      }
+
+      const providerToEdit = details?.provider || initialProvider;
+      const modelToEdit = details?.model_name || models?.[0] || '';
+      const providerBase = providers.find((p) => p.provider === providerToEdit)?.api_base || '';
+
       setEditingModel({
         type: modelType,
         config: {
-          provider: detailsResponse.data.provider,
-          model_name: detailsResponse.data.model_name,
-          api_key: detailsResponse.data.api_key, // 使用已保存的API密钥（或为空）
-          api_base: detailsResponse.data.api_base,
-          temperature: detailsResponse.data.temperature,
-          max_tokens: detailsResponse.data.max_tokens,
-          enabled: detailsResponse.data.enabled,
+          provider: providerToEdit,
+          model_name: modelToEdit,
+          api_key: details?.api_key || '',
+          api_base: details?.api_base || providerBase || undefined,
+          temperature: details?.temperature,
+          max_tokens: details?.max_tokens,
+          enabled: details?.enabled ?? true,
         }
       });
       
       // 重置自定义模型名称状态
       setCustomModelName('');
-      setShowCustomInput(false);
       
       setEditDialogOpen(true);
     } catch (error: any) {
@@ -180,7 +200,7 @@ const ModelConfigManager: React.FC = () => {
       // 如果使用了自定义模型名称，先将其添加到提供商的模型列表中
       if (!availableModels.includes(editingModel.config.model_name)) {
         try {
-          await modelConfigApi.addCustomModel(
+          await scopedApi.addCustomModel(
             editingModel.config.provider,
             editingModel.type,
             editingModel.config.model_name
@@ -192,7 +212,7 @@ const ModelConfigManager: React.FC = () => {
         }
       }
 
-      await modelConfigApi.updateActiveModel(editingModel.type, editingModel.config);
+      await scopedApi.updateActiveModel(editingModel.type, editingModel.config);
       setSuccess('模型配置更新成功');
       setEditDialogOpen(false);
       setEditingModel(null);
@@ -218,7 +238,7 @@ const ModelConfigManager: React.FC = () => {
     if (!editingModel) return;
     
     try {
-      const modelsResponse = await modelConfigApi.getProviderModels(provider, editingModel.type);
+      const modelsResponse = await scopedApi.getProviderModels(provider, editingModel.type);
       setAvailableModels(modelsResponse.data.models);
 
       const providerBase = providers.find(p => p.provider === provider)?.api_base || '';
@@ -258,7 +278,7 @@ const ModelConfigManager: React.FC = () => {
   const saveProviderConfig = async () => {
     if (!editingProvider) return;
     try {
-      await modelConfigApi.updateProvider(editingProvider.provider, {
+      await scopedApi.updateProvider(editingProvider.provider, {
         api_key: editingProvider.api_key, // 允许为空：后端会保持不变（若已配置）
         api_base: editingProvider.api_base || undefined,
         enabled: editingProvider.enabled,
@@ -277,7 +297,7 @@ const ModelConfigManager: React.FC = () => {
   const testProvider = async (provider: string) => {
     try {
       setTestingProvider(provider);
-      await modelConfigApi.testProviderConnection(provider);
+      await scopedApi.testProviderConnection(provider);
       setSuccess(`${getProviderName(provider)} 连接测试成功`);
     } catch (error: any) {
       console.error('Provider test failed:', error);
@@ -313,7 +333,7 @@ const ModelConfigManager: React.FC = () => {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
-          模型配置管理
+          {scope === 'tenant' ? '租户共享模型配置' : '个人模型配置'}
         </Typography>
         <Button
           variant="outlined"
@@ -347,11 +367,15 @@ const ModelConfigManager: React.FC = () => {
         </AccordionSummary>
         <AccordionDetails>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            推荐按 Dify/RAGFlow 的方式配置：先配置提供商，再选择每类模型的默认值（Chat/Embedding/Rerank）。
+            {scope === 'tenant'
+              ? '这里配置的是租户共享模型：先配置提供商，再选择每类模型的默认值（Chat/Embedding/Rerank）。'
+              : '这里配置的是个人模型：先配置提供商，再选择每类模型的默认值（Chat/Embedding/Rerank）。'}
           </Typography>
           <Box component="ul" sx={{ m: 0, pl: 2, color: 'text.secondary', fontSize: 14, lineHeight: 1.8 }}>
             <li>先点「配置 API」：填写 API Base / API Key，并启用提供商。</li>
-            <li>再编辑「活跃模型」：选择该租户默认的聊天/向量/重排模型。</li>
+            <li>
+              再编辑「活跃模型」：选择{scope === 'tenant' ? '租户' : '个人'}默认的聊天/向量/重排模型。
+            </li>
             <li>模型级 API Key 为空时，会自动复用提供商级 API Key（更安全，避免多处存储）。</li>
             <li>「本地(OpenAI兼容)」要求提供 OpenAI-Compatible `/v1` 接口；可不填 Key，把 Base 指向你的服务地址即可（会自动补齐 `/v1`）。</li>
           </Box>
@@ -509,7 +533,7 @@ const ModelConfigManager: React.FC = () => {
                   >
                     配置 API
                   </Button>
-                  {provider.has_api_key && (
+                  {(provider.has_api_key || provider.requires_api_key === false) && (
                     <Button 
                       size="small" 
                       startIcon={testingProvider === provider.provider ? 

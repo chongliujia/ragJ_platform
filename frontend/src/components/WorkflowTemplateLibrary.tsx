@@ -27,23 +27,16 @@ import {
   Tabs,
   Tab,
   Rating,
-  Divider,
   IconButton,
-  Tooltip,
   Alert,
   Paper,
   List,
   ListItem,
   ListItemText,
   ListItemIcon,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Badge,
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  Category as CategoryIcon,
   AccountTree as WorkflowIcon,
   SmartToy as AIIcon,
   Description as DocumentIcon,
@@ -57,12 +50,9 @@ import {
   Code as CodeIcon,
   Timeline as TimelineIcon,
   TrendingUp as TrendingUpIcon,
-  FiberNew as NewIcon,
-  ExpandMore as ExpandMoreIcon,
   FilterList as FilterIcon,
-  Sort as SortIcon,
+  Close as CloseIcon,
 } from '@mui/icons-material';
-import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 interface WorkflowTemplate {
@@ -101,7 +91,6 @@ interface TemplateCategory {
 }
 
 const WorkflowTemplateLibrary: React.FC = () => {
-  const { t } = useTranslation();
   const navigate = useNavigate();
   
   // 状态管理
@@ -149,7 +138,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
       color: '#ff9800',
       count: 10,
       subcategories: [
-        { id: 'qa_system', name: '问答系统', icon: <Psychology />, color: '#ff9800', count: 6 },
+        { id: 'qa_system', name: '问答系统', icon: <AnalyzeIcon />, color: '#ff9800', count: 6 },
         { id: 'writing_assistant', name: '写作助手', icon: <CodeIcon />, color: '#ff9800', count: 4 },
       ]
     },
@@ -861,7 +850,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
       <Paper sx={{ mb: 3, backgroundColor: 'rgba(26, 31, 46, 0.8)', border: '1px solid rgba(0, 212, 255, 0.2)' }}>
         <Tabs
           value={currentTab}
-          onChange={(e, newValue) => setCurrentTab(newValue)}
+          onChange={(_e, newValue) => setCurrentTab(newValue)}
           sx={{
             '& .MuiTabs-indicator': {
               backgroundColor: '#00d4ff',

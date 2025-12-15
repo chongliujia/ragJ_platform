@@ -15,8 +15,10 @@ from app.services.model_config_service import (
     ModelType,
     ProviderType,
 )
-from app.core.dependencies import get_tenant_id, require_tenant_admin
+from app.core.dependencies import get_tenant_id, require_tenant_admin, get_current_user, optional_permission
 from app.db.models.user import User
+from app.db.models.permission import PermissionType
+from app.services.user_model_config_service import user_model_config_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -66,7 +68,10 @@ class UpdateProviderRequest(BaseModel):
 
 
 @router.get("/providers", response_model=List[ProviderConfigResponse])
-async def get_providers(tenant_id: int = Depends(get_tenant_id)):
+async def get_providers(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
+):
     """获取所有提供商配置"""
     try:
         providers = model_config_service.get_providers(tenant_id=tenant_id)
@@ -98,7 +103,10 @@ async def get_providers(tenant_id: int = Depends(get_tenant_id)):
 
 @router.get("/providers/{provider}/models/{model_type}")
 async def get_provider_models(
-    provider: str, model_type: str, tenant_id: int = Depends(get_tenant_id)
+    provider: str,
+    model_type: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
 ):
     """获取指定提供商的模型列表"""
     try:
@@ -120,7 +128,10 @@ async def get_provider_models(
 
 
 @router.get("/active-models", response_model=List[ModelConfigResponse])
-async def get_active_models(tenant_id: int = Depends(get_tenant_id)):
+async def get_active_models(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
+):
     """获取当前活跃的模型配置"""
     try:
         active_models = []
@@ -162,7 +173,9 @@ class ModelConfigDetailsResponse(BaseModel):
     "/active-models/{model_type}/details", response_model=ModelConfigDetailsResponse
 )
 async def get_model_config_details(
-    model_type: str, tenant_id: int = Depends(get_tenant_id)
+    model_type: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
 ):
     """获取指定模型的配置详情"""
     try:
@@ -335,7 +348,10 @@ async def update_provider(
 
 
 @router.get("/summary")
-async def get_config_summary(tenant_id: int = Depends(get_tenant_id)):
+async def get_config_summary(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
+):
     """获取配置摘要"""
     try:
         summary = model_config_service.get_config_summary(tenant_id=tenant_id)
@@ -526,7 +542,10 @@ async def get_model_presets():
 
 
 @router.get("/available-chat-models")
-async def get_available_chat_models(tenant_id: int = Depends(get_tenant_id)):
+async def get_available_chat_models(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_tenant_admin()),
+):
     """获取可用的聊天模型列表（返回已可用的提供商/模型；本地提供商可无密钥）。"""
     try:
         available_models = []
@@ -607,3 +626,395 @@ async def get_available_chat_models(tenant_id: int = Depends(get_tenant_id)):
     except Exception as e:
         logger.error(f"Failed to get available chat models: {e}")
         raise HTTPException(status_code=500, detail="Failed to get available chat models")
+
+
+# ==================== Per-user ("me") model config ====================
+
+
+@router.get("/me/providers", response_model=List[ProviderConfigResponse])
+async def get_my_providers(current_user: User = Depends(get_current_user)):
+    """获取当前用户的提供商配置（个人配置）。"""
+    providers = user_model_config_service.get_providers(user_id=current_user.id)
+    response = []
+    for provider_type, provider_config in providers.items():
+        response.append(
+            ProviderConfigResponse(
+                provider=provider_type.value,
+                display_name=provider_config.display_name,
+                api_base=provider_config.api_base,
+                has_api_key=bool(provider_config.api_key),
+                requires_api_key=bool(getattr(provider_config, "requires_api_key", True)),
+                enabled=provider_config.enabled,
+                available_models={
+                    model_type.value: models
+                    for model_type, models in provider_config.models.items()
+                },
+                description=provider_config.description,
+            )
+        )
+    return response
+
+
+@router.get("/me/providers/{provider}/models/{model_type}")
+async def get_my_provider_models(
+    provider: str,
+    model_type: str,
+    current_user: User = Depends(get_current_user),
+):
+    """获取当前用户（个人配置）的指定提供商模型列表（含个人自定义模型）。"""
+    provider_enum = ProviderType(provider)
+    model_type_enum = ModelType(model_type)
+    p_cfg = user_model_config_service.get_provider(provider_enum, user_id=current_user.id)
+    if not p_cfg:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    models = (p_cfg.models or {}).get(model_type_enum, []) or []
+    return {"provider": provider, "model_type": model_type, "models": models}
+
+
+@router.put("/me/providers/{provider}")
+async def update_my_provider(
+    provider: str,
+    request: UpdateProviderRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """更新当前用户的提供商配置（个人 Key/Base/启用状态）。"""
+    provider_enum = ProviderType(provider)
+    provider_config = user_model_config_service.get_provider(provider_enum, user_id=current_user.id)
+    if not provider_config:
+        provider_config = model_config_service.get_provider(provider_enum)
+    if not provider_config:
+        raise HTTPException(status_code=404, detail=f"Provider '{provider}' not found")
+
+    provider_config = provider_config.copy(deep=True)
+    api_key = request.api_key
+    if isinstance(api_key, str):
+        api_key = api_key.strip()
+    if not api_key or "*" in api_key:
+        api_key = provider_config.api_key
+    if not api_key and bool(getattr(provider_config, "requires_api_key", True)):
+        raise HTTPException(status_code=400, detail="API key is required")
+    provider_config.api_key = api_key
+    if request.api_base:
+        api_base = request.api_base.strip().rstrip("/")
+        if api_base and not api_base.endswith("/v1") and provider_enum in (
+            ProviderType.LOCAL,
+            ProviderType.OPENAI,
+            ProviderType.SILICONFLOW,
+            ProviderType.DEEPSEEK,
+        ):
+            api_base = api_base + "/v1"
+        provider_config.api_base = api_base
+    if request.enabled is not None:
+        provider_config.enabled = bool(request.enabled)
+
+    user_model_config_service.update_provider(provider_enum, provider_config, user_id=current_user.id)
+    return {"message": f"Provider '{provider}' updated successfully"}
+
+
+@router.post("/me/test/{provider}")
+async def test_my_provider_connection(
+    provider: str,
+    tenant_id: int = Depends(get_tenant_id),
+    allow_shared: bool = Depends(optional_permission(PermissionType.MODEL_USE_SHARED.value)),
+    current_user: User = Depends(get_current_user),
+):
+    """测试当前用户的提供商连接（个人配置；有权限时可回退租户共享）。"""
+    provider_enum = ProviderType(provider)
+
+    # Prefer user provider config; optionally fallback to tenant-shared provider config.
+    provider_config = user_model_config_service.get_provider(provider_enum, user_id=current_user.id)
+    if provider_config is None and bool(allow_shared):
+        provider_config = model_config_service.get_provider(provider_enum, tenant_id=tenant_id)
+    if provider_config is None:
+        provider_config = model_config_service.get_provider(provider_enum)
+
+    if not provider_config:
+        raise HTTPException(status_code=400, detail="Provider not configured")
+    if not provider_config.enabled:
+        raise HTTPException(status_code=400, detail="Provider is disabled")
+    requires_key = bool(getattr(provider_config, "requires_api_key", True))
+    if requires_key and not provider_config.api_key:
+        raise HTTPException(status_code=400, detail="Provider missing API key")
+
+    # Mirror the tenant-admin test logic using the effective provider config.
+    chat_models = (provider_config.models or {}).get(ModelType.CHAT, []) or []
+    probe_chat_model = chat_models[0] if chat_models else None
+
+    if provider_enum in {ProviderType.OPENAI, ProviderType.SILICONFLOW, ProviderType.LOCAL}:
+        base = (provider_config.api_base or "").rstrip("/")
+        url = f"{base}/models" if base else ""
+        if not url:
+            raise HTTPException(status_code=400, detail="Provider api_base not configured")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                url,
+                headers=(
+                    {"Authorization": f"Bearer {provider_config.api_key}"}
+                    if provider_config.api_key
+                    else {}
+                ),
+            )
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider test failed ({resp.status_code}): {resp.text}",
+            )
+        return {"provider": provider, "status": "connected", "message": "Connection test successful"}
+
+    if provider_enum == ProviderType.DEEPSEEK:
+        base = (provider_config.api_base or "").rstrip("/")
+        if not base:
+            raise HTTPException(status_code=400, detail="Provider api_base not configured")
+        model_name = probe_chat_model or "deepseek-chat"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {provider_config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_name,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
+            )
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider test failed ({resp.status_code}): {resp.text}",
+            )
+        return {"provider": provider, "status": "connected", "message": "Connection test successful"}
+
+    if provider_enum == ProviderType.QWEN:
+        # DashScope native API via QwenAPIService
+        from app.services.llm_service import QwenAPIService
+
+        svc = QwenAPIService()
+        svc.api_key = provider_config.api_key
+        if provider_config.api_base:
+            svc.base_url = provider_config.api_base
+        if probe_chat_model:
+            svc.model = probe_chat_model
+        result = await svc.test_connection()
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=str(result))
+        return {"provider": provider, "status": "connected", "message": "Connection test successful"}
+
+    if provider_enum == ProviderType.COHERE:
+        base = (provider_config.api_base or "https://api.cohere.ai/v1").rstrip("/")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{base}/models",
+                headers={"Authorization": f"Bearer {provider_config.api_key}"},
+            )
+        if resp.status_code != 200:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider test failed ({resp.status_code}): {resp.text}",
+            )
+        return {"provider": provider, "status": "connected", "message": "Connection test successful"}
+
+    raise HTTPException(status_code=501, detail=f"Provider '{provider}' test not implemented")
+
+
+@router.get("/me/active-models", response_model=List[ModelConfigResponse])
+async def get_my_active_models(
+    tenant_id: int = Depends(get_tenant_id),
+    allow_shared: bool = Depends(optional_permission(PermissionType.MODEL_USE_SHARED.value)),
+    current_user: User = Depends(get_current_user),
+):
+    """获取当前用户的活跃模型配置（默认个人；有权限时可回退租户共享）。"""
+    active_models: list[ModelConfigResponse] = []
+    for model_type in ModelType:
+        cfg = user_model_config_service.get_active_model(
+            model_type,
+            user_id=current_user.id,
+            tenant_id=tenant_id,
+            allow_tenant_fallback=bool(allow_shared),
+        )
+        if cfg:
+            active_models.append(
+                ModelConfigResponse(
+                    model_type=model_type.value,
+                    provider=cfg.provider.value,
+                    model_name=cfg.model_name,
+                    has_api_key=bool(cfg.api_key),
+                    enabled=cfg.enabled,
+                )
+            )
+    return active_models
+
+
+@router.get("/me/active-models/{model_type}/details", response_model=ModelConfigDetailsResponse)
+async def get_my_model_config_details(
+    model_type: str,
+    tenant_id: int = Depends(get_tenant_id),
+    allow_shared: bool = Depends(optional_permission(PermissionType.MODEL_USE_SHARED.value)),
+    current_user: User = Depends(get_current_user),
+):
+    """获取当前用户指定模型的配置详情（api_key 始终掩码返回）。"""
+    model_type_enum = ModelType(model_type)
+    cfg = user_model_config_service.get_active_model(
+        model_type_enum,
+        user_id=current_user.id,
+        tenant_id=tenant_id,
+        allow_tenant_fallback=bool(allow_shared),
+    )
+    if not cfg:
+        raise HTTPException(status_code=404, detail="Model configuration not found")
+
+    masked_api_key = ""
+    if cfg.api_key:
+        if len(cfg.api_key) > 8:
+            masked_api_key = cfg.api_key[:4] + "*" * (len(cfg.api_key) - 8) + cfg.api_key[-4:]
+        else:
+            masked_api_key = "*" * len(cfg.api_key)
+
+    return ModelConfigDetailsResponse(
+        model_type=model_type_enum.value,
+        provider=cfg.provider.value,
+        model_name=cfg.model_name,
+        has_api_key=bool(cfg.api_key),
+        enabled=cfg.enabled,
+        api_key=masked_api_key,
+        api_base=cfg.api_base or "",
+        temperature=cfg.temperature,
+        max_tokens=cfg.max_tokens,
+    )
+
+
+@router.put("/me/active-models/{model_type}")
+async def update_my_active_model(
+    model_type: str,
+    request: UpdateModelConfigRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """更新当前用户指定类型的活跃模型（个人配置）。"""
+    model_type_enum = ModelType(model_type)
+    provider_enum = ProviderType(request.provider)
+
+    available_models = []
+    try:
+        p_cfg = user_model_config_service.get_provider(provider_enum, user_id=current_user.id)
+        if p_cfg:
+            available_models = p_cfg.models.get(model_type_enum, []) or []
+    except Exception:
+        available_models = []
+
+    if request.model_name not in available_models:
+        logger.warning(
+            f"Using custom model '{request.model_name}' for provider '{request.provider}' "
+            f"(not in predefined list)"
+        )
+
+    existing_config = user_model_config_service.get_active_model(
+        model_type_enum, user_id=current_user.id, allow_tenant_fallback=False
+    )
+
+    api_key = request.api_key
+    if isinstance(api_key, str):
+        api_key = api_key.strip()
+    if not api_key or "*" in api_key:
+        if existing_config and existing_config.api_key and existing_config.provider == provider_enum:
+            api_key = existing_config.api_key
+        else:
+            p_cfg = user_model_config_service.get_provider(provider_enum, user_id=current_user.id)
+            requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
+            if p_cfg and (p_cfg.api_key or not requires_key):
+                api_key = None
+            else:
+                raise HTTPException(status_code=400, detail="API key is required for new configuration")
+    if isinstance(api_key, str):
+        api_key = api_key.strip() or None
+
+    cfg = ModelConfig(
+        provider=provider_enum,
+        model_name=request.model_name,
+        api_key=api_key,
+        api_base=request.api_base,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+        enabled=request.enabled,
+    )
+    user_model_config_service.set_active_model(model_type_enum, cfg, user_id=current_user.id)
+    return {"message": f"Active {model_type} model updated successfully"}
+
+
+@router.post("/me/providers/{provider}/models/{model_type}")
+async def add_my_custom_model(
+    provider: str,
+    model_type: str,
+    model_name: str,
+    current_user: User = Depends(get_current_user),
+):
+    """为当前用户的提供商添加自定义模型名称。"""
+    provider_enum = ProviderType(provider)
+    model_type_enum = ModelType(model_type)
+    ok = user_model_config_service.add_custom_model(provider_enum, model_type_enum, model_name, user_id=current_user.id)
+    return {"message": "No-op" if not ok else "Custom model added", "provider": provider, "model_type": model_type, "model_name": model_name}
+
+
+@router.get("/me/available-chat-models")
+async def get_my_available_chat_models(
+    tenant_id: int = Depends(get_tenant_id),
+    allow_shared: bool = Depends(optional_permission(PermissionType.MODEL_USE_SHARED.value)),
+    current_user: User = Depends(get_current_user),
+):
+    """获取当前用户可用的聊天模型列表（个人；有权限时可回退租户共享，不返回明文 key）。"""
+    available_models: list[dict] = []
+
+    chat_cfg = user_model_config_service.get_active_model(
+        ModelType.CHAT,
+        user_id=current_user.id,
+        tenant_id=tenant_id,
+        allow_tenant_fallback=bool(allow_shared),
+    )
+    if chat_cfg:
+        provider_cfg = user_model_config_service.get_provider(chat_cfg.provider, user_id=current_user.id)
+        # If this config is a tenant fallback, provider_cfg may not carry tenant key; use cfg.api_key as indicator.
+        provider_display_name = (
+            provider_cfg.display_name if provider_cfg is not None else chat_cfg.provider.value
+        )
+        requires_key = bool(getattr(provider_cfg, "requires_api_key", True)) if provider_cfg else True
+        has_effective_key = bool(chat_cfg.api_key) or (provider_cfg and bool(provider_cfg.api_key)) or (not requires_key)
+        if has_effective_key and (provider_cfg is None or provider_cfg.enabled):
+            available_models.append(
+                {
+                    "model_name": chat_cfg.model_name,
+                    "provider": chat_cfg.provider.value,
+                    "provider_display_name": provider_display_name,
+                    "model_display_name": f"{provider_display_name} - {chat_cfg.model_name}",
+                }
+            )
+        if provider_cfg and provider_cfg.enabled and (provider_cfg.api_key or not requires_key):
+            for m in (provider_cfg.models.get(ModelType.CHAT, []) or []):
+                if m != chat_cfg.model_name:
+                    available_models.append(
+                        {
+                            "model_name": m,
+                            "provider": chat_cfg.provider.value,
+                            "provider_display_name": provider_display_name,
+                            "model_display_name": f"{provider_display_name} - {m}",
+                        }
+                    )
+
+    if not available_models:
+        providers = user_model_config_service.get_providers(user_id=current_user.id)
+        for p_type, p_cfg in providers.items():
+            if not p_cfg.enabled:
+                continue
+            requires_key = bool(getattr(p_cfg, "requires_api_key", True))
+            if requires_key and not p_cfg.api_key:
+                continue
+            for m in (p_cfg.models.get(ModelType.CHAT, []) or []):
+                available_models.append(
+                    {
+                        "model_name": m,
+                        "provider": p_type.value,
+                        "provider_display_name": p_cfg.display_name,
+                        "model_display_name": f"{p_cfg.display_name} - {m}",
+                    }
+                )
+
+    return {"models": available_models}

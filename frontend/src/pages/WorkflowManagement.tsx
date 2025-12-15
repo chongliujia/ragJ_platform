@@ -40,14 +40,9 @@ import {
   Delete as DeleteIcon,
   MoreVert as MoreIcon,
   FileCopy as CopyIcon,
-  History as HistoryIcon,
-  Code as CodeIcon,
-  BugReport as DebugIcon,
   Visibility as ViewIcon,
   GetApp as ExportIcon,
-  Schedule as ScheduleIcon,
 } from '@mui/icons-material';
-import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { workflowApi, agentApi } from '../services/api';
 
@@ -75,14 +70,12 @@ interface Agent {
 }
 
 const WorkflowManagement: React.FC = () => {
-  const { t } = useTranslation();
   const navigate = useNavigate();
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTab, setSelectedTab] = useState<'workflows' | 'agents'>('workflows');
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<Workflow | Agent | null>(null);
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
@@ -686,7 +679,17 @@ const WorkflowManagement: React.FC = () => {
             <ListItemText>设为当前</ListItemText>
           </MenuItem>
         )}
-        <MenuItem onClick={() => { handleMenuClose(); setEditDialogOpen(true); }}>
+        <MenuItem
+          onClick={() => {
+            handleMenuClose();
+            if (selectedItem && selectedTab === 'workflows') {
+              const wf = selectedItem as Workflow;
+              try { localStorage.setItem('current_workflow_id', wf.id); } catch {}
+              setCurrentWorkflowId(wf.id);
+              navigate('/workflow-editor');
+            }
+          }}
+        >
           <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
           <ListItemText>编辑</ListItemText>
         </MenuItem>

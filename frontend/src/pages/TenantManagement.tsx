@@ -37,7 +37,6 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   Add as AddIcon,
-  Business as TenantIcon,
   Storage as StorageIcon,
   People as UsersIcon,
   Description as DocsIcon,
@@ -483,7 +482,7 @@ const TenantManagement: React.FC = () => {
           count={(totalCount && totalCount >= 0) ? totalCount : (stats?.total_tenants ?? -1)}
           rowsPerPage={rowsPerPage}
           page={page}
-          onPageChange={(e, newPage) => setPage(newPage)}
+          onPageChange={(_e, newPage) => setPage(newPage)}
           onRowsPerPageChange={(e) => {
             setRowsPerPage(parseInt(e.target.value, 10));
             setPage(0);

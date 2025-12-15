@@ -25,6 +25,19 @@ from app.core.config import settings
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+def _can_read_kb(kb_row: KBModel, user: User) -> bool:
+    if user.role in ("super_admin", "tenant_admin"):
+        return True
+    if kb_row.owner_id == user.id:
+        return True
+    return bool(getattr(kb_row, "is_public", False))
+
+
+def _can_write_kb(kb_row: KBModel, user: User) -> bool:
+    if user.role in ("super_admin", "tenant_admin"):
+        return True
+    return kb_row.owner_id == user.id
+
 
 class DocumentUploadResponse(BaseModel):
     """Response model for a successful document upload."""
@@ -126,6 +139,11 @@ async def upload_document(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Knowledge base '{kb_name}' not found",
+        )
+    if not _can_write_kb(kb_row, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to upload to this knowledge base",
         )
 
     # Sanitize filename to prevent path traversal
@@ -248,6 +266,78 @@ async def upload_document(
     }
 
 
+@router.post("/{document_id}/retry", status_code=status.HTTP_202_ACCEPTED)
+async def retry_document_processing(
+    kb_name: str,
+    document_id: int = Path(..., description="Document ID"),
+    background_tasks: BackgroundTasks = None,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_UPDATE.value)),
+    db: Session = Depends(get_db),
+):
+    """Retry processing for a failed document without re-uploading the file."""
+    doc = (
+        db.query(Document)
+        .filter(
+            Document.id == document_id,
+            Document.knowledge_base_name == kb_name,
+            Document.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if not doc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if doc.status != DocumentStatusEnum.FAILED.value:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Only failed documents can be retried")
+
+    # Determine chunking config: reuse stored metadata if present, otherwise use KB defaults.
+    strategy = ChunkingStrategy.RECURSIVE
+    params: dict = {}
+    try:
+        meta = doc.doc_metadata or {}
+        s = meta.get("chunking_strategy")
+        p = meta.get("chunking_params")
+        if s:
+            try:
+                strategy = ChunkingStrategy(str(s))
+            except Exception:
+                strategy = ChunkingStrategy.RECURSIVE
+        if isinstance(p, dict):
+            params = p
+    except Exception:
+        pass
+
+    if not params:
+        kb_row = (
+            db.query(KBModel)
+            .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id)
+            .first()
+        )
+        if kb_row is not None:
+            if not _can_write_kb(kb_row, current_user):
+                raise HTTPException(status_code=403, detail="Not allowed to manage this knowledge base")
+            try:
+                params = {
+                    "chunk_size": int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE),
+                    "chunk_overlap": int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP),
+                }
+            except Exception:
+                params = {}
+
+    # Enqueue background retry
+    if background_tasks is None:
+        background_tasks = BackgroundTasks()
+    background_tasks.add_task(
+        document_service.reprocess_document,
+        document_id,
+        tenant_id,
+        current_user.id,
+        strategy,
+        params,
+    )
+    return {"message": "Retry accepted and is being processed in the background."}
+
+
 @router.get("/chunking-strategies")
 async def get_chunking_strategies():
     """
@@ -262,14 +352,24 @@ async def list_knowledge_base_documents(
     kb_name: str,
     db: Session = Depends(get_db),
     tenant_id: int = Depends(get_tenant_id),
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_READ.value)),
 ):
     """
     Get list of documents in a knowledge base.
     Returns all documents with their processing status and metadata.
     """
     try:
-        tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == kb_name,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_read_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
         
         # Query documents from database
         documents = db.query(Document).filter(
@@ -310,13 +410,25 @@ async def delete_document(
     document_id: int = Path(..., description="Document ID to delete"),
     db: Session = Depends(get_db),
     tenant_id: int = Depends(get_tenant_id),
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_DELETE.value)),
 ):
     """
     Delete a document from the knowledge base.
     This removes the document from both database and vector storage.
     """
     try:        
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == kb_name,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_write_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
+
         # Find document in database
         document = db.query(Document).filter(
             Document.id == document_id,
@@ -421,13 +533,25 @@ async def get_document_chunks(
     limit: int = 100,
     db: Session = Depends(get_db),
     tenant_id: int = Depends(get_tenant_id),
-    current_user = Depends(get_current_user),
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_READ.value)),
 ):
     """
     Retrieve chunk texts for a specific document, ordered by original insertion order.
     Prefer DB-persisted chunks for reliable pagination; fallback to Milvus by stored vector IDs.
     """
     try:
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == kb_name,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_read_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
+
         document = db.query(Document).filter(
             Document.id == document_id,
             Document.knowledge_base_name == kb_name,
@@ -587,12 +711,24 @@ async def batch_delete_documents(
     payload: BatchDeleteRequest,
     db: Session = Depends(get_db),
     tenant_id: int = Depends(get_tenant_id),
-    current_user = Depends(get_current_user),
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_DELETE.value)),
 ):
     """
     Batch delete multiple documents and their associated vectors and ES entries.
     """
     try:
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == kb_name,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_write_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
+
         ids = list({int(i) for i in (payload.document_ids or [])})
         if not ids:
             return BatchDeleteResult(deleted=0)
@@ -693,7 +829,8 @@ async def batch_delete_documents(
 async def get_document_status(
     document_id: int = Path(..., description="Document ID"),
     db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_READ.value)),
 ):
     """
     Get the processing status of a specific document.
@@ -701,13 +838,29 @@ async def get_document_status(
     """
     try:
         # Find document in database
-        document = db.query(Document).filter(Document.id == document_id).first()
+        document = (
+            db.query(Document)
+            .filter(Document.id == document_id, Document.tenant_id == tenant_id)
+            .first()
+        )
         
         if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Document with id {document_id} not found"
             )
+
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == document.knowledge_base_name,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_read_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail="Document not found")
         
         # TODO: Add progress information from processing service
         progress_info = None

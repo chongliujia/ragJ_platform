@@ -16,7 +16,6 @@ import {
   Alert,
   CircularProgress,
   Paper,
-  Divider,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -108,11 +107,12 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
           
           // 初始化默认参数
           const defaultParams: Record<string, any> = {};
-          Object.entries(defaultStrategy.params).forEach(([key, param]) => {
-            defaultParams[key] = param.default;
-          });
-          setStrategyParams(defaultParams);
-        }
+	          Object.entries(defaultStrategy.params).forEach(([key, param]) => {
+	            const p = param as { default?: unknown };
+	            defaultParams[key] = p.default;
+	          });
+	          setStrategyParams(defaultParams);
+	        }
       } catch (error) {
         console.error('Failed to fetch chunking strategies:', error);
         setError(t('document.upload.strategies.fetchError'));
@@ -134,12 +134,13 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     const strategyConfig = strategies.find(s => s.value === strategy);
     if (strategyConfig) {
       const newParams: Record<string, any> = {};
-      Object.entries(strategyConfig.params).forEach(([key, param]) => {
-        newParams[key] = param.default;
-      });
-      setStrategyParams(newParams);
-    }
-  };
+	    Object.entries(strategyConfig.params).forEach(([key, param]) => {
+	      const p = param as { default?: unknown };
+	      newParams[key] = p.default;
+	    });
+	    setStrategyParams(newParams);
+	  }
+	};
 
   // 支持拖拽添加文件
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {

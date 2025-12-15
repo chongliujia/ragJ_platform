@@ -33,6 +33,11 @@ backend/.env
 backend/.env.dev
 *.env.local
 .envrc
+secrets/
+*.pem
+*.key
+*.crt
+docker-compose.override.yml
 
 # Databases / runtime files
 *.db

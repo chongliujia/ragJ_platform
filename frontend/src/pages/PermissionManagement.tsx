@@ -20,7 +20,6 @@ import {
   FormControlLabel,
   Button,
   Alert,
-  Divider,
   Chip,
   List,
   ListItem,
@@ -54,11 +53,6 @@ interface Permission {
   display_name: string;
   description: string;
   category: string;
-}
-
-interface RolePermissions {
-  role: string;
-  permissions: Permission[];
 }
 
 interface PermissionsByCategory {
@@ -293,7 +287,7 @@ const PermissionManagement: React.FC = () => {
     return roles.find(r => r.value === selectedRole);
   };
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
+  const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
   };
 

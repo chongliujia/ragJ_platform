@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import get_current_user, get_tenant_id
 from app.db.database import get_db
 from app.db.models.agent import Agent as AgentModel
+from app.db.models.knowledge_base import KnowledgeBase as KBModel
 from app.db.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.chat_service import ChatService
@@ -105,6 +106,31 @@ def _get_agent_or_404(
     return agent
 
 
+def _can_read_kb(kb_row: KBModel, user: User) -> bool:
+    if user.role in ("super_admin", "tenant_admin"):
+        return True
+    if kb_row.owner_id == user.id:
+        return True
+    return bool(getattr(kb_row, "is_public", False))
+
+
+def _validate_agent_kbs(db: Session, tenant_id: int, user: User, kb_names: list[str]) -> None:
+    if user.role in ("super_admin", "tenant_admin"):
+        return
+    for name in kb_names or []:
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == name,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_read_kb(kb_row, user):
+            raise HTTPException(status_code=404, detail=f"Knowledge base not found: {name}")
+
+
 # 预定义的智能体模板（全局）
 @router.get("/templates")
 async def get_agent_templates():
@@ -152,6 +178,7 @@ async def create_agent(
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
 ):
+    _validate_agent_kbs(db, tenant_id, current_user, request.knowledge_bases)
     agent = AgentModel(
         name=request.name,
         description=request.description or "",
@@ -209,6 +236,8 @@ async def update_agent(
 ):
     agent = _get_agent_or_404(db, agent_id, tenant_id)
     data = request.dict(exclude_unset=True)
+    if "knowledge_bases" in data and data.get("knowledge_bases") is not None:
+        _validate_agent_kbs(db, tenant_id, current_user, data.get("knowledge_bases") or [])
     for k, v in data.items():
         setattr(agent, k, v)
     db.add(agent)
@@ -247,6 +276,18 @@ async def chat_with_agent(
     kb_id = request.knowledge_base_id
     if kb_id is None and agent.knowledge_bases:
         kb_id = agent.knowledge_bases[0]
+    if kb_id:
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == kb_id,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_read_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
 
     chat_req = ChatRequest(
         message=message,
@@ -286,6 +327,18 @@ async def stream_chat_with_agent(
     kb_id = request.knowledge_base_id
     if kb_id is None and agent.knowledge_bases:
         kb_id = agent.knowledge_bases[0]
+    if kb_id:
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == kb_id,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_read_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
 
     chat_req = ChatRequest(
         message=message,

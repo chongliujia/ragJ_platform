@@ -31,6 +31,19 @@ from app.services.chunking_service import chunking_service, ChunkingStrategy
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+def _can_read_kb(kb_row: KBModel, user: User) -> bool:
+    if user.role in ("super_admin", "tenant_admin"):
+        return True
+    if kb_row.owner_id == user.id:
+        return True
+    return bool(getattr(kb_row, "is_public", False))
+
+
+def _can_write_kb(kb_row: KBModel, user: User) -> bool:
+    if user.role in ("super_admin", "tenant_admin"):
+        return True
+    return kb_row.owner_id == user.id
+
 
 def validate_collection_name(name: str) -> bool:
     """
@@ -208,12 +221,20 @@ async def list_knowledge_bases(
     Rule: KBs are source-of-truth in DB; do not infer or auto-create from Milvus.
     """
     try:
-        kb_rows = (
-            db.query(KBModel)
-            .filter(KBModel.tenant_id == tenant_id, KBModel.is_active == True)
-            .order_by(KBModel.created_at.desc())
-            .all()
+        q = db.query(KBModel).filter(
+            KBModel.tenant_id == tenant_id, KBModel.is_active == True
         )
+        if current_user.role not in ("super_admin", "tenant_admin"):
+            from sqlalchemy import or_
+
+            q = q.filter(
+                or_(
+                    KBModel.owner_id == current_user.id,
+                    KBModel.is_public == True,
+                )
+            )
+
+        kb_rows = q.order_by(KBModel.created_at.desc()).all()
         kbs: List[KnowledgeBase] = []
         for row in kb_rows:
             kb_name = row.name
@@ -300,6 +321,8 @@ async def rebuild_es_index(
     )
     if kb_row is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
+    if not _can_write_kb(kb_row, current_user):
+        raise HTTPException(status_code=403, detail="Not allowed to manage this knowledge base")
 
     if es_service is None:
         raise HTTPException(status_code=503, detail="Elasticsearch service not available")
@@ -410,6 +433,8 @@ async def get_knowledge_base(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Knowledge base '{kb_name}' not found.",
             )
+        if not _can_read_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail=f"Knowledge base '{kb_name}' not found.")
 
         tenant_collection_name = (
             kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
@@ -486,6 +511,8 @@ async def clear_kb_vectors(
     )
     if kb_row is None:
         raise HTTPException(status_code=404, detail="Knowledge base not found")
+    if not _can_write_kb(kb_row, current_user):
+        raise HTTPException(status_code=403, detail="Not allowed to manage this knowledge base")
 
     tenant_collection_name = kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
     tenant_index_name = tenant_collection_name
@@ -552,9 +579,7 @@ async def clear_all_kb_vectors(
     tenant_id: int = Depends(get_tenant_id),
     es_service: Optional[ElasticsearchService] = Depends(get_elasticsearch_service),
     db: Session = Depends(get_db),
-    current_user: User = Depends(
-        require_permission(PermissionType.KNOWLEDGE_BASE_UPDATE.value)
-    ),
+    current_user: User = Depends(require_permission(PermissionType.KNOWLEDGE_BASE_MANAGE.value)),
 ):
     """
     Clear Milvus vectors for ALL knowledge bases under current tenant.
@@ -565,6 +590,8 @@ async def clear_all_kb_vectors(
     - Optionally clears Elasticsearch indices and recreates for DB KBs.
     """
     try:
+        if current_user.role not in ("super_admin", "tenant_admin"):
+            raise HTTPException(status_code=403, detail="Tenant admin access required")
         tenant_prefix = f"tenant_{tenant_id}_"
 
         # Load KB names from DB
@@ -657,6 +684,8 @@ async def delete_knowledge_base(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Knowledge base '{kb_name}' not found.",
             )
+        if not _can_write_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail=f"Knowledge base '{kb_name}' not found.")
 
         tenant_collection_name = (
             kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"

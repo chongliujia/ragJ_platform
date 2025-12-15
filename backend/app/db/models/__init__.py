@@ -22,6 +22,7 @@ from .workflow import (
 )
 from .api_key import ApiKey
 from .tenant_model_config import TenantProviderConfig, TenantModelConfig
+from .user_model_config import UserProviderConfig, UserModelConfig
 from .agent import Agent
 
 __all__ = [
@@ -51,5 +52,7 @@ __all__ = [
     "ApiKey",
     "TenantProviderConfig",
     "TenantModelConfig",
+    "UserProviderConfig",
+    "UserModelConfig",
     "Agent",
 ]

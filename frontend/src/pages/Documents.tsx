@@ -22,14 +22,14 @@ const Documents: React.FC = () => {
   const loadKBs = async () => {
     try {
       const res = await knowledgeBaseApi.getList();
-      const list = res.data || [];
+      const list: KnowledgeBase[] = Array.isArray(res.data) ? res.data : [];
       setKbs(list);
       if (list.length === 0) {
         setSelectedKb('');
       } else if (!selectedKb || !list.some(kb => kb.id === selectedKb)) {
         setSelectedKb(list[0].id);
       }
-    } catch (e) {
+    } catch {
       enqueueSnackbar('加载知识库失败', 'error');
     }
   };

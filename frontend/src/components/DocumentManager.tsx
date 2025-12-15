@@ -45,9 +45,36 @@ import {
   SelectAll as SelectAllIcon,
   ContentCopy as CopyIcon,
   InfoOutlined as InfoOutlinedIcon,
+  Replay as RetryIcon,
 } from '@mui/icons-material';
 import { documentApi, knowledgeBaseApi } from '../services/api';
 import DocumentChunksDialog from './DocumentChunksDialog';
+
+const parseErrorDetails = (message?: string): any | null => {
+  if (!message) return null;
+  const m = message.match(/details:\s*(\{[\s\S]*\})\s*$/);
+  if (!m) return null;
+  try {
+    return JSON.parse(m[1]);
+  } catch {
+    return null;
+  }
+};
+
+const getErrorHint = (message?: string): string | null => {
+  const details = parseErrorDetails(message);
+  const code = details?.code;
+  if (code === 20042 && /tokens/i.test(String(details?.message || message || ''))) {
+    return '嵌入模型限制单条输入长度（≤512 tokens）。建议在上传时调小“分片长度/Chunk Size”（例如 400~700），或更换支持更长输入的 embedding 模型。';
+  }
+  if (typeof code === 'number') {
+    return `提供商返回错误码：${code}。可以先检查模型是否可用、Key/配额是否足够，或在“模型配置”里测试连接。`;
+  }
+  if (message && /403/.test(message)) {
+    return '403 通常是 API Key/配额/模型权限问题：检查提供商 Key 是否正确、是否开通对应模型、是否触发限流。';
+  }
+  return null;
+};
 
 interface Document {
   id: string;
@@ -85,16 +112,17 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusMenuAnchor, setStatusMenuAnchor] = useState<null | HTMLElement>(null);
   const [actionMenuAnchor, setActionMenuAnchor] = useState<null | HTMLElement>(null);
-  const [processingDocuments, setProcessingDocuments] = useState<string[]>([]);
   const [deletingDocuments, setDeletingDocuments] = useState<string[]>([]);
   const [chunksDialogOpen, setChunksDialogOpen] = useState(false);
   const [activeDocForChunks, setActiveDocForChunks] = useState<Document | null>(null);
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
   const [activeDocForError, setActiveDocForError] = useState<Document | null>(null);
+  const [retryingDocuments, setRetryingDocuments] = useState<string[]>([]);
 
   // 获取文档列表（真实 API，做字段映射以复用现有表格）
-  const fetchDocuments = async (silent: boolean = false) => {
+  const fetchDocuments = async (silent = false) => {
     try {
       if (!silent) setLoading(true);
       setError(null);
@@ -185,6 +213,29 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
       setError(error.response?.data?.detail || t('document.manager.deleteError'));
     } finally {
       setDeletingDocuments([]);
+    }
+  };
+
+  const retryDocument = async (doc: Document) => {
+    try {
+      setRetryingDocuments((prev) => (prev.includes(doc.id) ? prev : prev.concat(doc.id)));
+      await documentApi.retry(knowledgeBaseId, doc.id);
+      // Optimistically update UI
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === doc.id
+            ? { ...d, status: 'pending', error_message: undefined, chunks_count: 0, progress: { stage: '重试中…' } }
+            : d
+        )
+      );
+    } catch (e: any) {
+      console.error('Retry failed:', e);
+      setError(e?.response?.data?.detail || '重试失败');
+    } finally {
+      setRetryingDocuments((prev) => prev.filter((id) => id !== doc.id));
+      // trigger refresh soon
+      fetchDocuments(true);
+      refreshProcessingProgress();
     }
   };
 
@@ -335,11 +386,11 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
         )}
 
         {/* 工具栏 */}
-        <Toolbar sx={{ px: 0, minHeight: 'auto !important', mb: 2 }}>
-          <TextField
-            placeholder={t('document.manager.search.placeholder')}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+	        <Toolbar sx={{ px: 0, minHeight: 'auto !important', mb: 2 }}>
+	          <TextField
+	            placeholder={t('document.manager.search.placeholder')}
+	            value={searchTerm}
+	            onChange={(e) => setSearchTerm(e.target.value)}
             size="small"
             sx={{ minWidth: 300 }}
             InputProps={{
@@ -348,8 +399,28 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                   <SearchIcon />
                 </InputAdornment>
               ),
-            }}
-          />
+	            }}
+	          />
+
+	          <Button
+	            size="small"
+	            variant="outlined"
+	            startIcon={<FilterIcon />}
+	            sx={{ ml: 1 }}
+	            onClick={(e) => setStatusMenuAnchor(e.currentTarget)}
+	          >
+	            {statusFilter === 'all'
+	              ? '全部状态'
+	              : statusFilter === 'pending'
+	                  ? '等待'
+	                  : statusFilter === 'processing'
+	                      ? '处理中'
+	                      : statusFilter === 'completed'
+	                          ? '已完成'
+	                          : statusFilter === 'failed'
+	                              ? '失败'
+	                              : statusFilter}
+	          </Button>
           
           <Box sx={{ flexGrow: 1 }} />
           
@@ -362,14 +433,14 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
             {allFilteredSelected ? t('document.manager.actions.deselectAll') : t('document.manager.actions.selectAll')}
           </Button>
           
-          <Button
-            size="small"
-            onClick={fetchDocuments}
-            startIcon={<RefreshIcon />}
-            disabled={loading}
-          >
-            {t('document.manager.actions.refresh')}
-          </Button>
+	          <Button
+	            size="small"
+	            onClick={() => fetchDocuments()}
+	            startIcon={<RefreshIcon />}
+	            disabled={loading}
+	          >
+	            {t('document.manager.actions.refresh')}
+	          </Button>
           <Button
             size="small"
             onClick={async () => {
@@ -402,7 +473,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
             <CircularProgress />
           </Box>
-        ) : (
+	        ) : (
           <TableContainer component={Paper} variant="outlined">
             <Table>
               <TableHead>
@@ -434,8 +505,10 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredDocuments.map((doc) => (
-                    <TableRow key={doc.id} hover>
+	                  filteredDocuments.map((doc) => {
+	                    const chunksCount = doc.chunks_count ?? 0;
+	                    return (
+	                    <TableRow key={doc.id} hover>
                       <TableCell padding="checkbox">
                         <Checkbox
                           checked={selectedDocuments.includes(doc.id)}
@@ -526,40 +599,53 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                           )}
                         </Box>
                       </TableCell>
-                      <TableCell>
-                        {typeof doc.chunks_count === 'number' ? (
-                          <Tooltip title={doc.chunks_count > 0 ? '点击查看分片' : '暂无分片'}>
-                            <span>
-                              <Chip
-                                size="small"
-                                label={String(doc.chunks_count)}
-                                clickable={doc.chunks_count > 0}
-                                onClick={() => {
-                                  if (doc.chunks_count > 0) {
-                                    setActiveDocForChunks(doc);
-                                    setChunksDialogOpen(true);
-                                  }
-                                }}
-                                variant={doc.chunks_count > 0 ? 'outlined' : 'filled'}
-                                color={doc.chunks_count > 0 ? 'primary' : 'default'}
-                              />
-                            </span>
-                          </Tooltip>
-                        ) : (
-                          <Typography variant="body2" color="text.secondary">-</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <Tooltip title={(doc.chunks_count ?? 0) > 0 ? '查看分片' : '无分片可查看'}>
+	                      <TableCell>
+	                        <Tooltip title={chunksCount > 0 ? '点击查看分片' : '暂无分片'}>
+	                            <span>
+	                              <Chip
+	                                size="small"
+	                                label={String(chunksCount)}
+	                                clickable={chunksCount > 0}
+	                                onClick={() => {
+	                                  if (chunksCount > 0) {
+	                                    setActiveDocForChunks(doc);
+	                                    setChunksDialogOpen(true);
+	                                  }
+	                                }}
+	                                variant={chunksCount > 0 ? 'outlined' : 'filled'}
+	                                color={chunksCount > 0 ? 'primary' : 'default'}
+	                              />
+	                            </span>
+	                          </Tooltip>
+	                      </TableCell>
+	                      <TableCell>
+	                        <Tooltip title={chunksCount > 0 ? '查看分片' : '无分片可查看'}>
+	                          <span>
+	                            <IconButton
+	                              size="small"
+	                              onClick={() => { setActiveDocForChunks(doc); setChunksDialogOpen(true); }}
+	                              disabled={chunksCount === 0}
+	                              color="primary"
+	                              sx={{ mr: 1 }}
+	                            >
+	                              <ViewIcon />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                        <Tooltip title={doc.status === 'failed' ? '重试处理' : '仅失败文档可重试'}>
                           <span>
                             <IconButton
                               size="small"
-                              onClick={() => { setActiveDocForChunks(doc); setChunksDialogOpen(true); }}
-                              disabled={(doc.chunks_count ?? 0) === 0}
-                              color="primary"
+                              onClick={() => retryDocument(doc)}
+                              disabled={doc.status !== 'failed' || retryingDocuments.includes(doc.id)}
+                              color="warning"
                               sx={{ mr: 1 }}
                             >
-                              <ViewIcon />
+                              {retryingDocuments.includes(doc.id) ? (
+                                <CircularProgress size={16} />
+                              ) : (
+                                <RetryIcon />
+                              )}
                             </IconButton>
                           </span>
                         </Tooltip>
@@ -576,18 +662,72 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                           )}
                         </IconButton>
                       </TableCell>
-                    </TableRow>
-                  ))
-                )}
+	                    </TableRow>
+	                    );
+	                  })
+	                )}
               </TableBody>
             </Table>
           </TableContainer>
-        )}
+	        )}
 
-        {/* 操作菜单 */}
-        <Menu
-          anchorEl={actionMenuAnchor}
-          open={Boolean(actionMenuAnchor)}
+	        {/* 状态筛选菜单 */}
+	        <Menu
+	          anchorEl={statusMenuAnchor}
+	          open={Boolean(statusMenuAnchor)}
+	          onClose={() => setStatusMenuAnchor(null)}
+	        >
+	          <MenuItem
+	            selected={statusFilter === 'all'}
+	            onClick={() => {
+	              setStatusFilter('all');
+	              setStatusMenuAnchor(null);
+	            }}
+	          >
+	            全部状态
+	          </MenuItem>
+	          <MenuItem
+	            selected={statusFilter === 'pending'}
+	            onClick={() => {
+	              setStatusFilter('pending');
+	              setStatusMenuAnchor(null);
+	            }}
+	          >
+	            等待
+	          </MenuItem>
+	          <MenuItem
+	            selected={statusFilter === 'processing'}
+	            onClick={() => {
+	              setStatusFilter('processing');
+	              setStatusMenuAnchor(null);
+	            }}
+	          >
+	            处理中
+	          </MenuItem>
+	          <MenuItem
+	            selected={statusFilter === 'completed'}
+	            onClick={() => {
+	              setStatusFilter('completed');
+	              setStatusMenuAnchor(null);
+	            }}
+	          >
+	            已完成
+	          </MenuItem>
+	          <MenuItem
+	            selected={statusFilter === 'failed'}
+	            onClick={() => {
+	              setStatusFilter('failed');
+	              setStatusMenuAnchor(null);
+	            }}
+	          >
+	            失败
+	          </MenuItem>
+	        </Menu>
+
+	        {/* 操作菜单 */}
+	        <Menu
+	          anchorEl={actionMenuAnchor}
+	          open={Boolean(actionMenuAnchor)}
           onClose={() => setActionMenuAnchor(null)}
         >
           <MenuItem 
@@ -667,6 +807,11 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                 <Chip size="small" label={`完成：${formatTime(activeDocForError.processed_at)}`} variant="outlined" />
               )}
             </Box>
+            {getErrorHint(activeDocForError.error_message) && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                {getErrorHint(activeDocForError.error_message)}
+              </Alert>
+            )}
             <Paper
               variant="outlined"
               sx={{

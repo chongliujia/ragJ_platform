@@ -1252,7 +1252,13 @@ class LLMService:
         return out
 
     def _resolve_provider_for_model(
-        self, model: str, tenant_id: int | None, model_type: str
+        self,
+        model: str,
+        tenant_id: int | None,
+        model_type: str,
+        *,
+        user_id: int | None = None,
+        allow_tenant_fallback: bool = False,
     ) -> str:
         """
         Resolve provider by looking up the tenant's provider model lists first, then fallback to heuristics.
@@ -1261,13 +1267,29 @@ class LLMService:
         """
         try:
             from app.services.model_config_service import model_config_service, ModelType
+            from app.services.user_model_config_service import user_model_config_service
 
             mt = ModelType(model_type)
-            providers = model_config_service.get_providers(tenant_id=tenant_id)
-            for p_type, p_cfg in providers.items():
-                names = (p_cfg.models or {}).get(mt, []) or []
-                if model in names:
-                    return p_type.value
+
+            if user_id is not None:
+                user_providers = user_model_config_service.get_providers(user_id=user_id)
+                for p_type, p_cfg in user_providers.items():
+                    names = (p_cfg.models or {}).get(mt, []) or []
+                    if model in names:
+                        return p_type.value
+
+                if allow_tenant_fallback and tenant_id is not None:
+                    tenant_providers = model_config_service.get_providers(tenant_id=tenant_id)
+                    for p_type, p_cfg in tenant_providers.items():
+                        names = (p_cfg.models or {}).get(mt, []) or []
+                        if model in names:
+                            return p_type.value
+            else:
+                providers = model_config_service.get_providers(tenant_id=tenant_id)
+                for p_type, p_cfg in providers.items():
+                    names = (p_cfg.models or {}).get(mt, []) or []
+                    if model in names:
+                        return p_type.value
         except Exception:
             pass
 
@@ -1285,6 +1307,80 @@ class LLMService:
         if model_type == "reranking":
             return settings.RERANK_MODEL_PROVIDER
         return settings.CHAT_MODEL_PROVIDER
+
+    def _get_active_model_config(
+        self,
+        model_type: "ModelType",
+        *,
+        tenant_id: int | None,
+        user_id: int | None,
+        allow_tenant_fallback: bool,
+    ):
+        from app.services.model_config_service import model_config_service
+        from app.services.user_model_config_service import user_model_config_service
+
+        if user_id is not None:
+            return user_model_config_service.get_active_model(
+                model_type,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                allow_tenant_fallback=allow_tenant_fallback,
+            )
+        return model_config_service.get_active_model(model_type, tenant_id=tenant_id)
+
+    def _get_provider_config(
+        self,
+        provider: "ProviderType",
+        *,
+        tenant_id: int | None,
+        user_id: int | None,
+        allow_tenant_fallback: bool,
+    ):
+        from app.services.model_config_service import model_config_service
+        from app.services.user_model_config_service import user_model_config_service
+
+        if user_id is not None:
+            cfg = user_model_config_service.get_provider(provider, user_id=user_id)
+            if cfg is not None:
+                return cfg
+            if allow_tenant_fallback and tenant_id is not None:
+                return model_config_service.get_provider(provider, tenant_id=tenant_id)
+            return None
+        return model_config_service.get_provider(provider, tenant_id=tenant_id)
+
+    def _resolve_allow_tenant_fallback(self, user_id: int | None, allow_tenant_fallback: bool | None) -> bool:
+        """Determine whether tenant-shared model configs can be used for this user."""
+        if user_id is None:
+            return True
+        if allow_tenant_fallback is not None:
+            return bool(allow_tenant_fallback)
+        try:
+            from app.db.database import SessionLocal
+            from app.db.models.user import User
+            from app.db.models.permission import Permission, RolePermission, PermissionType
+
+            db = SessionLocal()
+            try:
+                u = db.query(User).filter(User.id == user_id).first()
+                if not u:
+                    return False
+                if u.role in ("super_admin", "tenant_admin"):
+                    return True
+                perm = (
+                    db.query(Permission)
+                    .join(RolePermission, Permission.id == RolePermission.permission_id)
+                    .filter(
+                        RolePermission.role == u.role,
+                        Permission.name == PermissionType.MODEL_USE_SHARED.value,
+                        Permission.is_active == True,
+                    )
+                    .first()
+                )
+                return bool(perm)
+            finally:
+                db.close()
+        except Exception:
+            return False
 
     async def test_all_connections(self) -> Dict[str, Any]:
         """
@@ -1362,6 +1458,8 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: int = 1000,
         tenant_id: int = None,
+        user_id: int | None = None,
+        allow_tenant_fallback: bool | None = None,
     ) -> Dict[str, Any]:
         """
         Generate chat response using configured provider
@@ -1375,57 +1473,70 @@ class LLMService:
         Returns:
             Dict with chat response
         """
+        allow_fallback = self._resolve_allow_tenant_fallback(user_id, allow_tenant_fallback)
+
         # Use configured provider and model if not specified
         if model is None:
-            # 优先使用模型配置服务（含API Key与Base URL）
+            # 优先使用模型配置服务（个人配置优先；可选回退租户共享配置）
             try:
                 from app.services.model_config_service import (
-                    model_config_service,
                     ModelType,
+                    ProviderType,
                 )
 
-                chat_config = model_config_service.get_active_model(
-                    ModelType.CHAT, tenant_id=tenant_id
+                chat_config = self._get_active_model_config(
+                    ModelType.CHAT,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
                 )
-                logger.info(f"DEBUG: Got chat config from service: {chat_config}")
                 if chat_config:
                     provider = chat_config.provider.value
                     model = chat_config.model_name
 
+                    p_cfg = self._get_provider_config(
+                        ProviderType(provider),
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        allow_tenant_fallback=allow_fallback,
+                    )
+                    api_key = chat_config.api_key or (p_cfg.api_key if p_cfg else None)
+                    api_base = chat_config.api_base or (p_cfg.api_base if p_cfg else None)
+
                     # 将保存的密钥与base url注入到对应服务
                     if provider == "deepseek":
-                        if chat_config.api_key:
-                            self.deepseek.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.deepseek.base_url = chat_config.api_base
+                        if api_key:
+                            self.deepseek.api_key = api_key
+                        if api_base:
+                            self.deepseek.base_url = api_base
                         # DeepSeek服务内部使用 self.model
                         self.deepseek.model = model
                     elif provider == "qwen":
-                        if chat_config.api_key:
-                            self.qwen.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.qwen.base_url = chat_config.api_base
+                        if api_key:
+                            self.qwen.api_key = api_key
+                        if api_base:
+                            self.qwen.base_url = api_base
                         self.qwen.model = model
                     elif provider == "openai":
-                        if chat_config.api_key:
-                            self.openai.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.openai.base_url = chat_config.api_base
+                        if api_key:
+                            self.openai.api_key = api_key
+                        if api_base:
+                            self.openai.base_url = api_base
                     elif provider == "siliconflow":
-                        if chat_config.api_key:
-                            self.siliconflow.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.siliconflow.base_url = chat_config.api_base
+                        if api_key:
+                            self.siliconflow.api_key = api_key
+                        if api_base:
+                            self.siliconflow.base_url = api_base
                     elif provider == "cohere":
-                        if chat_config.api_key:
-                            self.cohere.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.cohere.base_url = chat_config.api_base
+                        if api_key:
+                            self.cohere.api_key = api_key
+                        if api_base:
+                            self.cohere.base_url = api_base
                     elif provider == "local":
-                        if chat_config.api_key:
-                            self.local.api_key = chat_config.api_key
-                        if chat_config.api_base:
-                            self.local.base_url = chat_config.api_base
+                        if api_key:
+                            self.local.api_key = api_key
+                        if api_base:
+                            self.local.base_url = api_base
 
                     # 使用用户保存的默认推理参数（如有）
                     if chat_config.temperature is not None:
@@ -1435,34 +1546,56 @@ class LLMService:
 
                     logger.info(f"Using model config service chat model: {provider}/{model}")
                 else:
-                    # 回退到环境变量配置
+                    if user_id is not None and not allow_fallback:
+                        return {
+                            "success": False,
+                            "error": "No chat model configured for current user",
+                            "message": "Please configure your personal chat model in Model Settings.",
+                        }
+                    # 回退到环境变量配置（匿名/内部调用）
                     provider = settings.CHAT_MODEL_PROVIDER
                     model = settings.CHAT_MODEL_NAME
                     logger.info(f"No config service data, using settings chat model: {provider}/{model}")
             except Exception as e:
                 logger.warning(f"Failed to get model config, using settings: {e}")
+                if user_id is not None and not allow_fallback:
+                    return {
+                        "success": False,
+                        "error": "No chat model configured for current user",
+                        "message": "Please configure your personal chat model in Model Settings.",
+                    }
                 provider = settings.CHAT_MODEL_PROVIDER
                 model = settings.CHAT_MODEL_NAME
                 logger.info(f"Exception fallback chat model: {provider}/{model}")
         else:
             # 当指定了具体模型时，根据模型名称确定提供商，但需要加载API密钥配置
             logger.info(f"Using specified model: {model}")
-            provider = self._resolve_provider_for_model(model, tenant_id=tenant_id, model_type="chat")
+            provider = self._resolve_provider_for_model(
+                model,
+                tenant_id=tenant_id,
+                model_type="chat",
+                user_id=user_id,
+                allow_tenant_fallback=allow_fallback,
+            )
             
             # 为指定的模型加载该 provider 的配置（优先租户 provider-level 配置）
             try:
                 from app.services.model_config_service import (
-                    model_config_service,
-                    ModelType,
                     ProviderType,
                 )
-                p_cfg = None
-                try:
-                    p_cfg = model_config_service.get_provider(
-                        ProviderType(provider), tenant_id=tenant_id
-                    )
-                except Exception:
-                    p_cfg = None
+                p_cfg = self._get_provider_config(
+                    ProviderType(provider),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
+                )
+                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
+                if requires_key and not (p_cfg and p_cfg.api_key):
+                    return {
+                        "success": False,
+                        "error": f"Provider '{provider}' is not configured",
+                        "message": "Please configure your personal provider API key/base URL in Model Settings.",
+                    }
 
                 if provider == "deepseek":
                     if p_cfg and p_cfg.api_key:
@@ -1547,6 +1680,8 @@ class LLMService:
         temperature: float = 0.7,
         max_tokens: int = 1000,
         tenant_id: int = None,
+        user_id: int | None = None,
+        allow_tenant_fallback: bool | None = None,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Generate streaming chat response using configured provider
@@ -1560,33 +1695,33 @@ class LLMService:
         Yields:
             Dict with streaming response chunks
         """
+        allow_fallback = self._resolve_allow_tenant_fallback(user_id, allow_tenant_fallback)
+
         # Use configured provider and model if not specified
-        logger.info(f"STREAM_DEBUG: Starting model selection for streaming, model={model}")
         if model is None:
             # 优先使用配置文件中的密钥与基础URL
             try:
                 from app.services.model_config_service import (
-                    model_config_service,
                     ModelType,
                     ProviderType,
                 )
 
-                chat_config = model_config_service.get_active_model(
-                    ModelType.CHAT, tenant_id=tenant_id
+                chat_config = self._get_active_model_config(
+                    ModelType.CHAT,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
                 )
-                logger.info(f"DEBUG: Got chat config from service: {chat_config}")
                 if chat_config:
                     provider = chat_config.provider.value
                     model = chat_config.model_name
 
-                    # 允许 model-level api_key 为空（回退到 provider-level）
-                    p_cfg = None
-                    try:
-                        p_cfg = model_config_service.get_provider(
-                            ProviderType(provider), tenant_id=tenant_id
-                        )
-                    except Exception:
-                        p_cfg = None
+                    p_cfg = self._get_provider_config(
+                        ProviderType(provider),
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        allow_tenant_fallback=allow_fallback,
+                    )
                     api_key = chat_config.api_key or (p_cfg.api_key if p_cfg else None)
                     api_base = chat_config.api_base or (p_cfg.api_base if p_cfg else None)
 
@@ -1631,29 +1766,49 @@ class LLMService:
 
                     logger.info(f"Using model config service chat model for streaming: {provider}/{model}")
                 else:
+                    if user_id is not None and not allow_fallback:
+                        yield {
+                            "success": False,
+                            "error": "No chat model configured for current user",
+                        }
+                        return
                     provider = settings.CHAT_MODEL_PROVIDER
                     model = settings.CHAT_MODEL_NAME
                     logger.info(f"No config service data, using settings chat model for streaming: {provider}/{model}")
             except Exception as e:
                 logger.warning(f"Failed to get model config, using settings: {e}")
+                if user_id is not None and not allow_fallback:
+                    yield {
+                        "success": False,
+                        "error": "No chat model configured for current user",
+                        "message": "Please configure your personal chat model in Model Settings.",
+                    }
+                    return
                 provider = settings.CHAT_MODEL_PROVIDER
                 model = settings.CHAT_MODEL_NAME
                 logger.info(f"Exception fallback chat model for streaming: {provider}/{model}")
         else:
             provider = self._resolve_provider_for_model(
-                model, tenant_id=tenant_id, model_type="chat"
+                model,
+                tenant_id=tenant_id,
+                model_type="chat",
+                user_id=user_id,
+                allow_tenant_fallback=allow_fallback,
             )
 
             # 为指定模型注入 provider-level 配置
             try:
-                from app.services.model_config_service import model_config_service, ProviderType
-                p_cfg = None
-                try:
-                    p_cfg = model_config_service.get_provider(
-                        ProviderType(provider), tenant_id=tenant_id
-                    )
-                except Exception:
-                    p_cfg = None
+                from app.services.model_config_service import ProviderType
+                p_cfg = self._get_provider_config(
+                    ProviderType(provider),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
+                )
+                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
+                if requires_key and not (p_cfg and p_cfg.api_key):
+                    yield {"success": False, "error": f"Provider '{provider}' is not configured"}
+                    return
 
                 if provider == "deepseek":
                     if p_cfg and p_cfg.api_key:
@@ -1700,22 +1855,24 @@ class LLMService:
                 # For deepseek, fallback to regular chat but simulate streaming
                 logger.info(f"Using deepseek provider with simulated streaming")
                 result = await self.chat(
-                    message, model, temperature, max_tokens, tenant_id=tenant_id
+                    message,
+                    model,
+                    temperature,
+                    max_tokens,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
                 )
-                logger.info(f"DEEPSEEK_DEBUG: Got result: {result}")
                 if result.get("success"):
                     # Split content into chunks for better streaming effect  
                     content = result.get("message", "") or result.get("content", "")
-                    logger.info(f"DEEPSEEK_DEBUG: Content length: {len(content)}, content: {content[:100]}...")
                     chunk_size = 20  # characters per chunk
                     for i in range(0, len(content), chunk_size):
                         chunk_content = content[i:i+chunk_size]
-                        logger.info(f"DEEPSEEK_DEBUG: Yielding chunk: {chunk_content}")
                         yield {"success": True, "content": chunk_content}
                         # Small delay to simulate streaming
                         await asyncio.sleep(0.1)
                 else:
-                    logger.error(f"DEEPSEEK_DEBUG: Chat failed: {result}")
                     yield {"success": False, "error": result.get("error", "Unknown error")}
             elif provider == "openai":
                 async for chunk in self.openai.stream_chat_completion(
@@ -1738,7 +1895,13 @@ class LLMService:
                 # For other non-streaming providers, fallback to regular chat
                 logger.warning(f"Streaming not supported for provider {provider}, falling back to regular chat")
                 result = await self.chat(
-                    message, model, temperature, max_tokens, tenant_id=tenant_id
+                    message,
+                    model,
+                    temperature,
+                    max_tokens,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
                 )
                 if result.get("success"):
                     yield {"success": True, "content": result.get("content", "")}
@@ -1749,24 +1912,33 @@ class LLMService:
             yield {"success": False, "error": str(e)}
 
     async def get_embeddings(
-        self, texts: list[str], model: str = None, tenant_id: int = None
+        self,
+        texts: list[str],
+        model: str = None,
+        tenant_id: int = None,
+        user_id: int | None = None,
+        allow_tenant_fallback: bool | None = None,
     ) -> dict[str, Any]:
         """
         Get text embeddings using configured provider.
         """
+        allow_fallback = self._resolve_allow_tenant_fallback(user_id, allow_tenant_fallback)
+
         # Use configured provider and model if not specified
         embedding_custom_params: dict[str, Any] | None = None
         if model is None:
             # 优先使用模型配置文件中的设置
             try:
                 from app.services.model_config_service import (
-                    model_config_service,
                     ModelType,
                     ProviderType,
                 )
                 
-                embedding_config = model_config_service.get_active_model(
-                    ModelType.EMBEDDING, tenant_id=tenant_id
+                embedding_config = self._get_active_model_config(
+                    ModelType.EMBEDDING,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
                 )
                 if embedding_config:
                     provider = embedding_config.provider.value
@@ -1777,14 +1949,12 @@ class LLMService:
                         else None
                     )
 
-                    # 若 model-level 未配置 api_key，则允许回退到 provider-level 的 api_key/api_base
-                    p_cfg = None
-                    try:
-                        p_cfg = model_config_service.get_provider(
-                            ProviderType(provider), tenant_id=tenant_id
-                        )
-                    except Exception:
-                        p_cfg = None
+                    p_cfg = self._get_provider_config(
+                        ProviderType(provider),
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        allow_tenant_fallback=allow_fallback,
+                    )
                     
                     # 如果配置中有API密钥和基础URL，临时更新服务实例
                     api_key = embedding_config.api_key or (p_cfg.api_key if p_cfg else None)
@@ -1823,29 +1993,51 @@ class LLMService:
                     
                     logger.info(f"Using configured embedding model: {provider}/{model}")
                 else:
-                    # 回退到环境变量
+                    if user_id is not None and not allow_fallback:
+                        return {
+                            "success": False,
+                            "error": "No embedding model configured for current user",
+                            "message": "Please configure your personal embedding model in Model Settings.",
+                        }
+                    # 回退到环境变量（匿名/内部调用）
                     provider = settings.EMBEDDING_MODEL_PROVIDER
                     model = settings.EMBEDDING_MODEL_NAME
                     logger.info(f"Using default embedding model: {provider}/{model}")
             except Exception as e:
                 logger.warning(f"Failed to get embedding model config, using default: {e}")
+                if user_id is not None and not allow_fallback:
+                    return {
+                        "success": False,
+                        "error": "No embedding model configured for current user",
+                        "message": "Please configure your personal embedding model in Model Settings.",
+                    }
                 provider = settings.EMBEDDING_MODEL_PROVIDER
                 model = settings.EMBEDDING_MODEL_NAME
         else:
             provider = self._resolve_provider_for_model(
-                model, tenant_id=tenant_id, model_type="embedding"
+                model,
+                tenant_id=tenant_id,
+                model_type="embedding",
+                user_id=user_id,
+                allow_tenant_fallback=allow_fallback,
             )
 
             # 对指定 model，也加载 provider-level 配置（便于 key/base 复用）
             try:
-                from app.services.model_config_service import model_config_service, ProviderType
-                p_cfg = None
-                try:
-                    p_cfg = model_config_service.get_provider(
-                        ProviderType(provider), tenant_id=tenant_id
-                    )
-                except Exception:
-                    p_cfg = None
+                from app.services.model_config_service import ProviderType
+                p_cfg = self._get_provider_config(
+                    ProviderType(provider),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
+                )
+                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
+                if requires_key and not (p_cfg and p_cfg.api_key):
+                    return {
+                        "success": False,
+                        "error": f"Provider '{provider}' is not configured",
+                        "message": "Please configure your personal provider API key/base URL in Model Settings.",
+                    }
 
                 if provider == "siliconflow":
                     if p_cfg and p_cfg.api_key:
@@ -2079,40 +2271,94 @@ class LLMService:
         model: str = None,
         top_n: int = 5,
         tenant_id: int = None,
+        user_id: int | None = None,
+        allow_tenant_fallback: bool | None = None,
     ) -> dict[str, Any]:
         """
         Reranks documents using configured provider.
         """
+        allow_fallback = self._resolve_allow_tenant_fallback(user_id, allow_tenant_fallback)
+
         # Use configured provider and model if not specified
         if model is None:
-            # 优先从模型配置服务读取（允许不同提供商）
+            # 优先从模型配置服务读取（个人配置优先；可选回退租户共享配置）
             try:
                 from app.services.model_config_service import (
-                    model_config_service,
                     ModelType,
+                    ProviderType,
                 )
-                rerank_config = model_config_service.get_active_model(
-                    ModelType.RERANKING, tenant_id=tenant_id
+                rerank_config = self._get_active_model_config(
+                    ModelType.RERANKING,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
                 )
                 if rerank_config:
                     provider = rerank_config.provider.value
                     model = rerank_config.model_name
-                    if provider == "qwen" and rerank_config.api_key:
-                        self.qwen.api_key = rerank_config.api_key
-                        if rerank_config.api_base:
-                            self.qwen.base_url = rerank_config.api_base
+                    p_cfg = self._get_provider_config(
+                        ProviderType(provider),
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        allow_tenant_fallback=allow_fallback,
+                    )
+                    api_key = rerank_config.api_key or (p_cfg.api_key if p_cfg else None)
+                    api_base = rerank_config.api_base or (p_cfg.api_base if p_cfg else None)
+                    if provider == "qwen":
+                        if api_key:
+                            self.qwen.api_key = api_key
+                        if api_base:
+                            self.qwen.base_url = api_base
                 else:
+                    if user_id is not None and not allow_fallback:
+                        return {
+                            "success": False,
+                            "error": "No reranking model configured for current user",
+                            "message": "Please configure your personal reranking model in Model Settings.",
+                        }
                     provider = settings.RERANK_MODEL_PROVIDER
                     model = settings.RERANK_MODEL_NAME
             except Exception:
+                if user_id is not None and not allow_fallback:
+                    return {
+                        "success": False,
+                        "error": "No reranking model configured for current user",
+                        "message": "Please configure your personal reranking model in Model Settings.",
+                    }
                 provider = settings.RERANK_MODEL_PROVIDER
                 model = settings.RERANK_MODEL_NAME
         else:
-            # Determine provider from model name
-            if "qwen" in model or "gte-rerank" in model:
-                provider = "qwen"
-            else:
-                provider = settings.RERANK_MODEL_PROVIDER
+            provider = self._resolve_provider_for_model(
+                model,
+                tenant_id=tenant_id,
+                model_type="reranking",
+                user_id=user_id,
+                allow_tenant_fallback=allow_fallback,
+            )
+
+            # Inject provider-level config for specified model
+            try:
+                from app.services.model_config_service import ProviderType
+                p_cfg = self._get_provider_config(
+                    ProviderType(provider),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    allow_tenant_fallback=allow_fallback,
+                )
+                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
+                if requires_key and not (p_cfg and p_cfg.api_key):
+                    return {
+                        "success": False,
+                        "error": f"Provider '{provider}' is not configured",
+                        "message": "Please configure your personal provider API key/base URL in Model Settings.",
+                    }
+                if provider == "qwen":
+                    if p_cfg and p_cfg.api_key:
+                        self.qwen.api_key = p_cfg.api_key
+                    if p_cfg and p_cfg.api_base:
+                        self.qwen.base_url = p_cfg.api_base
+            except Exception:
+                pass
 
         logger.info(f"Using rerank provider: {provider}, model: {model}")
 

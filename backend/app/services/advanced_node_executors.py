@@ -170,6 +170,10 @@ class AdvancedNodeExecutors:
                         (context.global_context or {}).get("tenant_id")
                         or (context.input_data or {}).get("tenant_id")
                     ),
+                    user_id=(
+                        (context.global_context or {}).get("user_id")
+                        or (context.input_data or {}).get("user_id")
+                    ),
                 )
                 
                 if response.get('success'):
@@ -228,6 +232,10 @@ JSON："""
                 tenant_id=(
                     (context.global_context or {}).get("tenant_id")
                     or (context.input_data or {}).get("tenant_id")
+                ),
+                user_id=(
+                    (context.global_context or {}).get("user_id")
+                    or (context.input_data or {}).get("user_id")
                 ),
             )
             

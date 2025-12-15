@@ -23,7 +23,6 @@ import {
   Add as AddIcon,
 } from '@mui/icons-material';
 import { useTeam } from '../hooks/useTeam';
-import { MEMBER_TYPES } from '../types';
 
 interface TeamSelectorProps {
   onTeamSettingsClick?: () => void;

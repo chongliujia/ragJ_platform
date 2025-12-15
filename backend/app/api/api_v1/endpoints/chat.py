@@ -14,6 +14,9 @@ from app.services.langgraph_chat_service import langgraph_chat_service
 from app.services.reranking_service import reranking_service
 from app.core.dependencies import get_tenant_id, get_current_user
 from app.db.models.user import User
+from app.db.database import get_db
+from sqlalchemy.orm import Session
+from app.db.models.knowledge_base import KnowledgeBase as KBModel
 
 # Use a single instance of the service
 chat_service = ChatService()
@@ -21,12 +24,20 @@ chat_service = ChatService()
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
+def _can_read_kb(kb_row: KBModel, user: User) -> bool:
+    if user.role in ("super_admin", "tenant_admin"):
+        return True
+    if kb_row.owner_id == user.id:
+        return True
+    return bool(getattr(kb_row, "is_public", False))
+
 
 @router.post("/", response_model=ChatResponse)
 async def handle_chat(
     request: ChatRequest,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Main chat endpoint for non-streaming responses.
@@ -40,6 +51,17 @@ async def handle_chat(
         
         # Use LangGraph service for RAG chat if knowledge base is specified
         if request.knowledge_base_id:
+            kb_row = (
+                db.query(KBModel)
+                .filter(
+                    KBModel.name == request.knowledge_base_id,
+                    KBModel.tenant_id == tenant_id,
+                    KBModel.is_active == True,
+                )
+                .first()
+            )
+            if kb_row is None or not _can_read_kb(kb_row, current_user):
+                raise HTTPException(status_code=404, detail="Knowledge base not found")
             logger.info("Using LangGraph RAG workflow for knowledge base chat")
             response = await langgraph_chat_service.chat(request, tenant_id, current_user.id)
         else:
@@ -61,6 +83,7 @@ async def handle_stream_chat(
     request: ChatRequest,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Chat endpoint for streaming responses.
@@ -71,6 +94,17 @@ async def handle_stream_chat(
             knowledge_base_id=request.knowledge_base_id,
         )
         if request.knowledge_base_id:
+            kb_row = (
+                db.query(KBModel)
+                .filter(
+                    KBModel.name == request.knowledge_base_id,
+                    KBModel.tenant_id == tenant_id,
+                    KBModel.is_active == True,
+                )
+                .first()
+            )
+            if kb_row is None or not _can_read_kb(kb_row, current_user):
+                raise HTTPException(status_code=404, detail="Knowledge base not found")
             generator = langgraph_chat_service.stream_chat(
                 request, tenant_id=tenant_id, user_id=current_user.id
             )
@@ -150,6 +184,7 @@ async def handle_rag_chat(
     request: ChatRequest,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     专门用于RAG对话的LangGraph端点
@@ -165,6 +200,18 @@ async def handle_rag_chat(
             "Handling RAG chat with LangGraph workflow",
             knowledge_base_id=request.knowledge_base_id,
         )
+
+        kb_row = (
+            db.query(KBModel)
+            .filter(
+                KBModel.name == request.knowledge_base_id,
+                KBModel.tenant_id == tenant_id,
+                KBModel.is_active == True,
+            )
+            .first()
+        )
+        if kb_row is None or not _can_read_kb(kb_row, current_user):
+            raise HTTPException(status_code=404, detail="Knowledge base not found")
         
         response = await langgraph_chat_service.chat(request, tenant_id, current_user.id)
         return response

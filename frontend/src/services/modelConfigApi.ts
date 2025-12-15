@@ -56,40 +56,40 @@ export interface PresetConfig {
 // 模型配置 API
 export const modelConfigApi = {
   // 获取提供商列表
-  getProviders: () => api.get<ProviderConfig[]>('/api/v1/model-config/providers'),
+  getProviders: () => api.get<ProviderConfig[]>('/api/v1/model-config/me/providers'),
   
   // 获取指定提供商的模型列表
   getProviderModels: (provider: string, modelType: string) => 
-    api.get(`/api/v1/model-config/providers/${provider}/models/${modelType}`),
+    api.get(`/api/v1/model-config/me/providers/${provider}/models/${modelType}`),
   
   // 获取当前活跃模型
-  getActiveModels: () => api.get<ModelConfig[]>('/api/v1/model-config/active-models'),
+  getActiveModels: () => api.get<ModelConfig[]>('/api/v1/model-config/me/active-models'),
   
   // 获取模型配置详情（包含API密钥）
   getModelConfigDetails: (modelType: string) => 
-    api.get<ModelConfig>(`/api/v1/model-config/active-models/${modelType}/details`),
+    api.get<ModelConfig>(`/api/v1/model-config/me/active-models/${modelType}/details`),
   
   // 更新活跃模型
   updateActiveModel: (modelType: string, config: UpdateModelConfigRequest) =>
-    api.put(`/api/v1/model-config/active-models/${modelType}`, config),
+    api.put(`/api/v1/model-config/me/active-models/${modelType}`, config),
   
   // 更新提供商配置
   updateProvider: (provider: string, config: UpdateProviderRequest) =>
-    api.put(`/api/v1/model-config/providers/${provider}`, config),
+    api.put(`/api/v1/model-config/me/providers/${provider}`, config),
   
   // 获取配置摘要
   getConfigSummary: () => api.get('/api/v1/model-config/summary'),
   
   // 测试提供商连接
   testProviderConnection: (provider: string) =>
-    api.post(`/api/v1/model-config/test/${provider}`),
+    api.post(`/api/v1/model-config/me/test/${provider}`),
   
   // 获取预设配置
   getPresets: () => api.get<{ presets: Record<string, PresetConfig> }>('/api/v1/model-config/presets'),
   
   // 添加自定义模型到提供商
   addCustomModel: (provider: string, modelType: string, modelName: string) =>
-    api.post(`/api/v1/model-config/providers/${provider}/models/${modelType}`, null, {
+    api.post(`/api/v1/model-config/me/providers/${provider}/models/${modelType}`, null, {
       params: { model_name: modelName }
     }),
   
@@ -100,7 +100,34 @@ export const modelConfigApi = {
       provider: string;
       provider_display_name: string;
       model_display_name: string;
-    }>}>('/api/v1/model-config/available-chat-models'),
+    }>}>('/api/v1/model-config/me/available-chat-models'),
+
+  // 租户共享模型配置（仅租户管理员/超级管理员）
+  tenant: {
+    getProviders: () => api.get<ProviderConfig[]>('/api/v1/model-config/providers'),
+    getProviderModels: (provider: string, modelType: string) =>
+      api.get(`/api/v1/model-config/providers/${provider}/models/${modelType}`),
+    getActiveModels: () => api.get<ModelConfig[]>('/api/v1/model-config/active-models'),
+    getModelConfigDetails: (modelType: string) =>
+      api.get<ModelConfig>(`/api/v1/model-config/active-models/${modelType}/details`),
+    updateActiveModel: (modelType: string, config: UpdateModelConfigRequest) =>
+      api.put(`/api/v1/model-config/active-models/${modelType}`, config),
+    updateProvider: (provider: string, config: UpdateProviderRequest) =>
+      api.put(`/api/v1/model-config/providers/${provider}`, config),
+    testProviderConnection: (provider: string) =>
+      api.post(`/api/v1/model-config/test/${provider}`),
+    addCustomModel: (provider: string, modelType: string, modelName: string) =>
+      api.post(`/api/v1/model-config/providers/${provider}/models/${modelType}`, null, {
+        params: { model_name: modelName }
+      }),
+    getAvailableChatModels: () =>
+      api.get<{models: Array<{
+        model_name: string;
+        provider: string;
+        provider_display_name: string;
+        model_display_name: string;
+      }>}>('/api/v1/model-config/available-chat-models'),
+  },
 };
 
 export default api;

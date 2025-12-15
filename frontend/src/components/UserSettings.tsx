@@ -13,8 +13,6 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  Switch,
-  FormControlLabel,
   Alert,
   CircularProgress,
   Accordion,
@@ -25,9 +23,7 @@ import {
 import {
   ExpandMore as ExpandMoreIcon,
   Save as SaveIcon,
-  Person as PersonIcon,
   Palette as ThemeIcon,
-  Language as LanguageIcon,
   Tune as TuneIcon,
   Info as InfoIcon,
 } from '@mui/icons-material';
@@ -62,7 +58,7 @@ interface AvailableChatModel {
 }
 
 const UserSettings: React.FC = () => {
-  const { t, i18n } = useTranslation();
+  const { i18n } = useTranslation();
   const [config, setConfig] = useState<UserConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -134,8 +130,10 @@ const UserSettings: React.FC = () => {
       const getOptionsForType = (type: string) => {
         const active = activeModels.find(m => m.model_type === type);
         const provider = active ? providers.find(p => p.provider === active.provider) : undefined;
-        const options = (provider as any)?.available_models?.[type] || (active?.model_name ? [active.model_name] : []);
-        return Array.from(new Set(options));
+        const raw = (provider as any)?.available_models?.[type] || (active?.model_name ? [active.model_name] : []);
+        const options = Array.isArray(raw) ? raw : [];
+        const strings = options.filter((v): v is string => typeof v === 'string');
+        return Array.from(new Set(strings));
       };
 
       setEmbeddingModels(getOptionsForType('embedding'));

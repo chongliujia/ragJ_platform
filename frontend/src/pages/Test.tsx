@@ -237,7 +237,7 @@ const Test: React.FC = () => {
               onChange={(e) => setTestKbName(e.target.value)}
               size="small"
               helperText="只能包含字母、数字和下划线"
-              error={testKbName && !/^[a-zA-Z0-9_]+$/.test(testKbName)}
+              error={Boolean(testKbName) && !/^[a-zA-Z0-9_]+$/.test(testKbName)}
             />
             <Button
               variant="contained"
