@@ -2,6 +2,7 @@ export type WorkflowNodeKind =
   | 'input'
   | 'llm'
   | 'rag_retriever'
+  | 'http_request'
   | 'condition'
   | 'code_executor'
   | 'output';
@@ -40,4 +41,3 @@ export type BackendWorkflowEdge = {
   condition?: string;
   transform?: string;
 };
-

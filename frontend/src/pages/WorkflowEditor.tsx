@@ -1,13 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import {
   Alert,
   Box,
   Button,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControlLabel,
   Paper,
   Snackbar,
   Stack,
+  Switch,
   TextField,
   Typography,
 } from '@mui/material';
@@ -16,6 +22,7 @@ import {
   Save as SaveIcon,
   Science as TestIcon,
   Refresh as ResetIcon,
+  FileCopy as TemplateIcon,
 } from '@mui/icons-material';
 import ReactFlow, {
   Background,
@@ -107,17 +114,24 @@ function defaultGraph(): { nodes: Node<WorkflowNodeData>[]; edges: Edge<Workflow
 const WorkflowEditor: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [rf, setRf] = useState<ReactFlowInstance | null>(null);
 
   const [name, setName] = useState(DEFAULT_WORKFLOW_NAME);
   const [description, setDescription] = useState('');
+  const [isPublic, setIsPublic] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<WorkflowEdgeData>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+
+  const focusNodeId = useMemo(() => {
+    const sp = new URLSearchParams(location.search || '');
+    return sp.get('node');
+  }, [location.search]);
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selectedNodeId) || null,
@@ -133,6 +147,12 @@ const WorkflowEditor: React.FC = () => {
 
   const [busy, setBusy] = useState(false);
   const [snack, setSnack] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templateName, setTemplateName] = useState('');
+  const [templateDescription, setTemplateDescription] = useState('');
+  const [templateCategory, setTemplateCategory] = useState('custom');
+  const [templateTags, setTemplateTags] = useState('');
+  const [templateIsPublic, setTemplateIsPublic] = useState(false);
 
   const [validation, setValidation] = useState<null | {
     is_valid: boolean;
@@ -178,6 +198,7 @@ const WorkflowEditor: React.FC = () => {
       if (!id) {
         setName(DEFAULT_WORKFLOW_NAME);
         setDescription('');
+        setIsPublic(false);
         resetToDefault();
         return;
       }
@@ -188,6 +209,7 @@ const WorkflowEditor: React.FC = () => {
         const wf = res.data || {};
         setName(wf.name || DEFAULT_WORKFLOW_NAME);
         setDescription(wf.description || '');
+        setIsPublic(!!wf.is_public);
         setNodes(toReactFlowNodes(wf.nodes || []));
         setEdges(toReactFlowEdges(wf.edges || []));
       } catch (e: any) {
@@ -199,6 +221,14 @@ const WorkflowEditor: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  useEffect(() => {
+    if (!focusNodeId) return;
+    if (nodes.some((n) => n.id === focusNodeId)) {
+      setSelectedNodeId(focusNodeId);
+      setSelectedEdgeId(null);
+    }
+  }, [focusNodeId, nodes]);
+
   const serialize = useCallback(() => {
     return {
       name: name || DEFAULT_WORKFLOW_NAME,
@@ -206,8 +236,49 @@ const WorkflowEditor: React.FC = () => {
       nodes: toBackendNodes(nodes),
       edges: toBackendEdges(edges),
       global_config: {},
+      is_public: !!isPublic,
     };
-  }, [description, edges, name, nodes]);
+  }, [description, edges, isPublic, name, nodes]);
+
+  const openSaveAsTemplate = useCallback(() => {
+    setTemplateName(name || DEFAULT_WORKFLOW_NAME);
+    setTemplateDescription(description || '');
+    setTemplateCategory('custom');
+    setTemplateTags('');
+    setTemplateIsPublic(false);
+    setTemplateDialogOpen(true);
+  }, [description, name]);
+
+  const saveAsTemplate = useCallback(async () => {
+    const tname = (templateName || '').trim();
+    if (!tname) {
+      setSnack({ type: 'error', message: '模板名称不能为空' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload = serialize();
+      const tags = templateTags
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      await workflowApi.createTemplate({
+        name: tname,
+        description: templateDescription || '',
+        category: templateCategory || 'custom',
+        tags,
+        nodes: payload.nodes,
+        edges: payload.edges,
+        is_public: !!templateIsPublic,
+      });
+      setTemplateDialogOpen(false);
+      setSnack({ type: 'success', message: '模板已保存' });
+    } catch (e: any) {
+      setSnack({ type: 'error', message: e?.response?.data?.detail || '保存模板失败' });
+    } finally {
+      setBusy(false);
+    }
+  }, [serialize, templateCategory, templateDescription, templateIsPublic, templateName, templateTags]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -464,6 +535,19 @@ const WorkflowEditor: React.FC = () => {
                 fullWidth
               />
             </Stack>
+            <Box sx={{ mt: 1 }}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={isPublic}
+                    onChange={(_e, checked) => setIsPublic(checked)}
+                    disabled={busy}
+                    size="small"
+                  />
+                }
+                label={isPublic ? '公开给团队' : '仅自己可见'}
+              />
+            </Box>
           </Box>
           <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
             <Button
@@ -497,6 +581,14 @@ const WorkflowEditor: React.FC = () => {
               disabled={busy}
             >
               测试
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<TemplateIcon />}
+              onClick={openSaveAsTemplate}
+              disabled={busy}
+            >
+              保存为模板
             </Button>
           </Stack>
         </Stack>
@@ -584,6 +676,8 @@ const WorkflowEditor: React.FC = () => {
               onCreateBranches={selectedNode.data.kind === 'condition' ? createBranchesForSelectedCondition : undefined}
               knowledgeBases={knowledgeBases}
               availableChatModels={availableChatModels}
+              allNodes={nodes}
+              allEdges={edges}
             />
           ) : (
             <EdgeInspector
@@ -624,6 +718,62 @@ const WorkflowEditor: React.FC = () => {
         onClose={() => setSnack(null)}
         message={snack?.message || ''}
       />
+
+      <Dialog open={templateDialogOpen} onClose={() => setTemplateDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>保存为模板</DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: 1 }}>
+          <TextField
+            label="模板名称"
+            value={templateName}
+            onChange={(e) => setTemplateName(e.target.value)}
+            fullWidth
+            size="small"
+          />
+          <TextField
+            label="模板描述"
+            value={templateDescription}
+            onChange={(e) => setTemplateDescription(e.target.value)}
+            fullWidth
+            size="small"
+            multiline
+            minRows={2}
+          />
+          <TextField
+            label="分类（可选）"
+            value={templateCategory}
+            onChange={(e) => setTemplateCategory(e.target.value)}
+            fullWidth
+            size="small"
+            helperText="例如 customer_service / document_processing / ai_assistant / data_analysis / custom"
+          />
+          <TextField
+            label="标签（逗号分隔，可选）"
+            value={templateTags}
+            onChange={(e) => setTemplateTags(e.target.value)}
+            fullWidth
+            size="small"
+            placeholder="RAG, 客服, 数据分析"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={templateIsPublic}
+                onChange={(_e, checked) => setTemplateIsPublic(checked)}
+                size="small"
+              />
+            }
+            label={templateIsPublic ? '公开给团队' : '仅自己可见'}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTemplateDialogOpen(false)} disabled={busy}>
+            取消
+          </Button>
+          <Button onClick={saveAsTemplate} variant="contained" disabled={busy}>
+            保存
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

@@ -57,6 +57,25 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
     defaultConfig: {
       language: 'python',
       code: 'result = input_data',
+      timeout_sec: 3,
+      max_memory_mb: 256,
+      max_stdout_chars: 10000,
+      max_input_bytes: 2000000,
+      max_result_bytes: 2000000,
+    },
+  },
+  {
+    category: '工具',
+    kind: 'http_request',
+    name: 'HTTP 请求',
+    description: '发起 HTTP 请求并返回 response_data/status_code',
+    defaultConfig: {
+      method: 'GET',
+      url: '',
+      timeout: 30,
+      headers: {},
+      params: {},
+      data: {},
     },
   },
   {
@@ -70,4 +89,3 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
     },
   },
 ];
-

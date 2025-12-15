@@ -7,6 +7,7 @@ import httpx
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.services.model_config_service import (
     model_config_service,
@@ -16,12 +17,44 @@ from app.services.model_config_service import (
     ProviderType,
 )
 from app.core.dependencies import get_tenant_id, require_tenant_admin, get_current_user, optional_permission
+from app.db.database import get_db
 from app.db.models.user import User
+from app.db.models.tenant import Tenant
 from app.db.models.permission import PermissionType
 from app.services.user_model_config_service import user_model_config_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+ADMIN_ROLES = {"super_admin", "tenant_admin"}
+
+
+def _tenant_shared_model_policy(db: Session, tenant_id: int) -> tuple[bool, set[int]]:
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    settings = tenant.settings if tenant and isinstance(tenant.settings, dict) else {}
+    allow_shared = bool((settings or {}).get("allow_shared_models", False))
+    raw_ids = (settings or {}).get("shared_model_user_ids") or []
+    ids: set[int] = set()
+    for x in raw_ids:
+        try:
+            ids.add(int(x))
+        except Exception:
+            continue
+    return allow_shared, ids
+
+
+def _effective_allow_shared_models(
+    db: Session,
+    tenant_id: int,
+    current_user: User,
+    allow_shared_permission: bool,
+) -> bool:
+    if getattr(current_user, "role", None) in ADMIN_ROLES:
+        return True
+    allow_shared, allowlist = _tenant_shared_model_policy(db, tenant_id)
+    if not allow_shared:
+        return False
+    return bool(allow_shared_permission) or (current_user.id in allowlist)
 
 
 class ModelConfigResponse(BaseModel):
@@ -717,13 +750,16 @@ async def test_my_provider_connection(
     tenant_id: int = Depends(get_tenant_id),
     allow_shared: bool = Depends(optional_permission(PermissionType.MODEL_USE_SHARED.value)),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """测试当前用户的提供商连接（个人配置；有权限时可回退租户共享）。"""
     provider_enum = ProviderType(provider)
 
+    allow_fallback = _effective_allow_shared_models(db, tenant_id, current_user, bool(allow_shared))
+
     # Prefer user provider config; optionally fallback to tenant-shared provider config.
     provider_config = user_model_config_service.get_provider(provider_enum, user_id=current_user.id)
-    if provider_config is None and bool(allow_shared):
+    if provider_config is None and allow_fallback:
         provider_config = model_config_service.get_provider(provider_enum, tenant_id=tenant_id)
     if provider_config is None:
         provider_config = model_config_service.get_provider(provider_enum)
@@ -823,15 +859,17 @@ async def get_my_active_models(
     tenant_id: int = Depends(get_tenant_id),
     allow_shared: bool = Depends(optional_permission(PermissionType.MODEL_USE_SHARED.value)),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """获取当前用户的活跃模型配置（默认个人；有权限时可回退租户共享）。"""
+    allow_fallback = _effective_allow_shared_models(db, tenant_id, current_user, bool(allow_shared))
     active_models: list[ModelConfigResponse] = []
     for model_type in ModelType:
         cfg = user_model_config_service.get_active_model(
             model_type,
             user_id=current_user.id,
             tenant_id=tenant_id,
-            allow_tenant_fallback=bool(allow_shared),
+            allow_tenant_fallback=allow_fallback,
         )
         if cfg:
             active_models.append(
@@ -852,14 +890,16 @@ async def get_my_model_config_details(
     tenant_id: int = Depends(get_tenant_id),
     allow_shared: bool = Depends(optional_permission(PermissionType.MODEL_USE_SHARED.value)),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """获取当前用户指定模型的配置详情（api_key 始终掩码返回）。"""
     model_type_enum = ModelType(model_type)
+    allow_fallback = _effective_allow_shared_models(db, tenant_id, current_user, bool(allow_shared))
     cfg = user_model_config_service.get_active_model(
         model_type_enum,
         user_id=current_user.id,
         tenant_id=tenant_id,
-        allow_tenant_fallback=bool(allow_shared),
+        allow_tenant_fallback=allow_fallback,
     )
     if not cfg:
         raise HTTPException(status_code=404, detail="Model configuration not found")
@@ -960,15 +1000,17 @@ async def get_my_available_chat_models(
     tenant_id: int = Depends(get_tenant_id),
     allow_shared: bool = Depends(optional_permission(PermissionType.MODEL_USE_SHARED.value)),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """获取当前用户可用的聊天模型列表（个人；有权限时可回退租户共享，不返回明文 key）。"""
     available_models: list[dict] = []
 
+    allow_fallback = _effective_allow_shared_models(db, tenant_id, current_user, bool(allow_shared))
     chat_cfg = user_model_config_service.get_active_model(
         ModelType.CHAT,
         user_id=current_user.id,
         tenant_id=tenant_id,
-        allow_tenant_fallback=bool(allow_shared),
+        allow_tenant_fallback=allow_fallback,
     )
     if chat_cfg:
         provider_cfg = user_model_config_service.get_provider(chat_cfg.provider, user_id=current_user.id)

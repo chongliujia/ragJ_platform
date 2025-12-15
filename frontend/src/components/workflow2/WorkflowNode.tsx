@@ -11,6 +11,8 @@ function kindLabel(kind: WorkflowNodeData['kind']): string {
       return 'LLM';
     case 'rag_retriever':
       return '检索';
+    case 'http_request':
+      return 'HTTP';
     case 'condition':
       return '条件';
     case 'code_executor':
@@ -32,6 +34,8 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
         return ['data', 'prompt'];
       case 'rag_retriever':
         return ['data', 'query'];
+      case 'http_request':
+        return ['data', 'url'];
       case 'condition':
         return ['data', 'value'];
       case 'code_executor':
@@ -52,6 +56,8 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
         return ['content', 'metadata'];
       case 'rag_retriever':
         return ['documents', 'query', 'total_results'];
+      case 'http_request':
+        return ['response_data', 'status_code', 'success'];
       case 'condition':
         // Special: 'true'/'false' are virtual handles used to auto-fill edge.condition on connect.
         return ['true', 'false'];
@@ -72,6 +78,8 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
         return theme.palette.primary.main;
       case 'rag_retriever':
         return theme.palette.secondary.main;
+      case 'http_request':
+        return theme.palette.info.main;
       case 'condition':
         return theme.palette.warning.main;
       case 'code_executor':

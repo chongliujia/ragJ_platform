@@ -8,11 +8,16 @@ import json
 import time
 import uuid
 import ast
+import re
+import math
+import multiprocessing as mp
+from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Callable, Tuple
 from datetime import datetime
 import structlog
 from concurrent.futures import ThreadPoolExecutor
 import networkx as nx
+import httpx
 
 from app.schemas.workflow import (
     WorkflowDefinition,
@@ -32,6 +37,266 @@ from app.services.workflow_parallel_executor import workflow_parallel_executor
 from app.services.workflow_performance_monitor import workflow_performance_monitor
 
 logger = structlog.get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class _SandboxLimits:
+    timeout_sec: float = 3.0
+    max_memory_mb: int = 256
+    max_stdout_chars: int = 10_000
+    max_input_bytes: int = 2_000_000
+    max_result_bytes: int = 2_000_000
+
+
+_BANNED_NAMES = {
+    "__import__",
+    "__builtins__",
+    "__loader__",
+    "__spec__",
+    "open",
+    "eval",
+    "exec",
+    "compile",
+    "globals",
+    "locals",
+    "vars",
+    "dir",
+    "help",
+    "input",
+    "breakpoint",
+    "getattr",
+    "setattr",
+    "delattr",
+    "hasattr",
+    "type",
+    "object",
+    "super",
+    "classmethod",
+    "staticmethod",
+    "property",
+}
+
+
+def _sandbox_make_safe_builtins(print_sink: List[str], max_stdout_chars: int) -> Dict[str, Any]:
+    def _safe_print(*args: Any, **kwargs: Any) -> None:
+        sep = kwargs.get("sep", " ")
+        end = kwargs.get("end", "\n")
+        try:
+            s = sep.join(str(a) for a in args) + str(end)
+        except Exception:
+            s = "<print error>\n"
+        current = sum(len(x) for x in print_sink)
+        if current >= max_stdout_chars:
+            return
+        remaining = max_stdout_chars - current
+        print_sink.append(s[:remaining])
+
+    return {
+        "abs": abs,
+        "all": all,
+        "any": any,
+        "bool": bool,
+        "dict": dict,
+        "enumerate": enumerate,
+        "filter": filter,
+        "float": float,
+        "int": int,
+        "len": len,
+        "list": list,
+        "map": map,
+        "max": max,
+        "min": min,
+        "pow": pow,
+        "range": range,
+        "reversed": reversed,
+        "round": round,
+        "set": set,
+        "sorted": sorted,
+        "str": str,
+        "sum": sum,
+        "tuple": tuple,
+        "zip": zip,
+        "print": _safe_print,
+    }
+
+
+def _sandbox_validate_python_ast(code: str) -> None:
+    """Best-effort AST validation (not a perfect sandbox).
+
+    Strict policy:
+    - Allow only expressions/assignments/if/for and basic data structures.
+    - Disallow import/try/with/while/function/class/lambda and other high-risk statements.
+    - Disallow dunder attribute access and dangerous builtins.
+    """
+    tree = ast.parse(code, mode="exec")
+
+    allowed_call_names = {
+        "abs",
+        "all",
+        "any",
+        "bool",
+        "dict",
+        "enumerate",
+        "filter",
+        "float",
+        "int",
+        "len",
+        "list",
+        "map",
+        "max",
+        "min",
+        "pow",
+        "range",
+        "reversed",
+        "round",
+        "set",
+        "sorted",
+        "str",
+        "sum",
+        "tuple",
+        "zip",
+        "print",
+    }
+
+    allowed_attr_modules = {"math", "json", "re"}
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            raise ValueError("Import is not allowed in sandbox")
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            raise ValueError("global/nonlocal is not allowed in sandbox")
+        if isinstance(node, (ast.ClassDef, ast.AsyncFunctionDef, ast.FunctionDef, ast.Lambda)):
+            raise ValueError("function/class/lambda is not allowed in sandbox")
+        if isinstance(node, ast.While):
+            raise ValueError("while is not allowed in sandbox (use for/range)")
+        if isinstance(node, ast.Try):
+            raise ValueError("try/except is not allowed in sandbox")
+        if isinstance(node, ast.With):
+            raise ValueError("with is not allowed in sandbox")
+        if isinstance(node, (ast.Raise, ast.Assert, ast.Delete)):
+            raise ValueError("raise/assert/delete is not allowed in sandbox")
+        if isinstance(node, ast.Attribute):
+            if node.attr.startswith("__"):
+                raise ValueError("Dunder attribute access is not allowed")
+        if isinstance(node, ast.Name):
+            if node.id in _BANNED_NAMES or node.id.startswith("__"):
+                raise ValueError(f"Name not allowed in sandbox: {node.id}")
+        if isinstance(node, ast.Call):
+            fn = node.func
+            if isinstance(fn, ast.Name):
+                if fn.id not in allowed_call_names:
+                    raise ValueError(f"Call not allowed in sandbox: {fn.id}")
+            elif isinstance(fn, ast.Attribute):
+                if fn.attr.startswith("__"):
+                    raise ValueError("Dunder attribute call is not allowed")
+                if isinstance(fn.value, ast.Name) and fn.value.id in allowed_attr_modules:
+                    pass
+                else:
+                    raise ValueError("Only module attribute calls (math/json/re) are allowed")
+            else:
+                raise ValueError("Unsupported call target in sandbox")
+
+
+def _sandbox_estimate_bytes(value: Any) -> int:
+    try:
+        s = json.dumps(value, ensure_ascii=False)
+        return len(s.encode("utf-8", errors="ignore"))
+    except Exception:
+        try:
+            return len(repr(value).encode("utf-8", errors="ignore"))
+        except Exception:
+            return 0
+
+
+def _sandbox_process_entry(
+    q: "mp.Queue",
+    *,
+    code: str,
+    input_data: Any,
+    context_data: Any,
+    limits: _SandboxLimits,
+) -> None:
+    try:
+        # OS-level resource limits (best-effort; may be unavailable).
+        try:
+            import resource
+
+            cpu = max(1, int(math.ceil(limits.timeout_sec + 1)))
+            resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))
+
+            if limits.max_memory_mb and limits.max_memory_mb > 0:
+                mem = int(limits.max_memory_mb) * 1024 * 1024
+                try:
+                    resource.setrlimit(resource.RLIMIT_AS, (mem, mem))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        _sandbox_validate_python_ast(code)
+
+        # Input/context size guard (prevents huge pickles/logs).
+        in_bytes = _sandbox_estimate_bytes(input_data)
+        ctx_bytes = _sandbox_estimate_bytes(context_data)
+        if limits.max_input_bytes and (in_bytes + ctx_bytes) > limits.max_input_bytes:
+            raise ValueError(f"input/context too large: {in_bytes + ctx_bytes} bytes (limit {limits.max_input_bytes})")
+
+        stdout_parts: List[str] = []
+        safe_builtins = _sandbox_make_safe_builtins(stdout_parts, limits.max_stdout_chars)
+
+        sandbox_globals: Dict[str, Any] = {
+            "__builtins__": safe_builtins,
+            "json": json,
+            "re": re,
+            "math": math,
+            "input_data": input_data,
+            "context": context_data,
+            "result": None,
+        }
+        sandbox_locals: Dict[str, Any] = {}
+
+        compiled = compile(code, "<workflow_code_executor>", "exec")
+        exec(compiled, sandbox_globals, sandbox_locals)
+
+        result = sandbox_locals.get("result", sandbox_globals.get("result", None))
+        stdout = "".join(stdout_parts)
+        if limits.max_result_bytes:
+            out_bytes = _sandbox_estimate_bytes(result)
+            if out_bytes > limits.max_result_bytes:
+                raise ValueError(f"result too large: {out_bytes} bytes (limit {limits.max_result_bytes})")
+        q.put({"success": True, "result": result, "stdout": stdout})
+    except Exception as e:
+        try:
+            q.put({"success": False, "error": str(e)})
+        except Exception:
+            pass
+
+
+def _run_python_sandbox(
+    *,
+    code: str,
+    input_data: Any,
+    context_data: Any,
+    limits: _SandboxLimits,
+) -> Dict[str, Any]:
+    q: mp.Queue = mp.Queue(maxsize=1)
+    p = mp.Process(
+        target=_sandbox_process_entry,
+        kwargs={"q": q, "code": code, "input_data": input_data, "context_data": context_data, "limits": limits},
+        daemon=True,
+    )
+    p.start()
+    p.join(timeout=limits.timeout_sec)
+    if p.is_alive():
+        p.terminate()
+        p.join(timeout=0.2)
+        return {"success": False, "error": f"Timeout after {limits.timeout_sec}s"}
+    try:
+        if not q.empty():
+            return q.get_nowait()
+    except Exception:
+        pass
+    return {"success": False, "error": "Sandbox failed without result"}
 
 
 class WorkflowExecutionEngine:
@@ -65,6 +330,7 @@ class WorkflowExecutionEngine:
             'data_transformer': self._execute_data_transformer_node,
             'embeddings': self._execute_embeddings_node,
             'reranker': self._execute_reranker_node,
+            'http_request': self._execute_http_request_node,
         }
     
     async def execute_workflow(
@@ -599,11 +865,110 @@ class WorkflowExecutionEngine:
             if isinstance(overrides, dict):
                 for k, v in overrides.items():
                     if k and (k not in input_data or input_data[k] in (None, '')) and v not in (None, ''):
-                        input_data[k] = v
+                        if isinstance(v, str):
+                            input_data[k] = self._render_mustache_template(
+                                v,
+                                data=input_data,
+                                input_data=context.input_data,
+                                context_data=context.global_context,
+                            )
+                        else:
+                            input_data[k] = v
         except Exception:
             pass
 
         return input_data
+
+    _MUSTACHE_RE = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
+
+    def _render_mustache_template(
+        self,
+        template: str,
+        *,
+        data: Any,
+        input_data: Optional[Dict[str, Any]] = None,
+        context_data: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Render a minimal {{var}} template using dotted paths.
+
+        Resolution order for {{foo}}:
+          1) data.foo
+          2) input.foo
+          3) context.foo
+
+        Supported explicit roots:
+          - {{data.foo}}
+          - {{input.foo}}
+          - {{context.foo}}
+
+        Non-string values are JSON-serialized.
+        """
+        if not template or "{{" not in template:
+            return template
+        if not isinstance(template, str):
+            template = str(template)
+
+        roots = {
+            "data": data,
+            "input": input_data or {},
+            "context": context_data or {},
+        }
+
+        def _tokenize(path: str) -> List[str]:
+            # Convert bracket indices: documents[0].text -> documents.0.text
+            normalized = re.sub(r"\[(\d+)\]", r".\1", path.strip())
+            return [p for p in normalized.split(".") if p]
+
+        def _get_path(obj: Any, path: str) -> Any:
+            cur: Any = obj
+            for part in _tokenize(path):
+                if cur is None:
+                    return None
+                if isinstance(cur, dict):
+                    if part in cur:
+                        cur = cur[part]
+                        continue
+                    return None
+                if isinstance(cur, (list, tuple)):
+                    if part.isdigit():
+                        idx = int(part)
+                        if 0 <= idx < len(cur):
+                            cur = cur[idx]
+                            continue
+                    return None
+                return None
+            return cur
+
+        def _stringify(value: Any) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                return value
+            try:
+                return json.dumps(value, ensure_ascii=False)
+            except Exception:
+                return str(value)
+
+        def _resolve(expr: str) -> str:
+            expr = (expr or "").strip()
+            if not expr:
+                return ""
+
+            # Explicit root: input.xxx / context.xxx / data.xxx
+            if expr.startswith("input."):
+                return _stringify(_get_path(roots["input"], expr[len("input.") :]))
+            if expr.startswith("context."):
+                return _stringify(_get_path(roots["context"], expr[len("context.") :]))
+            if expr.startswith("data."):
+                return _stringify(_get_path(roots["data"], expr[len("data.") :]))
+
+            for root_name in ("data", "input", "context"):
+                val = _get_path(roots[root_name], expr)
+                if val is not None:
+                    return _stringify(val)
+            return ""
+
+        return self._MUSTACHE_RE.sub(lambda m: _resolve(m.group(1)), template)
 
     def _evaluate_edge_condition(
         self,
@@ -891,6 +1256,20 @@ class WorkflowExecutionEngine:
             prompt = str(prompt) if prompt is not None else ''
         
         system_prompt = config.get('system_prompt', '')
+        if isinstance(system_prompt, str) and system_prompt:
+            system_prompt = self._render_mustache_template(
+                system_prompt,
+                data=actual_data,
+                input_data=context.input_data,
+                context_data=context.global_context,
+            )
+        if isinstance(prompt, str) and prompt:
+            prompt = self._render_mustache_template(
+                prompt,
+                data=actual_data,
+                input_data=context.input_data,
+                context_data=context.global_context,
+            )
         
         # 构建完整提示
         if system_prompt:
@@ -1357,31 +1736,43 @@ class WorkflowExecutionEngine:
         language = config.get('language', 'python')
         
         if language == 'python':
-            # 创建安全的执行环境
-            safe_globals = {
-                'json': json,
-                'len': len,
-                'str': str,
-                'int': int,
-                'float': float,
-                'bool': bool,
-                'list': list,
-                'dict': dict,
-                'print': print,
-                'input_data': input_data,
-                'context': context.global_context,
-            }
-            
-            # 执行代码
-            exec_globals = safe_globals.copy()
-            exec(code, exec_globals)
-            
-            # 获取结果
-            result = exec_globals.get('result', {})
-            
+            actual_data = self._normalize_input_payload(input_data)
+            timeout_sec = float(config.get("timeout_sec") or config.get("timeout") or 3.0)
+            max_mem_mb = int(config.get("max_memory_mb") or 256)
+            max_stdout_chars = int(config.get("max_stdout_chars") or 10_000)
+            max_input_bytes = int(config.get("max_input_bytes") or 2_000_000)
+            max_result_bytes = int(config.get("max_result_bytes") or 2_000_000)
+
+            limits = _SandboxLimits(
+                timeout_sec=max(0.1, timeout_sec),
+                max_memory_mb=max(16, max_mem_mb),
+                max_stdout_chars=max(1000, max_stdout_chars),
+                max_input_bytes=max(10_000, max_input_bytes),
+                max_result_bytes=max(10_000, max_result_bytes),
+            )
+
+            res = await asyncio.to_thread(
+                _run_python_sandbox,
+                code=str(code or ""),
+                input_data=actual_data,
+                context_data=context.global_context,
+                limits=limits,
+            )
+
+            if not res.get("success"):
+                raise RuntimeError(f"代码执行失败（sandbox）：{res.get('error') or 'Unknown error'}")
+
             return {
-                'result': result,
-                'execution_output': 'Code executed successfully'
+                "result": res.get("result"),
+                "stdout": res.get("stdout", ""),
+                "execution_output": "Code executed successfully",
+                "sandbox": {
+                    "timeout_sec": limits.timeout_sec,
+                    "max_memory_mb": limits.max_memory_mb,
+                    "max_stdout_chars": limits.max_stdout_chars,
+                    "max_input_bytes": limits.max_input_bytes,
+                    "max_result_bytes": limits.max_result_bytes,
+                },
             }
         else:
             raise ValueError(f"不支持的语言: {language}")
@@ -1425,17 +1816,107 @@ class WorkflowExecutionEngine:
         if template:
             # 使用模板格式化输出，避免缺失键报错
             try:
-                class _SafeDict(dict):
-                    def __missing__(self, key):
-                        return ''
-                formatted_output = template.format_map(_SafeDict(payload if isinstance(payload, dict) else {}))
-                return {'result': formatted_output}
+                if isinstance(template, str) and "{{" in template:
+                    rendered = self._render_mustache_template(
+                        template,
+                        data=payload,
+                        input_data=context.input_data,
+                        context_data=context.global_context,
+                    )
+                    return {"result": rendered}
+                else:
+                    class _SafeDict(dict):
+                        def __missing__(self, key):
+                            return ''
+                    formatted_output = template.format_map(_SafeDict(payload if isinstance(payload, dict) else {}))
+                    return {'result': formatted_output}
             except Exception as e:
                 logger.warning(f"模板格式化失败: {e}")
                 return {'result': payload}
         else:
             # 直接返回输入数据
             return {'result': payload}
+
+    async def _execute_http_request_node(
+        self,
+        node: WorkflowNode,
+        input_data: Dict[str, Any],
+        context: WorkflowExecutionContext,
+    ) -> Dict[str, Any]:
+        """执行 HTTP 请求节点（支持 {{变量}} 模板）。"""
+        config = node.config or {}
+        actual_data = self._normalize_input_payload(input_data)
+
+        def render_str(v: Any) -> Any:
+            if isinstance(v, str):
+                return self._render_mustache_template(
+                    v,
+                    data=actual_data,
+                    input_data=context.input_data,
+                    context_data=context.global_context,
+                )
+            return v
+
+        url = str(render_str(config.get("url") or actual_data.get("url") or "")).strip()
+        method = str(config.get("method") or "GET").upper()
+        timeout = float(config.get("timeout") or 30)
+
+        if not url:
+            raise ValueError("HTTP 请求节点缺少 url")
+        if method not in ("GET", "POST", "PUT", "PATCH", "DELETE"):
+            raise ValueError(f"HTTP method 不支持: {method}")
+
+        headers = config.get("headers") or {}
+        params = config.get("params") or {}
+        data = config.get("data") if "data" in config else actual_data.get("data", {})
+
+        # 渲染 headers/params 的字符串值
+        if isinstance(headers, dict):
+            headers = {str(k): render_str(v) for k, v in headers.items()}
+        if isinstance(params, dict):
+            params = {str(k): render_str(v) for k, v in params.items()}
+        if isinstance(data, str):
+            data = render_str(data)
+        elif isinstance(data, dict):
+            data = {str(k): render_str(v) for k, v in data.items()}
+
+        req_kwargs: Dict[str, Any] = {
+            "headers": headers if isinstance(headers, dict) else {},
+            "params": params if isinstance(params, dict) else {},
+        }
+        if method in ("POST", "PUT", "PATCH"):
+            if isinstance(data, dict):
+                req_kwargs["json"] = data
+            else:
+                req_kwargs["content"] = str(data)
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                resp = await client.request(method, url, **req_kwargs)
+        except Exception as e:
+            return {
+                "status_code": 0,
+                "response_data": None,
+                "headers": {},
+                "success": False,
+                "url": url,
+                "method": method,
+                "error": str(e),
+            }
+
+        try:
+            response_data = resp.json()
+        except Exception:
+            response_data = resp.text
+
+        return {
+            "status_code": resp.status_code,
+            "response_data": response_data,
+            "headers": dict(resp.headers),
+            "success": resp.status_code < 400,
+            "url": url,
+            "method": method,
+        }
     
     async def _execute_data_transformer_node(
         self,

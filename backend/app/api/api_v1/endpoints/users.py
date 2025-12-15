@@ -20,7 +20,6 @@ from app.core.dependencies import (
     require_tenant_admin,
 )
 from app.core.security import get_password_hash
-from datetime import datetime
 
 router = APIRouter()
 
@@ -185,7 +184,7 @@ async def get_user_stats(
             .count()
         )
         # 本月新用户
-        from datetime import datetime, timedelta
+        from datetime import datetime
         this_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         new_users_this_month = (
             db.query(User)
@@ -210,7 +209,7 @@ async def get_user_stats(
             .count()
         )
         # 本月新用户
-        from datetime import datetime, timedelta
+        from datetime import datetime
         this_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         new_users_this_month = (
             db.query(User)
@@ -497,69 +496,4 @@ async def get_user_config_by_id(
             if config.updated_at
             else config.created_at.isoformat()
         ),
-    )
-
-
-@router.get("/stats", response_model=UserStatsResponse)
-async def get_user_stats(
-    current_user: User = Depends(require_tenant_admin()), db: Session = Depends(get_db)
-):
-    """获取用户统计信息（管理员功能）"""
-    # 根据用户角色限制访问范围
-    if current_user.role == "super_admin":
-        # 超级管理员可以查看所有用户统计
-        total_users = db.query(User).count()
-        active_users = db.query(User).filter(User.is_active == True).count()
-        admin_users = (
-            db.query(User)
-            .filter(User.role.in_(["super_admin", "tenant_admin"]))
-            .count()
-        )
-
-        # 计算本月新增用户
-        current_date = datetime.now()
-        first_day_of_month = current_date.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
-        new_users_this_month = (
-            db.query(User).filter(User.created_at >= first_day_of_month).count()
-        )
-    else:
-        # 租户管理员只能查看同租户用户统计
-        total_users = (
-            db.query(User).filter(User.tenant_id == current_user.tenant_id).count()
-        )
-        active_users = (
-            db.query(User)
-            .filter(User.tenant_id == current_user.tenant_id, User.is_active == True)
-            .count()
-        )
-        admin_users = (
-            db.query(User)
-            .filter(
-                User.tenant_id == current_user.tenant_id,
-                User.role.in_(["super_admin", "tenant_admin"]),
-            )
-            .count()
-        )
-
-        # 计算本月新增用户
-        current_date = datetime.now()
-        first_day_of_month = current_date.replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
-        new_users_this_month = (
-            db.query(User)
-            .filter(
-                User.tenant_id == current_user.tenant_id,
-                User.created_at >= first_day_of_month,
-            )
-            .count()
-        )
-
-    return UserStatsResponse(
-        total_users=total_users,
-        active_users=active_users,
-        admin_users=admin_users,
-        new_users_this_month=new_users_this_month,
     )

@@ -80,7 +80,9 @@ LOG_LEVEL=INFO
 启动后端服务后，您可以通过以下方式验证所有 API 是否正确配置：
 
 ```bash
-curl -X GET "http://localhost:8000/api/v1/llm/test-connections"
+# 需要先登录获取 token，然后测试提供商连通性（租户共享配置）
+curl -X POST "http://localhost:8000/api/v1/model-config/test/deepseek" \\
+  -H "Authorization: Bearer <YOUR_TOKEN>"
 ```
 
 ## 5. 配置选项说明

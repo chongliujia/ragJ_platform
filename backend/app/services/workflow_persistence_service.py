@@ -7,7 +7,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 
 from app.db.database import SessionLocal
 from app.db.models.workflow import (
@@ -44,7 +44,8 @@ class WorkflowPersistenceService:
         self, 
         workflow: WorkflowDefinition, 
         tenant_id: int, 
-        owner_id: int
+        owner_id: int,
+        is_public: bool = False,
     ) -> str:
         """保存工作流定义"""
         db = self._get_db()
@@ -57,6 +58,7 @@ class WorkflowPersistenceService:
                 tenant_id=tenant_id,
                 owner_id=owner_id,
                 status=WorkflowStatus.ACTIVE.value,
+                is_public=bool(is_public),
                 nodes=[node.dict() for node in workflow.nodes],
                 edges=[edge.dict() for edge in workflow.edges],
                 global_config=workflow.global_config,
@@ -112,14 +114,29 @@ class WorkflowPersistenceService:
         finally:
             db.close()
     
-    def list_workflow_definitions(self, tenant_id: int, limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
+    def list_workflow_definitions(
+        self,
+        tenant_id: int,
+        limit: int = 50,
+        offset: int = 0,
+        user_id: Optional[int] = None,
+        is_admin: bool = False,
+        include_public: bool = True,
+    ) -> List[Dict[str, Any]]:
         """列出工作流定义"""
         db = self._get_db()
         try:
-            query = db.query(DBWorkflowDefinition).filter(
-                DBWorkflowDefinition.tenant_id == tenant_id,
-                DBWorkflowDefinition.status != WorkflowStatus.ARCHIVED.value
-            ).order_by(desc(DBWorkflowDefinition.updated_at))
+            query = db.query(DBWorkflowDefinition).filter(DBWorkflowDefinition.tenant_id == tenant_id)
+            query = query.filter(DBWorkflowDefinition.status != WorkflowStatus.ARCHIVED.value)
+
+            # 非管理员默认只能看到自己的工作流 +（可选）公开工作流
+            if user_id is not None and not is_admin:
+                conds = [DBWorkflowDefinition.owner_id == user_id]
+                if include_public:
+                    conds.append(DBWorkflowDefinition.is_public == True)  # noqa: E712
+                query = query.filter(or_(*conds))
+
+            query = query.order_by(desc(DBWorkflowDefinition.updated_at))
             
             workflows = query.offset(offset).limit(limit).all()
             
@@ -127,7 +144,8 @@ class WorkflowPersistenceService:
             for workflow in workflows:
                 # 获取最近执行记录
                 last_execution = db.query(DBWorkflowExecution).filter(
-                    DBWorkflowExecution.workflow_id == workflow.id
+                    DBWorkflowExecution.workflow_id == workflow.id,
+                    DBWorkflowExecution.tenant_id == tenant_id,
                 ).order_by(desc(DBWorkflowExecution.created_at)).first()
                 
                 result.append({
@@ -136,6 +154,8 @@ class WorkflowPersistenceService:
                     "description": workflow.description,
                     "version": workflow.version,
                     "status": workflow.status,
+                    "owner_id": workflow.owner_id,
+                    "is_public": bool(workflow.is_public),
                     "node_count": len(workflow.nodes),
                     "edge_count": len(workflow.edges),
                     "execution_count": workflow.execution_count,
@@ -370,8 +390,9 @@ class WorkflowPersistenceService:
         workflow_id: str, 
         tenant_id: int, 
         limit: int = 50, 
-        offset: int = 0
-    ) -> List[Dict[str, Any]]:
+        offset: int = 0,
+        executed_by: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
         """列出工作流执行记录"""
         db = self._get_db()
         try:
@@ -379,6 +400,11 @@ class WorkflowPersistenceService:
                 DBWorkflowExecution.workflow_definition_id == workflow_id,
                 DBWorkflowExecution.tenant_id == tenant_id
             ).order_by(desc(DBWorkflowExecution.created_at))
+
+            if executed_by is not None:
+                query = query.filter(DBWorkflowExecution.executed_by == executed_by)
+
+            total = query.count()
             
             executions = query.offset(offset).limit(limit).all()
             
@@ -396,14 +422,15 @@ class WorkflowPersistenceService:
                     "failed_steps": execution.failed_steps,
                     "error_message": execution.error_message,
                     "created_at": execution.created_at.isoformat() if execution.created_at else None,
-                    "metrics": execution.metrics
+                    "metrics": execution.metrics,
+                    "executed_by": execution.executed_by,
                 })
             
-            return result
+            return result, total
             
         except Exception as e:
             logger.error(f"Failed to list workflow executions: {e}", exc_info=True)
-            return []
+            return [], 0
         finally:
             db.close()
     
@@ -412,6 +439,7 @@ class WorkflowPersistenceService:
         tenant_id: int,
         workflow_id: Optional[str] = None,
         status: Optional[str] = None,
+        executed_by: Optional[int] = None,
         limit: int = 20, 
         offset: int = 0
     ) -> Tuple[List[Dict[str, Any]], int]:
@@ -427,6 +455,9 @@ class WorkflowPersistenceService:
             
             if status:
                 query = query.filter(DBWorkflowExecution.status == status)
+
+            if executed_by is not None:
+                query = query.filter(DBWorkflowExecution.executed_by == executed_by)
             
             # 获取总数
             total = query.count()
@@ -458,6 +489,309 @@ class WorkflowPersistenceService:
         except Exception as e:
             logger.error(f"Failed to get paginated execution history: {e}", exc_info=True)
             return [], 0
+        finally:
+            db.close()
+
+    # 工作流模板相关方法
+
+    def list_workflow_templates(
+        self,
+        *,
+        tenant_id: int,
+        limit: int = 20,
+        offset: int = 0,
+        category: Optional[str] = None,
+        difficulty: Optional[str] = None,
+        sort_by: str = "popular",
+        query: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        author_id: Optional[int] = None,
+        visible_to_user_id: Optional[int] = None,
+        include_inactive: bool = False,
+        include_private: bool = True,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """列出租户内可用模板（支持简单筛选/分页）。
+
+        - tenant_id：租户隔离
+        - author_id：仅作者模板（用于“我的模板”）
+        - include_private：若为 False，则只返回 is_public=True
+        """
+        db = self._get_db()
+        try:
+            q = db.query(DBWorkflowTemplate).filter(DBWorkflowTemplate.tenant_id == tenant_id)
+            if not include_inactive:
+                q = q.filter(DBWorkflowTemplate.is_active == True)  # noqa: E712
+
+            if not include_private:
+                q = q.filter(DBWorkflowTemplate.is_public == True)  # noqa: E712
+
+            # 可见性：非管理员场景下，私有模板仅作者可见；公共模板全员可见
+            if visible_to_user_id is not None:
+                q = q.filter(or_(DBWorkflowTemplate.is_public == True, DBWorkflowTemplate.author_id == visible_to_user_id))  # noqa: E712
+
+            if author_id is not None:
+                q = q.filter(DBWorkflowTemplate.author_id == author_id)
+
+            if category:
+                q = q.filter(or_(DBWorkflowTemplate.category == category, DBWorkflowTemplate.subcategory == category))
+
+            if difficulty:
+                q = q.filter(DBWorkflowTemplate.difficulty == difficulty)
+
+            if query:
+                like = f"%{query.strip()}%"
+                q = q.filter(or_(DBWorkflowTemplate.name.like(like), DBWorkflowTemplate.description.like(like)))
+
+            # 排序
+            sort_key = (sort_by or "popular").lower()
+            if sort_key == "newest":
+                q = q.order_by(desc(DBWorkflowTemplate.created_at))
+            elif sort_key == "rating":
+                q = q.order_by(desc(DBWorkflowTemplate.rating), desc(DBWorkflowTemplate.rating_count))
+            elif sort_key == "name":
+                q = q.order_by(DBWorkflowTemplate.name.asc())
+            else:
+                q = q.order_by(desc(DBWorkflowTemplate.downloads))
+
+            total = q.count()
+            items = q.offset(offset).limit(limit).all()
+
+            def to_dict(tpl: DBWorkflowTemplate) -> Dict[str, Any]:
+                return {
+                    "id": tpl.template_id,
+                    "name": tpl.name,
+                    "description": tpl.description,
+                    "category": tpl.category,
+                    "subcategory": tpl.subcategory,
+                    "tags": tpl.tags or [],
+                    "difficulty": tpl.difficulty,
+                    "estimated_time": tpl.estimated_time,
+                    "use_cases": tpl.use_cases or [],
+                    "requirements": tpl.requirements or [],
+                    "version": tpl.version,
+                    "author_id": tpl.author_id,
+                    "tenant_id": tpl.tenant_id,
+                    "is_public": bool(tpl.is_public),
+                    "is_featured": bool(tpl.is_featured),
+                    "is_premium": bool(tpl.is_premium),
+                    "downloads": tpl.downloads,
+                    "rating": tpl.rating,
+                    "rating_count": tpl.rating_count,
+                    "usage_count": tpl.usage_count,
+                    "node_count": len(tpl.nodes or []),
+                    "edge_count": len(tpl.edges or []),
+                    "created_at": tpl.created_at.isoformat() if tpl.created_at else None,
+                    "updated_at": tpl.updated_at.isoformat() if tpl.updated_at else None,
+                }
+
+            result = [to_dict(x) for x in items]
+
+            # tags 过滤（跨数据库 JSON 查询兼容性差，这里先走 Python 过滤）
+            if tags:
+                wanted = {str(x) for x in tags if x}
+
+                def has_any(t: Dict[str, Any]) -> bool:
+                    got = {str(x) for x in (t.get("tags") or [])}
+                    return bool(got & wanted)
+
+                result = [t for t in result if has_any(t)]
+                total = len(result)
+
+            return result, total
+        except Exception as e:
+            logger.error(f"Failed to list workflow templates: {e}", exc_info=True)
+            return [], 0
+        finally:
+            db.close()
+
+    def get_workflow_template(
+        self,
+        *,
+        tenant_id: int,
+        template_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        db = self._get_db()
+        try:
+            tpl = (
+                db.query(DBWorkflowTemplate)
+                .filter(
+                    DBWorkflowTemplate.tenant_id == tenant_id,
+                    DBWorkflowTemplate.template_id == template_id,
+                )
+                .first()
+            )
+            if not tpl:
+                return None
+            return {
+                "id": tpl.template_id,
+                "name": tpl.name,
+                "description": tpl.description,
+                "category": tpl.category,
+                "subcategory": tpl.subcategory,
+                "tags": tpl.tags or [],
+                "difficulty": tpl.difficulty,
+                "estimated_time": tpl.estimated_time,
+                "use_cases": tpl.use_cases or [],
+                "requirements": tpl.requirements or [],
+                "version": tpl.version,
+                "author_id": tpl.author_id,
+                "tenant_id": tpl.tenant_id,
+                "is_public": bool(tpl.is_public),
+                "is_featured": bool(tpl.is_featured),
+                "is_premium": bool(tpl.is_premium),
+                "downloads": tpl.downloads,
+                "rating": tpl.rating,
+                "rating_count": tpl.rating_count,
+                "usage_count": tpl.usage_count,
+                "nodes": tpl.nodes or [],
+                "edges": tpl.edges or [],
+                "global_config": tpl.global_config or {},
+                "example_inputs": tpl.example_inputs or {},
+                "example_outputs": tpl.example_outputs or {},
+                "created_at": tpl.created_at.isoformat() if tpl.created_at else None,
+                "updated_at": tpl.updated_at.isoformat() if tpl.updated_at else None,
+            }
+        except Exception as e:
+            logger.error(f"Failed to get workflow template: {e}", exc_info=True)
+            return None
+        finally:
+            db.close()
+
+    def create_workflow_template(
+        self,
+        *,
+        tenant_id: int,
+        author_id: int,
+        template_id: str,
+        name: str,
+        description: str,
+        category: str,
+        subcategory: Optional[str],
+        tags: List[str],
+        difficulty: str,
+        estimated_time: str,
+        use_cases: List[str],
+        requirements: List[str],
+        nodes: List[Dict[str, Any]],
+        edges: List[Dict[str, Any]],
+        is_public: bool,
+        global_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        db = self._get_db()
+        try:
+            tpl = DBWorkflowTemplate(
+                template_id=template_id,
+                name=name,
+                description=description or "",
+                category=category,
+                subcategory=subcategory,
+                tags=tags or [],
+                difficulty=difficulty or "intermediate",
+                estimated_time=estimated_time,
+                use_cases=use_cases or [],
+                requirements=requirements or [],
+                tenant_id=tenant_id,
+                author_id=author_id,
+                is_public=bool(is_public),
+                nodes=nodes or [],
+                edges=edges or [],
+                global_config=global_config or {},
+                version="1.0.0",
+            )
+            db.add(tpl)
+            db.commit()
+            return template_id
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to create workflow template: {e}", exc_info=True)
+            raise
+        finally:
+            db.close()
+
+    def update_workflow_template(
+        self,
+        *,
+        tenant_id: int,
+        template_id: str,
+        patch: Dict[str, Any],
+    ) -> bool:
+        db = self._get_db()
+        try:
+            tpl = (
+                db.query(DBWorkflowTemplate)
+                .filter(DBWorkflowTemplate.tenant_id == tenant_id, DBWorkflowTemplate.template_id == template_id)
+                .first()
+            )
+            if not tpl:
+                return False
+
+            allowed = {
+                "name",
+                "description",
+                "category",
+                "subcategory",
+                "tags",
+                "difficulty",
+                "estimated_time",
+                "use_cases",
+                "requirements",
+                "nodes",
+                "edges",
+                "global_config",
+                "is_public",
+                "is_featured",
+                "is_premium",
+                "is_active",
+            }
+            for k, v in (patch or {}).items():
+                if k in allowed:
+                    setattr(tpl, k, v)
+
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to update workflow template: {e}", exc_info=True)
+            raise
+        finally:
+            db.close()
+
+    def delete_workflow_template(self, *, tenant_id: int, template_id: str) -> bool:
+        db = self._get_db()
+        try:
+            tpl = (
+                db.query(DBWorkflowTemplate)
+                .filter(DBWorkflowTemplate.tenant_id == tenant_id, DBWorkflowTemplate.template_id == template_id)
+                .first()
+            )
+            if not tpl:
+                return False
+            db.delete(tpl)
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to delete workflow template: {e}", exc_info=True)
+            raise
+        finally:
+            db.close()
+
+    def bump_template_downloads(self, *, tenant_id: int, template_id: str) -> None:
+        db = self._get_db()
+        try:
+            tpl = (
+                db.query(DBWorkflowTemplate)
+                .filter(DBWorkflowTemplate.tenant_id == tenant_id, DBWorkflowTemplate.template_id == template_id)
+                .first()
+            )
+            if not tpl:
+                return
+            tpl.downloads = int(tpl.downloads or 0) + 1
+            tpl.usage_count = int(tpl.usage_count or 0) + 1
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to bump template downloads: {e}", exc_info=True)
         finally:
             db.close()
 

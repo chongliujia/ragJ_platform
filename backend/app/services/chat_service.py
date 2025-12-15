@@ -148,26 +148,3 @@ class ChatService:
     async def clear_chat_history(self, chat_id: str):
         if chat_id in self.chat_history:
             del self.chat_history[chat_id]
-
-    async def execute_workflow(
-        self, workflow_id: str, request: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """执行LangGraph工作流（简化版本）"""
-        logger.info("Executing workflow", workflow_id=workflow_id)
-        # This remains a mock implementation for now
-        execution_id = f"exec_{uuid.uuid4().hex[:8]}"
-        start_time = datetime.now()
-        message = request.get("input", {}).get("message", "")
-        output = {"result": f"Workflow {workflow_id} executed with input: {message}"}
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
-
-        return {
-            "output": output,
-            "execution_id": execution_id,
-            "workflow_id": workflow_id,
-            "status": "completed",
-            "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat(),
-            "duration": duration,
-        }

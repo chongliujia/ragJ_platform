@@ -163,22 +163,6 @@ async def clear_history(chat_id: str):
         raise HTTPException(status_code=500, detail="Failed to clear chat history.")
 
 
-@router.post("/workflows/{workflow_id}/execute")
-async def execute_workflow(workflow_id: str, request: dict):
-    """
-    执行LangGraph工作流
-    """
-    try:
-        logger.info("执行工作流", workflow_id=workflow_id)
-
-        result = await chat_service.execute_workflow(workflow_id, request)
-        return result
-
-    except Exception as e:
-        logger.error("工作流执行失败", error=str(e))
-        raise HTTPException(status_code=500, detail=f"工作流执行失败: {str(e)}")
-
-
 @router.post("/rag", response_model=ChatResponse)
 async def handle_rag_chat(
     request: ChatRequest,

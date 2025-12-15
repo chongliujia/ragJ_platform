@@ -37,23 +37,20 @@ import {
 } from '@mui/material';
 import {
   Search as SearchIcon,
-  AccountTree as WorkflowIcon,
-  SmartToy as AIIcon,
-  Description as DocumentIcon,
-  Translate as TranslateIcon,
-  Psychology as AnalyzeIcon,
-  Group as TeamIcon,
-  Star as StarIcon,
-  StarBorder as StarBorderIcon,
-  Visibility as PreviewIcon,
-  GetApp as UseIcon,
-  Code as CodeIcon,
-  Timeline as TimelineIcon,
-  TrendingUp as TrendingUpIcon,
-  FilterList as FilterIcon,
-  Close as CloseIcon,
-} from '@mui/icons-material';
+	  AccountTree as WorkflowIcon,
+	  SmartToy as AIIcon,
+	  Description as DocumentIcon,
+	  Group as TeamIcon,
+	  Star as StarIcon,
+	  StarBorder as StarBorderIcon,
+	  Visibility as PreviewIcon,
+	  GetApp as UseIcon,
+	  TrendingUp as TrendingUpIcon,
+	  FilterList as FilterIcon,
+	  Close as CloseIcon,
+	} from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import { workflowApi } from '../services/api';
 
 interface WorkflowTemplate {
   id: string;
@@ -62,7 +59,8 @@ interface WorkflowTemplate {
   category: string;
   subcategory?: string;
   tags: string[];
-  author: string;
+  author?: string;
+  author_id?: number;
   version: string;
   created_at: string;
   updated_at: string;
@@ -71,10 +69,11 @@ interface WorkflowTemplate {
   rating_count: number;
   is_featured: boolean;
   is_premium: boolean;
+  is_public?: boolean;
   difficulty: 'beginner' | 'intermediate' | 'advanced';
   estimated_time: string;
-  nodes: any[];
-  edges: any[];
+  nodes?: any[];
+  edges?: any[];
   preview_image?: string;
   use_cases: string[];
   requirements: string[];
@@ -106,266 +105,93 @@ const WorkflowTemplateLibrary: React.FC = () => {
   const [favoriteTemplates, setFavoriteTemplates] = useState<Set<string>>(new Set());
   const [currentTab, setCurrentTab] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
+  const [mineOnly, setMineOnly] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
-  // 模拟数据
-  const mockCategories: TemplateCategory[] = [
-    {
-      id: 'customer_service',
-      name: '客户服务',
-      icon: <TeamIcon />,
-      color: '#2196f3',
-      count: 12,
-      subcategories: [
-        { id: 'chatbot', name: '聊天机器人', icon: <AIIcon />, color: '#2196f3', count: 8 },
-        { id: 'ticket_system', name: '工单系统', icon: <DocumentIcon />, color: '#2196f3', count: 4 },
-      ]
-    },
-    {
-      id: 'document_processing',
-      name: '文档处理',
-      icon: <DocumentIcon />,
-      color: '#4caf50',
-      count: 15,
-      subcategories: [
-        { id: 'document_analysis', name: '文档分析', icon: <AnalyzeIcon />, color: '#4caf50', count: 8 },
-        { id: 'translation', name: '翻译处理', icon: <TranslateIcon />, color: '#4caf50', count: 7 },
-      ]
-    },
-    {
-      id: 'ai_assistant',
-      name: 'AI助手',
-      icon: <AIIcon />,
-      color: '#ff9800',
-      count: 10,
-      subcategories: [
-        { id: 'qa_system', name: '问答系统', icon: <AnalyzeIcon />, color: '#ff9800', count: 6 },
-        { id: 'writing_assistant', name: '写作助手', icon: <CodeIcon />, color: '#ff9800', count: 4 },
-      ]
-    },
-    {
-      id: 'data_analysis',
-      name: '数据分析',
-      icon: <TrendingUpIcon />,
-      color: '#9c27b0',
-      count: 8,
-      subcategories: [
-        { id: 'report_generation', name: '报表生成', icon: <TimelineIcon />, color: '#9c27b0', count: 5 },
-        { id: 'trend_analysis', name: '趋势分析', icon: <TrendingUpIcon />, color: '#9c27b0', count: 3 },
-      ]
-    },
-  ];
+  // 分类元信息（用于 UI 图标/颜色）
+  const CATEGORY_META: Record<string, { name: string; icon: React.ReactNode; color: string }> = {
+    customer_service: { name: '客户服务', icon: <TeamIcon />, color: '#2196f3' },
+    document_processing: { name: '文档处理', icon: <DocumentIcon />, color: '#4caf50' },
+    ai_assistant: { name: 'AI助手', icon: <AIIcon />, color: '#ff9800' },
+    data_analysis: { name: '数据分析', icon: <TrendingUpIcon />, color: '#9c27b0' },
+    custom: { name: '自定义', icon: <WorkflowIcon />, color: '#607d8b' },
+  };
 
-  const mockTemplates: WorkflowTemplate[] = [
-    {
-      id: 'customer-service-bot',
-      name: '智能客服机器人',
-      description: '基于RAG技术的智能客服系统，支持多轮对话和知识库检索',
-      category: 'customer_service',
-      subcategory: 'chatbot',
-      tags: ['客服', 'RAG', '对话', '知识库'],
-      author: 'AI团队',
-      version: '2.1.0',
-      created_at: '2024-01-10T10:00:00Z',
-      updated_at: '2024-01-15T14:30:00Z',
-      downloads: 1247,
-      rating: 4.8,
-      rating_count: 156,
-      is_featured: true,
-      is_premium: false,
-      difficulty: 'intermediate',
-      estimated_time: '30分钟',
-      nodes: [
-        { id: 'input', type: 'input', name: '用户输入' },
-        { id: 'intent', type: 'classifier', name: '意图识别' },
-        { id: 'rag', type: 'rag_retriever', name: '知识检索' },
-        { id: 'llm', type: 'llm', name: '回复生成' },
-        { id: 'output', type: 'output', name: '输出回复' },
-      ],
-      edges: [
-        { id: 'e1', source: 'input', target: 'intent' },
-        { id: 'e2', source: 'intent', target: 'rag' },
-        { id: 'e3', source: 'rag', target: 'llm' },
-        { id: 'e4', source: 'llm', target: 'output' },
-      ],
-      use_cases: ['客户咨询', '技术支持', '售后服务'],
-      requirements: ['知识库文档', 'LLM API密钥'],
-      similar_templates: ['advanced-chatbot', 'multilingual-support']
-    },
-    {
-      id: 'document-analyzer',
-      name: '文档智能分析',
-      description: '自动提取文档关键信息并生成结构化摘要',
-      category: 'document_processing',
-      subcategory: 'document_analysis',
-      tags: ['文档', '分析', '摘要', 'NLP'],
-      author: '文档处理团队',
-      version: '1.5.0',
-      created_at: '2024-01-08T09:00:00Z',
-      updated_at: '2024-01-12T16:45:00Z',
-      downloads: 892,
-      rating: 4.6,
-      rating_count: 94,
-      is_featured: false,
-      is_premium: true,
-      difficulty: 'advanced',
-      estimated_time: '45分钟',
-      nodes: [
-        { id: 'upload', type: 'input', name: '文档上传' },
-        { id: 'extract', type: 'parser', name: '文本提取' },
-        { id: 'segment', type: 'data_transformer', name: '文本分割' },
-        { id: 'analyze', type: 'llm', name: '内容分析' },
-        { id: 'summarize', type: 'llm', name: '摘要生成' },
-        { id: 'output', type: 'output', name: '结果输出' },
-      ],
-      edges: [
-        { id: 'e1', source: 'upload', target: 'extract' },
-        { id: 'e2', source: 'extract', target: 'segment' },
-        { id: 'e3', source: 'segment', target: 'analyze' },
-        { id: 'e4', source: 'analyze', target: 'summarize' },
-        { id: 'e5', source: 'summarize', target: 'output' },
-      ],
-      use_cases: ['合同分析', '报告总结', '研究论文摘要'],
-      requirements: ['文档上传功能', '高级LLM模型'],
-      similar_templates: ['contract-reviewer', 'research-assistant']
-    },
-    {
-      id: 'translation-workflow',
-      name: '多语言翻译助手',
-      description: '支持多种语言的智能翻译工作流，包含术语一致性检查',
-      category: 'document_processing',
-      subcategory: 'translation',
-      tags: ['翻译', '多语言', '术语', '一致性'],
-      author: '国际化团队',
-      version: '1.8.0',
-      created_at: '2024-01-05T11:30:00Z',
-      updated_at: '2024-01-14T10:15:00Z',
-      downloads: 634,
-      rating: 4.4,
-      rating_count: 73,
-      is_featured: true,
-      is_premium: false,
-      difficulty: 'beginner',
-      estimated_time: '20分钟',
-      nodes: [
-        { id: 'input', type: 'input', name: '原文输入' },
-        { id: 'detect', type: 'classifier', name: '语言检测' },
-        { id: 'translate', type: 'llm', name: '翻译处理' },
-        { id: 'check', type: 'classifier', name: '术语检查' },
-        { id: 'output', type: 'output', name: '翻译输出' },
-      ],
-      edges: [
-        { id: 'e1', source: 'input', target: 'detect' },
-        { id: 'e2', source: 'detect', target: 'translate' },
-        { id: 'e3', source: 'translate', target: 'check' },
-        { id: 'e4', source: 'check', target: 'output' },
-      ],
-      use_cases: ['技术文档翻译', '产品说明书', '用户界面本地化'],
-      requirements: ['翻译API', '术语词典'],
-      similar_templates: ['localization-helper', 'content-translator']
-    },
-    {
-      id: 'qa-system',
-      name: '企业问答系统',
-      description: '基于企业知识库的智能问答系统，支持复杂查询和上下文理解',
-      category: 'ai_assistant',
-      subcategory: 'qa_system',
-      tags: ['问答', '知识库', '企业', '上下文'],
-      author: '企业AI团队',
-      version: '3.0.0',
-      created_at: '2024-01-03T14:20:00Z',
-      updated_at: '2024-01-16T09:45:00Z',
-      downloads: 1583,
-      rating: 4.9,
-      rating_count: 201,
-      is_featured: true,
-      is_premium: true,
-      difficulty: 'advanced',
-      estimated_time: '60分钟',
-      nodes: [
-        { id: 'question', type: 'input', name: '问题输入' },
-        { id: 'understand', type: 'llm', name: '问题理解' },
-        { id: 'search', type: 'rag_retriever', name: '知识检索' },
-        { id: 'rerank', type: 'reranker', name: '结果重排' },
-        { id: 'generate', type: 'llm', name: '答案生成' },
-        { id: 'verify', type: 'classifier', name: '答案验证' },
-        { id: 'output', type: 'output', name: '答案输出' },
-      ],
-      edges: [
-        { id: 'e1', source: 'question', target: 'understand' },
-        { id: 'e2', source: 'understand', target: 'search' },
-        { id: 'e3', source: 'search', target: 'rerank' },
-        { id: 'e4', source: 'rerank', target: 'generate' },
-        { id: 'e5', source: 'generate', target: 'verify' },
-        { id: 'e6', source: 'verify', target: 'output' },
-      ],
-      use_cases: ['员工培训', '技术支持', '政策咨询'],
-      requirements: ['企业知识库', '高性能向量数据库', '重排序模型'],
-      similar_templates: ['help-desk-bot', 'training-assistant']
-    },
-    {
-      id: 'data-report-generator',
-      name: '数据报告生成器',
-      description: '自动化数据分析和报告生成，支持多种图表和可视化',
-      category: 'data_analysis',
-      subcategory: 'report_generation',
-      tags: ['数据分析', '报告', '可视化', '自动化'],
-      author: '数据科学团队',
-      version: '2.3.0',
-      created_at: '2024-01-07T08:15:00Z',
-      updated_at: '2024-01-13T13:20:00Z',
-      downloads: 456,
-      rating: 4.3,
-      rating_count: 52,
-      is_featured: false,
-      is_premium: false,
-      difficulty: 'intermediate',
-      estimated_time: '40分钟',
-      nodes: [
-        { id: 'data_input', type: 'input', name: '数据输入' },
-        { id: 'clean', type: 'data_transformer', name: '数据清洗' },
-        { id: 'analyze', type: 'code_executor', name: '统计分析' },
-        { id: 'visualize', type: 'code_executor', name: '图表生成' },
-        { id: 'report', type: 'llm', name: '报告撰写' },
-        { id: 'output', type: 'output', name: '报告输出' },
-      ],
-      edges: [
-        { id: 'e1', source: 'data_input', target: 'clean' },
-        { id: 'e2', source: 'clean', target: 'analyze' },
-        { id: 'e3', source: 'analyze', target: 'visualize' },
-        { id: 'e4', source: 'visualize', target: 'report' },
-        { id: 'e5', source: 'report', target: 'output' },
-      ],
-      use_cases: ['销售报告', '用户行为分析', '财务报表'],
-      requirements: ['数据源接口', '图表库', '报告模板'],
-      similar_templates: ['dashboard-generator', 'kpi-tracker']
-    },
-  ];
+  const buildCategoriesFromTemplates = (tpls: WorkflowTemplate[]): TemplateCategory[] => {
+    const counts: Record<string, number> = {};
+    const subcounts: Record<string, Record<string, number>> = {};
+    for (const t of tpls) {
+      const cat = t.category || 'custom';
+      counts[cat] = (counts[cat] || 0) + 1;
+      if (t.subcategory) {
+        subcounts[cat] = subcounts[cat] || {};
+        subcounts[cat][t.subcategory] = (subcounts[cat][t.subcategory] || 0) + 1;
+      }
+    }
+    const cats: TemplateCategory[] = Object.keys(counts)
+      .sort()
+      .map((id) => {
+        const meta = CATEGORY_META[id] || { name: id, icon: <WorkflowIcon />, color: '#2196f3' };
+        const subs = Object.entries(subcounts[id] || {})
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([sid, c]) => ({ id: sid, name: sid, icon: meta.icon, color: meta.color, count: c }));
+        return { id, name: meta.name, icon: meta.icon, color: meta.color, count: counts[id] || 0, subcategories: subs };
+      });
+    return cats;
+  };
+
+  const normalizeTemplate = (raw: any): WorkflowTemplate => {
+    return {
+      id: String(raw?.id || raw?.template_id || ''),
+      name: String(raw?.name || ''),
+      description: String(raw?.description || ''),
+      category: String(raw?.category || 'custom'),
+      subcategory: raw?.subcategory ? String(raw.subcategory) : undefined,
+      tags: Array.isArray(raw?.tags) ? raw.tags.map((x: any) => String(x)) : [],
+      author: raw?.author ? String(raw.author) : undefined,
+      author_id: typeof raw?.author_id === 'number' ? raw.author_id : undefined,
+      version: String(raw?.version || '1.0.0'),
+      created_at: String(raw?.created_at || new Date().toISOString()),
+      updated_at: String(raw?.updated_at || raw?.created_at || new Date().toISOString()),
+      downloads: Number(raw?.downloads || 0),
+      rating: Number(raw?.rating || 0),
+      rating_count: Number(raw?.rating_count || 0),
+      is_featured: !!raw?.is_featured,
+      is_premium: !!raw?.is_premium,
+      is_public: raw?.is_public != null ? !!raw.is_public : undefined,
+      difficulty: (raw?.difficulty as any) || 'intermediate',
+      estimated_time: String(raw?.estimated_time || ''),
+      nodes: Array.isArray(raw?.nodes) ? raw.nodes : undefined,
+      edges: Array.isArray(raw?.edges) ? raw.edges : undefined,
+      use_cases: Array.isArray(raw?.use_cases) ? raw.use_cases : [],
+      requirements: Array.isArray(raw?.requirements) ? raw.requirements : [],
+      similar_templates: Array.isArray(raw?.similar_templates) ? raw.similar_templates : [],
+    };
+  };
 
   useEffect(() => {
-    // 模拟数据加载
-    const loadData = async () => {
+    const load = async () => {
       setLoading(true);
+      setError(null);
       try {
-        // 模拟API调用延迟
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        setCategories(mockCategories);
-        setTemplates(mockTemplates);
-        
-        // 从localStorage加载收藏
+        const resp = await workflowApi.getTemplates({ limit: 500, offset: 0, sort_by: 'popular', mine: mineOnly });
+        const list = Array.isArray(resp.data) ? resp.data : [];
+        const tpls = list.map(normalizeTemplate);
+        setTemplates(tpls);
+        setCategories(buildCategoriesFromTemplates(tpls));
         const savedFavorites = localStorage.getItem('workflow_template_favorites');
-        if (savedFavorites) {
-          setFavoriteTemplates(new Set(JSON.parse(savedFavorites)));
-        }
-      } catch (error) {
-        console.error('Failed to load template data:', error);
+        if (savedFavorites) setFavoriteTemplates(new Set(JSON.parse(savedFavorites)));
+      } catch (e: any) {
+        setTemplates([]);
+        setCategories([]);
+        setError(e?.response?.data?.detail || '加载模板失败');
       } finally {
         setLoading(false);
       }
     };
-
-    loadData();
-  }, []);
+    load();
+  }, [mineOnly, reloadNonce]);
 
   // 过滤和排序模板
   const filteredAndSortedTemplates = React.useMemo(() => {
@@ -427,24 +253,27 @@ const WorkflowTemplateLibrary: React.FC = () => {
   };
 
   // 处理模板预览
-  const handlePreviewTemplate = (template: WorkflowTemplate) => {
+  const handlePreviewTemplate = async (template: WorkflowTemplate) => {
     setSelectedTemplate(template);
     setPreviewDialogOpen(true);
+    try {
+      const res = await workflowApi.getTemplateDetail(template.id);
+      setSelectedTemplate(normalizeTemplate(res.data));
+    } catch (e) {
+      console.error('Failed to load template detail:', e);
+    }
   };
 
   // 处理使用模板
-  const handleUseTemplate = (template: WorkflowTemplate) => {
-    // 跳转到工作流编辑器并加载模板
-    navigate('/workflows/new', { 
-      state: { 
-        template: {
-          name: template.name,
-          description: template.description,
-          nodes: template.nodes,
-          edges: template.edges
-        }
-      }
-    });
+  const handleUseTemplate = async (template: WorkflowTemplate) => {
+    try {
+      const resp = await workflowApi.useTemplate(template.id);
+      const workflowId = resp.data?.workflow_id || resp.data?.id;
+      if (workflowId) navigate(`/workflows/${workflowId}/edit`);
+    } catch (e) {
+      console.error('Use template failed:', e);
+      alert('使用模板失败');
+    }
   };
 
   // 获取难度颜色
@@ -625,7 +454,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
               </Typography>
             </Box>
             <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-              {template.author}
+              {template.author || (template.author_id != null ? `作者#${template.author_id}` : '')}
             </Typography>
           </Box>
         </CardContent>
@@ -840,6 +669,41 @@ const WorkflowTemplateLibrary: React.FC = () => {
           >
             {showFilters ? '隐藏' : '显示'}筛选
           </Button>
+
+          <Button
+            variant="outlined"
+            onClick={() => setMineOnly((v) => !v)}
+            sx={{ color: '#00d4ff', borderColor: 'rgba(0, 212, 255, 0.35)' }}
+          >
+            {mineOnly ? '查看全部模板' : '只看我的模板'}
+          </Button>
+
+          <Button
+            variant="outlined"
+            onClick={async () => {
+              try {
+                await workflowApi.seedTemplates(false);
+                setReloadNonce((n) => n + 1);
+              } catch (e) {
+                console.error('seed templates failed:', e);
+                alert('导入示例模板失败（需要管理员权限）');
+              }
+            }}
+            sx={{ color: '#00d4ff', borderColor: 'rgba(0, 212, 255, 0.35)' }}
+          >
+            导入示例模板
+          </Button>
+
+          <Button
+            variant="contained"
+            sx={{
+              background: 'linear-gradient(45deg, #00d4ff 0%, #0099cc 100%)',
+              '&:hover': { background: 'linear-gradient(45deg, #0099cc 0%, #007acc 100%)' },
+            }}
+            onClick={() => navigate('/workflows/new')}
+          >
+            新建工作流
+          </Button>
         </Box>
       </Paper>
 
@@ -878,6 +742,19 @@ const WorkflowTemplateLibrary: React.FC = () => {
         </Box>
       ) : (
         <>
+          {error && (
+            <Alert
+              severity="error"
+              sx={{
+                mb: 2,
+                backgroundColor: 'rgba(244, 67, 54, 0.12)',
+                color: '#f44336',
+                border: '1px solid rgba(244, 67, 54, 0.2)',
+              }}
+            >
+              {error}
+            </Alert>
+          )}
           {filteredAndSortedTemplates.length === 0 ? (
             <Alert
               severity="info"
@@ -1007,7 +884,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                     适用场景
                   </Typography>
                   <List>
-                    {selectedTemplate.use_cases.map((useCase, index) => (
+                    {(selectedTemplate.use_cases || []).map((useCase, index) => (
                       <ListItem key={index} sx={{ py: 0.5 }}>
                         <ListItemIcon sx={{ minWidth: 24 }}>
                           <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: '#00d4ff' }} />
@@ -1028,7 +905,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                     所需资源
                   </Typography>
                   <List>
-                    {selectedTemplate.requirements.map((req, index) => (
+                    {(selectedTemplate.requirements || []).map((req, index) => (
                       <ListItem key={index} sx={{ py: 0.5 }}>
                         <ListItemIcon sx={{ minWidth: 24 }}>
                           <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: '#4caf50' }} />
@@ -1049,7 +926,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                     工作流节点
                   </Typography>
                   <List>
-                    {selectedTemplate.nodes.map((node, index) => (
+                    {(selectedTemplate.nodes || []).map((node, index) => (
                       <ListItem key={index} sx={{ py: 0.5 }}>
                         <ListItemIcon sx={{ minWidth: 24 }}>
                           <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: '#ff9800' }} />
@@ -1073,6 +950,43 @@ const WorkflowTemplateLibrary: React.FC = () => {
                 sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
               >
                 关闭
+              </Button>
+              <Button
+                color="error"
+                variant="outlined"
+                onClick={async () => {
+                  if (!selectedTemplate?.id) return;
+                  if (!confirm('确定要删除这个模板吗？')) return;
+                  try {
+                    await workflowApi.deleteTemplate(selectedTemplate.id);
+                    setPreviewDialogOpen(false);
+                    setReloadNonce((n) => n + 1);
+                  } catch (e) {
+                    console.error('delete template failed:', e);
+                    alert('删除失败（需要作者或管理员权限）');
+                  }
+                }}
+                sx={{ borderColor: 'rgba(244, 67, 54, 0.45)' }}
+              >
+                删除模板
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={async () => {
+                  if (!selectedTemplate?.id) return;
+                  try {
+                    const nextPublic = !selectedTemplate.is_public;
+                    await workflowApi.updateTemplate(selectedTemplate.id, { is_public: nextPublic });
+                    setSelectedTemplate({ ...selectedTemplate, is_public: nextPublic });
+                    setReloadNonce((n) => n + 1);
+                  } catch (e) {
+                    console.error('toggle template visibility failed:', e);
+                    alert('修改可见性失败（需要作者或管理员权限）');
+                  }
+                }}
+                sx={{ color: '#00d4ff', borderColor: 'rgba(0, 212, 255, 0.35)' }}
+              >
+                {selectedTemplate.is_public ? '设为私有' : '设为公开'}
               </Button>
               <Button
                 startIcon={<UseIcon />}

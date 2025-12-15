@@ -138,7 +138,7 @@ async def main():
         print("\n🎉 All tests passed! LLM integration is working correctly.")
         print("💡 You can now start the server and use the chat functionality.")
         print("   Server: python backend/app/main.py")
-        print("   Test API: http://localhost:8000/api/v1/test/llm/connectivity")
+        print("   Provider Test API: POST http://localhost:8000/api/v1/model-config/me/test/<provider>")
     else:
         print("\n❌ Some tests failed. Please check the configuration and try again.")
         sys.exit(1)

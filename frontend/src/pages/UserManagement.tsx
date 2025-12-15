@@ -32,6 +32,7 @@ import {
   Switch,
   FormControlLabel,
   Grid,
+  Tooltip,
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -42,7 +43,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import { AuthManager } from '../services/authApi';
-import { systemApi } from '../services/api';
+import { systemApi, teamApi } from '../services/api';
 
 interface UserListItem {
   id: number;
@@ -66,10 +67,16 @@ interface UserStats {
   new_users_this_month: number;
 }
 
+interface TeamSettings {
+  allow_shared_models: boolean;
+  shared_model_user_ids: number[];
+}
+
 const UserManagement: React.FC = () => {
   const { t } = useTranslation();
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
+  const [teamSettings, setTeamSettings] = useState<TeamSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
   const [page, setPage] = useState(0);
@@ -93,14 +100,17 @@ const UserManagement: React.FC = () => {
   const authManager = AuthManager.getInstance();
   const currentUser = authManager.getCurrentUser();
 
-  useEffect(() => {
-    // Debug: Check current user and token
-    console.log('Current user:', currentUser);
-    console.log('Auth token:', localStorage.getItem('auth_token'));
-    
-    loadUsers();
-    loadStats();
-  }, [page, rowsPerPage, searchTerm, roleFilter, statusFilter]);
+  const loadTeamSettings = async () => {
+    try {
+      const resp = await teamApi.getCurrentSettings();
+      setTeamSettings(resp.data);
+    } catch {
+      setTeamSettings(null);
+    }
+  };
+
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const listEndpoint = isSuperAdmin ? '/api/v1/admin/users' : '/api/v1/users';
 
   const loadUsers = async () => {
     try {
@@ -114,26 +124,18 @@ const UserManagement: React.FC = () => {
       if (roleFilter) params.append('role', roleFilter);
       if (statusFilter) params.append('is_active', statusFilter);
 
-      // Debug log
-      console.log('Fetching users from:', `/api/v1/admin/users?${params}`);
-      console.log('Using token:', localStorage.getItem('auth_token')?.substring(0, 20) + '...');
-
-      const response = await fetch(`/api/v1/admin/users?${params}`, {
+      const response = await fetch(`${listEndpoint}?${params}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
           'Content-Type': 'application/json',
         },
       });
 
-      console.log('Response status:', response.status);
-      console.log('Response headers:', response.headers.get('content-type'));
-
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('Error response:', errorText);
         
         if (response.status === 403) {
-          setError('Access denied: Super admin privileges required');
+          setError('Access denied: Admin privileges required');
         } else if (response.status === 401) {
           setError('Authentication failed: Please login again');
         } else {
@@ -152,7 +154,7 @@ const UserManagement: React.FC = () => {
         return;
       }
 
-      const totalHeader = response.headers.get('x-total-count');
+      const totalHeader = response.headers.get('x-total-count') || response.headers.get('X-Total-Count');
       if (totalHeader) {
         const parsed = parseInt(totalHeader, 10);
         if (!Number.isNaN(parsed)) setTotalCount(parsed);
@@ -164,7 +166,6 @@ const UserManagement: React.FC = () => {
       setUsers(data);
       setError(null);
     } catch (error) {
-      console.error('Load users error:', error);
       setError(error instanceof Error ? error.message : 'Failed to load users');
       setUsers([]);
     } finally {
@@ -174,26 +175,29 @@ const UserManagement: React.FC = () => {
 
   const loadStats = async () => {
     try {
-      // 获取系统总数
-      let totalUsers = 0;
-      try {
-        const sys = await systemApi.getStats();
-        totalUsers = sys.data?.total_users || 0;
-      } catch (e) {
-        // ignore
+      if (!currentUser) {
+        setStats({ total_users: 0, active_users: 0, admin_users: 0, new_users_this_month: 0 });
+        return;
       }
 
-      // 额外统计（活跃/管理员/本月新增）——基于有限列表近似
-      const usersResponse = await fetch('/api/v1/admin/users?limit=1000', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
-          'Content-Type': 'application/json',
-        },
-      });
+      // 超级管理员：系统统计 + 全量用户列表近似活跃/管理员/本月新增
+      if (currentUser.role === 'super_admin') {
+        let totalUsers = 0;
+        try {
+          const sys = await systemApi.getStats();
+          totalUsers = sys.data?.total_users || 0;
+        } catch {
+          totalUsers = 0;
+        }
 
-      if (usersResponse.ok) {
-        const contentType = usersResponse.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
+        const usersResponse = await fetch('/api/v1/admin/users?limit=1000', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!usersResponse.ok) {
           setStats({ total_users: totalUsers, active_users: 0, admin_users: 0, new_users_this_month: 0 });
           return;
         }
@@ -205,13 +209,60 @@ const UserManagement: React.FC = () => {
         thisMonth.setDate(1);
         const newUsersThisMonth = userData.filter((user) => new Date(user.created_at) >= thisMonth).length;
 
-        setStats({ total_users: totalUsers || userData.length, active_users: activeUsers, admin_users: adminUsers, new_users_this_month: newUsersThisMonth });
-      } else {
-        setStats({ total_users: totalUsers, active_users: 0, admin_users: 0, new_users_this_month: 0 });
+        setStats({
+          total_users: totalUsers || userData.length,
+          active_users: activeUsers,
+          admin_users: adminUsers,
+          new_users_this_month: newUsersThisMonth,
+        });
+        return;
       }
+
+      // 租户管理员：使用后端聚合统计
+      const resp = await fetch('/api/v1/users/stats', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!resp.ok) {
+        setStats({ total_users: 0, active_users: 0, admin_users: 0, new_users_this_month: 0 });
+        return;
+      }
+      const data = await resp.json();
+      setStats(data);
     } catch (error) {
-      console.error('Failed to load stats:', error);
       setStats({ total_users: 0, active_users: 0, admin_users: 0, new_users_this_month: 0 });
+    }
+  };
+
+  const canToggleSharedModelsForUser = (user: UserListItem) => {
+    if (!teamSettings?.allow_shared_models) return false;
+    if (isSuperAdmin && user.tenant_id !== currentUser?.tenant_id) return false;
+    return true;
+  };
+
+  const canUseSharedModels = (userId: number) => {
+    if (!teamSettings?.allow_shared_models) return false;
+    return (teamSettings.shared_model_user_ids || []).includes(userId);
+  };
+
+  const toggleSharedModels = async (user: UserListItem, enabled: boolean) => {
+    try {
+      setError(null);
+      if (!canToggleSharedModelsForUser(user)) {
+        setError('请先在“设置 → 系统设置 → 共享模型”开启共享模型开关');
+        return;
+      }
+      if (enabled) {
+        const resp = await teamApi.addSharedModelUser(user.id);
+        setTeamSettings(resp.data);
+      } else {
+        const resp = await teamApi.removeSharedModelUser(user.id);
+        setTeamSettings(resp.data);
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || 'Failed to update shared model whitelist');
     }
   };
 
@@ -302,6 +353,12 @@ const UserManagement: React.FC = () => {
         return role;
     }
   };
+
+  useEffect(() => {
+    loadUsers();
+    loadStats();
+    loadTeamSettings();
+  }, [page, rowsPerPage, searchTerm, roleFilter, statusFilter]);
 
   return (
     <Box sx={{ p: 3 }}>
@@ -515,6 +572,7 @@ const UserManagement: React.FC = () => {
               <TableCell sx={{ minWidth: 120, display: { xs: 'none', md: 'table-cell' } }}>{t('userManagement.table.tenant')}</TableCell>
               <TableCell sx={{ minWidth: 80, display: { xs: 'none', lg: 'table-cell' } }}>{t('userManagement.table.kbCount')}</TableCell>
               <TableCell sx={{ minWidth: 80, display: { xs: 'none', lg: 'table-cell' } }}>{t('userManagement.table.docCount')}</TableCell>
+              <TableCell sx={{ minWidth: 140, display: { xs: 'none', lg: 'table-cell' } }}>共享模型</TableCell>
               <TableCell sx={{ minWidth: 100, display: { xs: 'none', md: 'table-cell' } }}>{t('userManagement.table.created')}</TableCell>
               <TableCell sx={{ minWidth: 120, position: 'sticky', right: 0, backgroundColor: 'background.paper', zIndex: 1 }}>{t('userManagement.table.actions')}</TableCell>
             </TableRow>
@@ -523,7 +581,7 @@ const UserManagement: React.FC = () => {
             {loadingUsers && (
               [...Array(8)].map((_, idx) => (
                 <TableRow key={`skeleton-${idx}`}>
-                  {Array.from({ length: 10 }).map((__, cidx) => (
+                  {Array.from({ length: 11 }).map((__, cidx) => (
                     <TableCell key={cidx}>
                       <Box sx={{ height: 18, bgcolor: 'action.hover', borderRadius: 1 }} />
                     </TableCell>
@@ -580,6 +638,27 @@ const UserManagement: React.FC = () => {
                 </TableCell>
                 <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' }, textAlign: 'center' }}>{user.knowledge_bases_count}</TableCell>
                 <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' }, textAlign: 'center' }}>{user.documents_count}</TableCell>
+                <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>
+                  <Tooltip
+                    title={
+                      !teamSettings?.allow_shared_models
+                        ? '团队未开启共享模型'
+                        : (isSuperAdmin && user.tenant_id !== currentUser?.tenant_id)
+                          ? '仅支持管理当前团队成员'
+                          : '允许该用户在未配置个人模型时使用团队共享模型'
+                    }
+                    placement="top"
+                  >
+                    <span>
+                      <Switch
+                        size="small"
+                        checked={canUseSharedModels(user.id)}
+                        onChange={(_e, checked) => toggleSharedModels(user, checked)}
+                        disabled={!canToggleSharedModelsForUser(user)}
+                      />
+                    </span>
+                  </Tooltip>
+                </TableCell>
                 <TableCell sx={{ display: { xs: 'none', md: 'table-cell' } }}>
                   <Box sx={{ fontSize: '0.875rem' }}>
                     {new Date(user.created_at).toLocaleDateString(i18n.language === 'zh' ? 'zh-CN' : 'en-US')}

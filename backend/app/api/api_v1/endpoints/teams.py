@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 import uuid
 from datetime import datetime, timedelta
+from pydantic import BaseModel
 
 from app.db.database import get_db
 from app.db.models import User, Tenant, UserTenant, TeamInvitation, TeamType, MemberType, UserTenantRole
@@ -18,9 +19,40 @@ from app.schemas.team import (
     TeamCreate, TeamUpdate, TeamResponse, TeamMemberResponse,
     TeamInvitationCreate, TeamInvitationResponse, JoinTeamRequest
 )
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, get_tenant_id
 
 router = APIRouter()
+
+DEFAULT_TENANT_SETTINGS = {
+    "allow_shared_models": False,
+    "shared_model_user_ids": [],
+}
+
+
+class TeamSettingsResponse(BaseModel):
+    allow_shared_models: bool = False
+    shared_model_user_ids: List[int] = []
+
+
+class TeamSettingsUpdate(BaseModel):
+    allow_shared_models: Optional[bool] = None
+    shared_model_user_ids: Optional[List[int]] = None
+
+
+def _normalize_team_settings(settings: dict | None) -> dict:
+    s = settings if isinstance(settings, dict) else {}
+    out = {**DEFAULT_TENANT_SETTINGS, **s}
+    # sanitize
+    out["allow_shared_models"] = bool(out.get("allow_shared_models", False))
+    raw_ids = out.get("shared_model_user_ids") or []
+    ids: list[int] = []
+    for x in raw_ids:
+        try:
+            ids.append(int(x))
+        except Exception:
+            continue
+    out["shared_model_user_ids"] = sorted(set(ids))
+    return out
 
 
 @router.post("/", response_model=TeamResponse)
@@ -124,6 +156,127 @@ async def get_current_team(
         my_role=user_tenant.role if user_tenant else None,
         my_member_type=user_tenant.member_type if user_tenant else None,
         is_private=current_team.is_private
+    )
+
+
+@router.get("/current/settings", response_model=TeamSettingsResponse)
+async def get_current_team_settings(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取当前团队 settings（包括共享模型开关/白名单）。"""
+    # Any authenticated member can read its current team's settings.
+    team = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.is_active == True).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="团队不存在")
+    s = _normalize_team_settings(team.settings)
+    return TeamSettingsResponse(
+        allow_shared_models=bool(s.get("allow_shared_models", False)),
+        shared_model_user_ids=list(s.get("shared_model_user_ids") or []),
+    )
+
+
+@router.put("/current/settings", response_model=TeamSettingsResponse)
+async def update_current_team_settings(
+    payload: TeamSettingsUpdate,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """更新当前团队 settings（需要团队管理员/Owner）。"""
+    if not is_team_admin(current_user.id, tenant_id, db):
+        raise HTTPException(status_code=403, detail="无权修改团队设置")
+
+    team = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.is_active == True).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="团队不存在")
+
+    settings = _normalize_team_settings(team.settings)
+
+    if payload.allow_shared_models is not None:
+        settings["allow_shared_models"] = bool(payload.allow_shared_models)
+
+    if payload.shared_model_user_ids is not None:
+        # Only allow users in this tenant
+        wanted = {int(x) for x in payload.shared_model_user_ids if isinstance(x, int) or str(x).isdigit()}
+        if wanted:
+            existing = (
+                db.query(User.id)
+                .filter(User.tenant_id == tenant_id, User.id.in_(list(wanted)))
+                .all()
+            )
+            allowed_ids = sorted({row[0] for row in existing})
+        else:
+            allowed_ids = []
+        settings["shared_model_user_ids"] = allowed_ids
+
+    team.settings = settings
+    db.commit()
+
+    return TeamSettingsResponse(
+        allow_shared_models=bool(settings.get("allow_shared_models", False)),
+        shared_model_user_ids=list(settings.get("shared_model_user_ids") or []),
+    )
+
+
+@router.post("/current/settings/shared-model-users/{user_id}", response_model=TeamSettingsResponse)
+async def add_shared_model_user(
+    user_id: int,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """将用户加入“可使用共享模型”的白名单（需要团队管理员/Owner）。"""
+    if not is_team_admin(current_user.id, tenant_id, db):
+        raise HTTPException(status_code=403, detail="无权修改团队设置")
+
+    team = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.is_active == True).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="团队不存在")
+
+    target = db.query(User).filter(User.id == user_id, User.tenant_id == tenant_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    settings = _normalize_team_settings(team.settings)
+    ids = set(settings.get("shared_model_user_ids") or [])
+    ids.add(int(user_id))
+    settings["shared_model_user_ids"] = sorted(ids)
+    team.settings = settings
+    db.commit()
+
+    return TeamSettingsResponse(
+        allow_shared_models=bool(settings.get("allow_shared_models", False)),
+        shared_model_user_ids=list(settings.get("shared_model_user_ids") or []),
+    )
+
+
+@router.delete("/current/settings/shared-model-users/{user_id}", response_model=TeamSettingsResponse)
+async def remove_shared_model_user(
+    user_id: int,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """将用户移出“可使用共享模型”的白名单（需要团队管理员/Owner）。"""
+    if not is_team_admin(current_user.id, tenant_id, db):
+        raise HTTPException(status_code=403, detail="无权修改团队设置")
+
+    team = db.query(Tenant).filter(Tenant.id == tenant_id, Tenant.is_active == True).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="团队不存在")
+
+    settings = _normalize_team_settings(team.settings)
+    ids = set(settings.get("shared_model_user_ids") or [])
+    ids.discard(int(user_id))
+    settings["shared_model_user_ids"] = sorted(ids)
+    team.settings = settings
+    db.commit()
+
+    return TeamSettingsResponse(
+        allow_shared_models=bool(settings.get("allow_shared_models", False)),
+        shared_model_user_ids=list(settings.get("shared_model_user_ids") or []),
     )
 
 

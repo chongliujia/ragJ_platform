@@ -202,6 +202,21 @@ export const systemApi = {
 export const teamApi = {
   // 获取当前用户所属的团队
   getCurrentTeam: () => api.get('/api/v1/teams/current'),
+
+  // 获取当前团队 settings（共享模型开关/白名单）
+  getCurrentSettings: () => api.get('/api/v1/teams/current/settings'),
+
+  // 更新当前团队 settings（需要团队管理员/Owner）
+  updateCurrentSettings: (data: {
+    allow_shared_models?: boolean;
+    shared_model_user_ids?: number[];
+  }) => api.put('/api/v1/teams/current/settings', data),
+
+  // 将用户加入共享模型白名单
+  addSharedModelUser: (userId: number) => api.post(`/api/v1/teams/current/settings/shared-model-users/${userId}`),
+
+  // 将用户移出共享模型白名单
+  removeSharedModelUser: (userId: number) => api.delete(`/api/v1/teams/current/settings/shared-model-users/${userId}`),
   
   // 创建团队
   createTeam: (data: {
@@ -258,6 +273,7 @@ export const workflowApi = {
     nodes: any[]; 
     edges: any[]; 
     global_config?: any;
+    is_public?: boolean;
     // 兼容旧字段（历史代码使用 config）
     config?: any; 
   }) => api.post('/api/v1/workflows/', {
@@ -278,6 +294,7 @@ export const workflowApi = {
     nodes?: any[];
     edges?: any[];
     global_config?: any;
+    is_public?: boolean;
     // 兼容旧字段（历史代码使用 config）
     config?: any;
   }) => api.put(`/api/v1/workflows/${id}`, {
@@ -364,7 +381,12 @@ export const workflowApi = {
   },
   
   // 获取执行历史
-  getExecutionHistory: (id: string) => api.get(`/api/v1/workflows/${id}/executions`),
+  getExecutionHistory: (id: string, params?: { limit?: number; offset?: number }) =>
+    api.get(`/api/v1/workflows/${id}/executions`, { params }),
+
+  // 获取某次执行的完整详情（含步骤 input/output）
+  getExecutionDetail: (id: string, executionId: string) =>
+    api.get(`/api/v1/workflows/${id}/executions/${executionId}`),
   
   // 停止工作流执行
   stopExecution: (id: string, executionId: string) => 
@@ -386,7 +408,31 @@ export const workflowApi = {
     api.post('/api/v1/workflows/generate-code', data),
 
   // 获取工作流模板列表
-  getTemplates: () => api.get('/api/v1/workflows/templates'),
+  getTemplates: (params?: {
+    category?: string;
+    difficulty?: string;
+    sort_by?: string;
+    limit?: number;
+    offset?: number;
+    query?: string;
+    mine?: boolean;
+  }) => api.get('/api/v1/workflows/templates', { params }),
+
+  // 获取工作流模板详情
+  getTemplateDetail: (templateId: string) => api.get(`/api/v1/workflows/templates/${templateId}`),
+
+  // 创建工作流模板
+  createTemplate: (data: any) => api.post('/api/v1/workflows/templates', data),
+
+  // 更新工作流模板
+  updateTemplate: (templateId: string, data: any) => api.put(`/api/v1/workflows/templates/${templateId}`, data),
+
+  // 删除工作流模板
+  deleteTemplate: (templateId: string) => api.delete(`/api/v1/workflows/templates/${templateId}`),
+
+  // 导入示例模板（管理员）
+  seedTemplates: (overwrite?: boolean) =>
+    api.post('/api/v1/workflows/templates/seed', null, { params: overwrite ? { overwrite: true } : undefined }),
 
   // 使用模板创建工作流
   useTemplate: (templateId: string, workflowName?: string) =>

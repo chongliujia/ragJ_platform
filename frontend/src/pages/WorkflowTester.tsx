@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert, Stack, LinearProgress, useMediaQuery } from '@mui/material';
-import { ArrowBack as BackIcon, Send as SendIcon, PlayArrow as PlayIcon, Stop as StopIcon } from '@mui/icons-material';
+import { ArrowBack as BackIcon, Send as SendIcon, PlayArrow as PlayIcon, Stop as StopIcon, History as HistoryIcon } from '@mui/icons-material';
 import { workflowApi } from '../services/api';
 import { useTranslation } from 'react-i18next';
 import { alpha, useTheme } from '@mui/material/styles';
@@ -59,7 +59,13 @@ const WorkflowTester: React.FC = () => {
         },
         (result) => {
           try {
-            const out = (result && result.result && result.result.output_data) || result.output_data || result;
+            if (result == null) {
+              setMessages((msgs) =>
+                msgs.concat([{ role: 'assistant', content: '执行完成，但没有返回结果（可能被中断或后端未返回 complete payload）', timestamp: Date.now() }])
+              );
+              return;
+            }
+            const out = result?.result?.output_data ?? result?.output_data ?? result;
             const textOut = typeof out === 'string' ? out : (out?.content || out?.text || JSON.stringify(out));
             setMessages((msgs) => msgs.concat([{ role: 'assistant', content: textOut, timestamp: Date.now() }]));
           } finally {
@@ -131,7 +137,15 @@ const WorkflowTester: React.FC = () => {
                 stepLike.progress ??
                 stepLike.percentage ??
                 stepLike.completed_percent ??
-                0;
+                (() => {
+                  const prog = (p && (p.progress ?? stepLike.progress)) || null;
+                  const cur = Number(prog?.current);
+                  const total = Number(prog?.total);
+                  if (Number.isFinite(cur) && Number.isFinite(total) && total > 0) {
+                    return (cur / total) * 100;
+                  }
+                  return 0;
+                })();
               const n = Number(v);
               return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
             })()}
@@ -153,6 +167,11 @@ const WorkflowTester: React.FC = () => {
         </Typography>
         {id && <Chip label={`ID: ${id}`} size="small" />}
         <Stack direction="row" spacing={1}>
+          {id && (
+            <Button size="small" variant="outlined" startIcon={<HistoryIcon />} onClick={() => navigate(`/workflows/${id}/executions`)}>
+              历史
+            </Button>
+          )}
           <Button size="small" variant="outlined" startIcon={<StopIcon />} disabled={!running} onClick={() => { const c = cancelRef.current; if (c) { try { c(); } catch {} } }}>
             {t('workflowTester.actions.stop')}
           </Button>

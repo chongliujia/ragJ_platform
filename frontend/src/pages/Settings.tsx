@@ -14,6 +14,7 @@ import {
 } from '@mui/icons-material';
 import ModelConfigManager from '../components/ModelConfigManager';
 import UserSettings from '../components/UserSettings';
+import SharedModelSettings from '../components/SharedModelSettings';
 import { AuthManager } from '../services/authApi';
 
 interface TabPanelProps {
@@ -113,6 +114,7 @@ const Settings: React.FC = () => {
       
       {currentUser && (currentUser.role === 'tenant_admin' || currentUser.role === 'super_admin') && (
         <TabPanel value={tabValue} index={2}>
+          <SharedModelSettings />
           <ModelConfigManager scope="tenant" />
         </TabPanel>
       )}

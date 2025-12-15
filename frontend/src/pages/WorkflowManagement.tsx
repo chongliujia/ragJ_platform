@@ -30,6 +30,8 @@ import {
   Avatar,
   Fab,
   Tooltip,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -39,10 +41,11 @@ import {
   Edit as EditIcon,
   Delete as DeleteIcon,
   MoreVert as MoreIcon,
-  FileCopy as CopyIcon,
-  Visibility as ViewIcon,
-  GetApp as ExportIcon,
-} from '@mui/icons-material';
+	  FileCopy as CopyIcon,
+	  Visibility as ViewIcon,
+	  GetApp as ExportIcon,
+	  History as HistoryIcon,
+	} from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { workflowApi, agentApi } from '../services/api';
 
@@ -57,6 +60,8 @@ interface Workflow {
   status: 'draft' | 'active' | 'archived';
   executions_count: number;
   last_execution?: string;
+  is_public?: boolean;
+  owner_id?: number;
 }
 
 interface Agent {
@@ -81,6 +86,7 @@ const WorkflowManagement: React.FC = () => {
   const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null);
   const [newWorkflowName, setNewWorkflowName] = useState('');
   const [newWorkflowDescription, setNewWorkflowDescription] = useState('');
+  const [newWorkflowIsPublic, setNewWorkflowIsPublic] = useState(false);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templates, setTemplates] = useState<any[]>([]);
   const [loadingTemplates, setLoadingTemplates] = useState(false);
@@ -185,12 +191,14 @@ const WorkflowManagement: React.FC = () => {
         name: newWorkflowName,
         description: newWorkflowDescription,
         nodes: [],
-        edges: []
+        edges: [],
+        is_public: newWorkflowIsPublic,
       });
       
       setCreateDialogOpen(false);
       setNewWorkflowName('');
       setNewWorkflowDescription('');
+      setNewWorkflowIsPublic(false);
       
       // 跳转到工作流编辑器
       navigate(`/workflows/${response.data.id}/edit`);
@@ -201,6 +209,7 @@ const WorkflowManagement: React.FC = () => {
       setCreateDialogOpen(false);
       setNewWorkflowName('');
       setNewWorkflowDescription('');
+      setNewWorkflowIsPublic(false);
       navigate('/workflows/new');
     }
   };
@@ -230,6 +239,19 @@ const WorkflowManagement: React.FC = () => {
     } catch (e) {
       console.error('Use template failed:', e);
       alert('使用模板失败');
+    }
+  };
+
+  const toggleWorkflowVisibility = async (workflow: Workflow) => {
+    try {
+      const next = !workflow.is_public;
+      await workflowApi.update(workflow.id, { is_public: next });
+      setWorkflows((prev) => prev.map((w) => (w.id === workflow.id ? { ...w, is_public: next } : w)));
+      setNotice(next ? `已设为公开：${workflow.name}` : `已设为私有：${workflow.name}`);
+      setTimeout(() => setNotice(null), 2000);
+    } catch (e) {
+      setNotice('修改可见性失败');
+      setTimeout(() => setNotice(null), 2000);
     }
   };
 
@@ -331,6 +353,15 @@ const WorkflowManagement: React.FC = () => {
                   mt: 0.5
                 }}
               />
+              <Chip
+                label={workflow.is_public ? '公开' : '私有'}
+                size="small"
+                sx={{
+                  ml: 1,
+                  backgroundColor: workflow.is_public ? 'rgba(0, 212, 255, 0.15)' : 'rgba(255, 255, 255, 0.08)',
+                  color: workflow.is_public ? '#00d4ff' : 'rgba(255,255,255,0.75)',
+                }}
+              />
               {currentWorkflowId === workflow.id && (
                 <Chip label="当前" size="small" sx={{ ml: 1, backgroundColor: 'rgba(102,187,106,0.2)', color: '#66bb6a' }} />
               )}
@@ -383,22 +414,31 @@ const WorkflowManagement: React.FC = () => {
         >
           编辑
         </Button>
-        <Button
-          startIcon={<PlayIcon />}
-          size="small"
-          sx={{ color: '#4caf50' }}
-          onClick={() => {
-            // 执行工作流
-            console.log('Execute workflow:', workflow.id);
-          }}
-        >
-          执行
-        </Button>
-        <Button
-          startIcon={<ViewIcon />}
-          size="small"
-          sx={{ color: currentWorkflowId === workflow.id ? '#66bb6a' : '#00d4ff' }}
-          onClick={() => {
+	        <Button
+	          startIcon={<PlayIcon />}
+	          size="small"
+	          sx={{ color: '#4caf50' }}
+	          onClick={() => {
+	            navigate(`/workflows/${workflow.id}/test`);
+	          }}
+	        >
+	          执行
+	        </Button>
+	        <Button
+	          startIcon={<HistoryIcon />}
+	          size="small"
+	          sx={{ color: 'rgba(255, 255, 255, 0.75)' }}
+	          onClick={() => {
+	            navigate(`/workflows/${workflow.id}/executions`);
+	          }}
+	        >
+	          历史
+	        </Button>
+	        <Button
+	          startIcon={<ViewIcon />}
+	          size="small"
+	          sx={{ color: currentWorkflowId === workflow.id ? '#66bb6a' : '#00d4ff' }}
+	          onClick={() => {
             try {
               localStorage.setItem('current_workflow_id', workflow.id);
               setCurrentWorkflowId(workflow.id);
@@ -684,15 +724,24 @@ const WorkflowManagement: React.FC = () => {
             handleMenuClose();
             if (selectedItem && selectedTab === 'workflows') {
               const wf = selectedItem as Workflow;
-              try { localStorage.setItem('current_workflow_id', wf.id); } catch {}
-              setCurrentWorkflowId(wf.id);
-              navigate('/workflow-editor');
+              navigate(`/workflows/${wf.id}/edit`);
             }
           }}
         >
           <ListItemIcon><EditIcon fontSize="small" /></ListItemIcon>
           <ListItemText>编辑</ListItemText>
         </MenuItem>
+        {selectedItem && selectedTab === 'workflows' && (
+          <MenuItem
+            onClick={() => {
+              handleMenuClose();
+              void toggleWorkflowVisibility(selectedItem as Workflow);
+            }}
+          >
+            <ListItemIcon><ViewIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>{(selectedItem as Workflow).is_public ? '设为私有' : '设为公开'}</ListItemText>
+          </MenuItem>
+        )}
         <MenuItem onClick={() => { handleMenuClose(); }}>
           <ListItemIcon><CopyIcon fontSize="small" /></ListItemIcon>
           <ListItemText>复制</ListItemText>
@@ -731,6 +780,16 @@ const WorkflowManagement: React.FC = () => {
             rows={3}
             value={newWorkflowDescription}
             onChange={(e) => setNewWorkflowDescription(e.target.value)}
+          />
+          <FormControlLabel
+            sx={{ mt: 1 }}
+            control={
+              <Switch
+                checked={newWorkflowIsPublic}
+                onChange={(_e, checked) => setNewWorkflowIsPublic(checked)}
+              />
+            }
+            label={newWorkflowIsPublic ? '公开给团队' : '仅自己可见'}
           />
         </DialogContent>
         <DialogActions>

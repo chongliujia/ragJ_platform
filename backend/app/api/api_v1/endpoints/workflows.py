@@ -12,6 +12,7 @@ import asyncio
 import uuid
 from datetime import datetime
 import structlog
+from sqlalchemy.orm import Session
 
 from app.schemas.workflow import (
     WorkflowDefinition,
@@ -32,6 +33,11 @@ from app.services.workflow_performance_monitor import workflow_performance_monit
 from app.services.workflow_persistence_service import workflow_persistence_service
 from app.core.dependencies import get_tenant_id, get_current_user
 from app.db.models.user import User
+from app.db.database import get_db
+from app.db.models.workflow import (
+    WorkflowDefinition as DBWorkflowDefinition,
+    WorkflowExecution as DBWorkflowExecution,
+)
 from app.services.llm_service import llm_service
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import get_elasticsearch_service
@@ -41,6 +47,39 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
+ADMIN_ROLES = {"super_admin", "tenant_admin"}
+
+
+def _is_admin(user: User) -> bool:
+    return bool(getattr(user, "role", None) in ADMIN_ROLES)
+
+
+def _can_read_workflow(db_workflow: DBWorkflowDefinition, user: User) -> bool:
+    return _is_admin(user) or db_workflow.owner_id == user.id or bool(db_workflow.is_public)
+
+
+def _can_write_workflow(db_workflow: DBWorkflowDefinition, user: User) -> bool:
+    return _is_admin(user) or db_workflow.owner_id == user.id
+
+
+def _get_db_workflow_or_404(db: Session, tenant_id: int, workflow_id: str) -> DBWorkflowDefinition:
+    db_workflow = (
+        db.query(DBWorkflowDefinition)
+        .filter(
+            DBWorkflowDefinition.workflow_id == workflow_id,
+            DBWorkflowDefinition.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if not db_workflow:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+    return db_workflow
+
+
+def _require_admin(user: User) -> None:
+    if not _is_admin(user):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
 
 class WorkflowCreateRequest(BaseModel):
     name: str
@@ -48,6 +87,7 @@ class WorkflowCreateRequest(BaseModel):
     nodes: List[Dict[str, Any]]
     edges: List[Dict[str, Any]]
     global_config: Dict[str, Any] = {}
+    is_public: bool = False
 
 
 class WorkflowExecuteRequest(BaseModel):
@@ -63,12 +103,13 @@ class WorkflowUpdateRequest(BaseModel):
     nodes: Optional[List[Dict[str, Any]]] = None
     edges: Optional[List[Dict[str, Any]]] = None
     global_config: Optional[Dict[str, Any]] = None
+    is_public: Optional[bool] = None
 
 
 class WorkflowTemplateCreateRequest(BaseModel):
     name: str
-    description: str
-    category: str
+    description: str = ""
+    category: str = "custom"
     subcategory: Optional[str] = None
     tags: List[str] = []
     difficulty: str = "intermediate"
@@ -77,7 +118,23 @@ class WorkflowTemplateCreateRequest(BaseModel):
     requirements: List[str] = []
     nodes: List[Dict[str, Any]]
     edges: List[Dict[str, Any]]
-    is_public: bool = True
+    is_public: bool = False
+
+
+class WorkflowTemplateUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
+    tags: Optional[List[str]] = None
+    difficulty: Optional[str] = None
+    estimated_time: Optional[str] = None
+    use_cases: Optional[List[str]] = None
+    requirements: Optional[List[str]] = None
+    nodes: Optional[List[Dict[str, Any]]] = None
+    edges: Optional[List[Dict[str, Any]]] = None
+    global_config: Optional[Dict[str, Any]] = None
+    is_public: Optional[bool] = None
 
 
 class WorkflowTemplateSearchRequest(BaseModel):
@@ -94,7 +151,7 @@ class WorkflowTemplateSearchRequest(BaseModel):
 async def create_workflow(
     request: WorkflowCreateRequest,
     tenant_id: int = Depends(get_tenant_id),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     """创建工作流"""
     try:
@@ -111,7 +168,10 @@ async def create_workflow(
         
         # 使用持久化服务保存工作流
         workflow_id = workflow_persistence_service.save_workflow_definition(
-            workflow_definition, tenant_id, current_user.id
+            workflow_definition,
+            tenant_id,
+            current_user.id,
+            is_public=bool(request.is_public),
         )
         
         logger.info(
@@ -145,7 +205,12 @@ async def list_workflows(
     """获取工作流列表"""
     try:
         workflows = workflow_persistence_service.list_workflow_definitions(
-            tenant_id, limit, offset
+            tenant_id,
+            limit,
+            offset,
+            user_id=current_user.id,
+            is_admin=_is_admin(current_user),
+            include_public=True,
         )
         
         return workflows
@@ -159,28 +224,41 @@ async def list_workflows(
 async def get_workflow(
     workflow_id: str,
     tenant_id: int = Depends(get_tenant_id),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """获取工作流详情"""
     try:
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_read_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权访问该工作流")
+
         workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
         
         if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
         
-        # 获取执行历史
-        executions = workflow_persistence_service.list_workflow_executions(workflow_id, tenant_id)
+        # 获取执行历史统计（非 owner 只展示自己的执行）
+        exec_query = db.query(DBWorkflowExecution).filter(
+            DBWorkflowExecution.tenant_id == tenant_id,
+            DBWorkflowExecution.workflow_definition_id == workflow_id,
+        )
+        if not (_is_admin(current_user) or db_workflow.owner_id == current_user.id):
+            exec_query = exec_query.filter(DBWorkflowExecution.executed_by == current_user.id)
+        execution_count = exec_query.count()
         
         return {
             "id": workflow_def.id,
             "name": workflow_def.name,
             "description": workflow_def.description,
             "version": workflow_def.version,
+            "owner_id": db_workflow.owner_id,
+            "is_public": bool(db_workflow.is_public),
             "nodes": [_node_to_dict(node) for node in workflow_def.nodes],
             "edges": [_edge_to_dict(edge) for edge in workflow_def.edges],
             "global_config": workflow_def.global_config,
             "metadata": workflow_def.metadata,
-            "execution_count": len(executions)
+            "execution_count": execution_count,
         }
         
     except HTTPException:
@@ -196,9 +274,14 @@ async def update_workflow(
     request: WorkflowUpdateRequest,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """更新工作流"""
     try:
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_write_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权修改该工作流")
+
         # 获取现有定义
         existing = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
         if not existing:
@@ -212,6 +295,8 @@ async def update_workflow(
             updates["description"] = request.description
         if request.global_config is not None:
             updates["global_config"] = request.global_config
+        if request.is_public is not None:
+            updates["is_public"] = bool(request.is_public)
         if request.nodes is not None:
             nodes = await _convert_nodes(request.nodes)
             updates["nodes"] = [n.dict() for n in nodes]
@@ -262,9 +347,14 @@ async def delete_workflow(
     workflow_id: str,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """删除工作流"""
     try:
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_write_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权删除该工作流")
+
         ok = workflow_persistence_service.delete_workflow_definition(workflow_id, tenant_id)
         if not ok:
             raise HTTPException(status_code=404, detail="工作流不存在")
@@ -286,9 +376,14 @@ async def execute_workflow(
     background_tasks: BackgroundTasks,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """执行工作流"""
     try:
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_read_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权执行该工作流")
+
         workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
         if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
@@ -352,9 +447,14 @@ async def execute_workflow_stream(
     request: WorkflowExecuteRequest,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """流式执行工作流"""
     try:
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_read_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权执行该工作流")
+
         workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
         if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
@@ -498,23 +598,31 @@ async def get_execution_history(
     workflow_id: str,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     limit: int = 20,
     offset: int = 0
 ):
     """获取执行历史（分页）"""
     try:
-        # 验证工作流是否存在
-        workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
-        if not workflow_def:
-            raise HTTPException(status_code=404, detail="工作流不存在")
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_read_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权访问该工作流")
+
+        executed_by = None
+        if not (_is_admin(current_user) or db_workflow.owner_id == current_user.id):
+            executed_by = current_user.id
         
-        executions = workflow_persistence_service.list_workflow_executions(
-            workflow_id, tenant_id, limit, offset
+        executions, total = workflow_persistence_service.list_workflow_executions(
+            workflow_id,
+            tenant_id,
+            limit,
+            offset,
+            executed_by=executed_by,
         )
         
         return {
             "executions": executions,
-            "total": len(executions),  # TODO: 实现真正的总数统计
+            "total": total,
             "limit": limit,
             "offset": offset,
             "workflow_id": workflow_id
@@ -527,10 +635,73 @@ async def get_execution_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{workflow_id}/executions/{execution_id}", response_model=Dict[str, Any])
+async def get_execution_detail(
+    workflow_id: str,
+    execution_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """获取某次执行的完整详情（含步骤 input/output）。"""
+    db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+    if not _can_read_workflow(db_workflow, current_user):
+        raise HTTPException(status_code=403, detail="无权访问该工作流")
+
+    db_execution = (
+        db.query(DBWorkflowExecution)
+        .filter(
+            DBWorkflowExecution.execution_id == execution_id,
+            DBWorkflowExecution.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if not db_execution or db_execution.workflow_definition_id != workflow_id:
+        raise HTTPException(status_code=404, detail="执行不存在")
+
+    if not (_is_admin(current_user) or db_workflow.owner_id == current_user.id or db_execution.executed_by == current_user.id):
+        raise HTTPException(status_code=403, detail="无权访问该执行详情")
+
+    ctx = workflow_persistence_service.get_workflow_execution(execution_id, tenant_id)
+    if not ctx:
+        raise HTTPException(status_code=404, detail="执行详情不存在")
+
+    return {
+        "execution_id": ctx.execution_id,
+        "workflow_id": ctx.workflow_id,
+        "status": ctx.status,
+        "start_time": ctx.start_time,
+        "end_time": ctx.end_time,
+        "duration": (ctx.end_time - ctx.start_time) if (ctx.start_time and ctx.end_time) else None,
+        "input_data": ctx.input_data,
+        "output_data": ctx.output_data,
+        "error": ctx.error,
+        "metrics": ctx.metrics,
+        "steps": [
+            {
+                "step_id": s.step_id,
+                "node_id": s.node_id,
+                "node_name": s.node_name,
+                "status": s.status,
+                "start_time": s.start_time,
+                "end_time": s.end_time,
+                "duration": s.duration,
+                "input": s.input_data,
+                "output": s.output_data,
+                "error": s.error,
+                "memory": s.memory_usage,
+                "metrics": s.metrics,
+            }
+            for s in (ctx.steps or [])
+        ],
+    }
+
+
 @router.get("/executions", response_model=Dict[str, Any])
 async def get_execution_history_paginated(
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
     workflow_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 20,
@@ -538,10 +709,20 @@ async def get_execution_history_paginated(
 ):
     """获取分页的执行历史记录"""
     try:
+        if workflow_id:
+            db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+            if not _can_read_workflow(db_workflow, current_user):
+                raise HTTPException(status_code=403, detail="无权访问该工作流")
+
+        executed_by = None
+        if not _is_admin(current_user):
+            executed_by = current_user.id
+
         executions, total = workflow_persistence_service.get_execution_history_paginated(
             tenant_id=tenant_id,
             workflow_id=workflow_id,
             status=status,
+            executed_by=executed_by,
             limit=limit,
             offset=offset
         )
@@ -568,9 +749,28 @@ async def stop_execution(
     execution_id: str,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """停止工作流执行"""
     try:
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_read_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权访问该工作流")
+
+        db_execution = (
+            db.query(DBWorkflowExecution)
+            .filter(
+                DBWorkflowExecution.execution_id == execution_id,
+                DBWorkflowExecution.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not db_execution or db_execution.workflow_definition_id != workflow_id:
+            raise HTTPException(status_code=404, detail="执行不存在")
+
+        if not (_is_admin(current_user) or db_workflow.owner_id == current_user.id or db_execution.executed_by == current_user.id):
+            raise HTTPException(status_code=403, detail="无权停止该执行")
+
         success = await workflow_execution_engine.stop_execution(execution_id)
         
         if success:
@@ -592,10 +792,29 @@ async def retry_execution_step(
     node_id: str,
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """从指定节点及其下游重新执行（单步重试）。"""
     try:
         # 获取工作流与基线执行
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_read_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权访问该工作流")
+
+        db_execution = (
+            db.query(DBWorkflowExecution)
+            .filter(
+                DBWorkflowExecution.execution_id == execution_id,
+                DBWorkflowExecution.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        if not db_execution or db_execution.workflow_definition_id != workflow_id:
+            raise HTTPException(status_code=404, detail="基线执行不存在")
+
+        if not (_is_admin(current_user) or db_workflow.owner_id == current_user.id or db_execution.executed_by == current_user.id):
+            raise HTTPException(status_code=403, detail="无权重试该执行")
+
         workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
         if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
@@ -715,7 +934,7 @@ async def test_retrieve(
     use_rerank = bool(payload.get("rerank", True))
 
     # 1) 生成查询向量
-    emb = await llm_service.get_embeddings(texts=[query], tenant_id=tenant_id)
+    emb = await llm_service.get_embeddings(texts=[query], tenant_id=tenant_id, user_id=current_user.id)
     if not emb.get("success") or not emb.get("embeddings"):
         raise HTTPException(status_code=500, detail=f"Failed to embed query: {emb.get('error')}")
     query_vec = emb["embeddings"][0]
@@ -771,62 +990,6 @@ async def test_retrieve(
         out = sorted(docs, key=lambda x: x.get("score", 0), reverse=True)[:top_k]
 
     return {"results": out}
-
-
-@router.get("/workflows/templates", response_model=List[Dict[str, Any]])
-async def get_workflow_templates():
-    """获取工作流模板"""
-    try:
-        # 内置模板
-        builtin_templates = [
-            {
-                "id": "customer_service",
-                "name": "智能客服助手",
-                "description": "基于RAG的智能客服工作流，包含意图识别、知识检索和回复生成",
-                "category": "客服",
-                "tags": ["RAG", "客服", "智能对话"],
-                "node_count": 5,
-                "estimated_time": "2-5秒"
-            },
-            {
-                "id": "document_analysis",
-                "name": "智能文档分析",
-                "description": "自动解析文档，提取关键信息，生成摘要和分析报告",
-                "category": "文档处理",
-                "tags": ["文档", "分析", "摘要"],
-                "node_count": 6,
-                "estimated_time": "10-30秒"
-            },
-            {
-                "id": "translation",
-                "name": "多语言翻译助手",
-                "description": "自动检测语言并翻译为多种目标语言，支持批量处理",
-                "category": "翻译",
-                "tags": ["翻译", "多语言", "批量"],
-                "node_count": 4,
-                "estimated_time": "1-3秒"
-            }
-        ]
-        
-        # 合并用户自定义模板
-        user_templates = [
-            {
-                "id": template.id,
-                "name": template.name,
-                "description": template.description,
-                "category": template.category,
-                "tags": template.tags,
-                "node_count": len(template.workflow_definition.nodes),
-                "estimated_time": "未知"
-            }
-            for template in templates_db.values()
-        ]
-        
-        return builtin_templates + user_templates
-        
-    except Exception as e:
-        logger.error("获取模板失败", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # 辅助函数
@@ -1025,6 +1188,51 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     required=False
                 )
             ]
+        ),
+        'http_request': NodeFunctionSignature(
+            name="http_request",
+            description="发起 HTTP 请求（支持 GET/POST/PUT/PATCH）",
+            category="tool",
+            inputs=[
+                NodeInputSchema(
+                    name="data",
+                    type=DataType.OBJECT,
+                    description="输入数据对象（可选，用于透传上下文或作为请求体 data）",
+                    required=False,
+                ),
+                NodeInputSchema(
+                    name="url",
+                    type=DataType.STRING,
+                    description="请求 URL（可选，若未配置则从节点配置读取）",
+                    required=False,
+                ),
+            ],
+            outputs=[
+                NodeOutputSchema(
+                    name="status_code",
+                    type=DataType.NUMBER,
+                    description="HTTP 状态码",
+                    required=True,
+                ),
+                NodeOutputSchema(
+                    name="response_data",
+                    type=DataType.OBJECT,
+                    description="响应数据（JSON 或 text）",
+                    required=True,
+                ),
+                NodeOutputSchema(
+                    name="headers",
+                    type=DataType.OBJECT,
+                    description="响应头",
+                    required=True,
+                ),
+                NodeOutputSchema(
+                    name="success",
+                    type=DataType.BOOLEAN,
+                    description="是否成功（status_code < 400）",
+                    required=True,
+                ),
+            ],
         ),
         'classifier': NodeFunctionSignature(
             name="classify_text",
@@ -1394,9 +1602,13 @@ async def _init_templates():
 # 错误处理和恢复相关的端点
 
 @router.post("/execution/{execution_id}/retry")
-async def retry_execution(execution_id: str):
+async def retry_execution(
+    execution_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """重试执行"""
     try:
+        _require_admin(current_user)
         # 重置错误处理器
         workflow_execution_engine.reset_error_handler()
         
@@ -1408,9 +1620,13 @@ async def retry_execution(execution_id: str):
 
 
 @router.get("/execution/{execution_id}/metrics")
-async def get_execution_metrics(execution_id: str):
+async def get_execution_metrics(
+    execution_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """获取执行指标"""
     try:
+        _require_admin(current_user)
         # 获取执行指标
         execution_metrics = workflow_execution_engine.get_execution_metrics()
         
@@ -1431,10 +1647,12 @@ async def get_execution_metrics(execution_id: str):
 @router.post("/node/{node_id}/error-strategy")
 async def set_node_error_strategy(
     node_id: str,
-    strategy_config: Dict[str, Any]
+    strategy_config: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
 ):
     """设置节点错误策略"""
     try:
+        _require_admin(current_user)
         # 解析策略配置
         action = RecoveryAction(strategy_config.get("action", "retry"))
         
@@ -1484,9 +1702,10 @@ async def get_error_statistics():
 
 
 @router.post("/reset-error-handler")
-async def reset_error_handler():
+async def reset_error_handler(current_user: User = Depends(get_current_user)):
     """重置错误处理器"""
     try:
+        _require_admin(current_user)
         workflow_error_handler.clear_retry_counts()
         workflow_error_handler.reset_circuit_breakers()
         
@@ -1501,10 +1720,12 @@ async def reset_error_handler():
 
 @router.post("/configure-parallel-execution")
 async def configure_parallel_execution(
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
 ):
     """配置并行执行"""
     try:
+        _require_admin(current_user)
         enable = config.get("enable", True)
         max_workers = config.get("max_workers", 10)
         
@@ -1534,9 +1755,10 @@ async def configure_parallel_execution(
 
 
 @router.get("/parallel-statistics")
-async def get_parallel_statistics():
+async def get_parallel_statistics(current_user: User = Depends(get_current_user)):
     """获取并行执行统计"""
     try:
+        _require_admin(current_user)
         return workflow_execution_engine.get_parallel_statistics()
         
     except Exception as e:
@@ -1545,9 +1767,10 @@ async def get_parallel_statistics():
 
 
 @router.post("/reset-parallel-cache")
-async def reset_parallel_cache():
+async def reset_parallel_cache(current_user: User = Depends(get_current_user)):
     """重置并行执行缓存"""
     try:
+        _require_admin(current_user)
         workflow_execution_engine.reset_parallel_cache()
         return {"message": "并行执行缓存已重置"}
         
@@ -1560,9 +1783,15 @@ async def reset_parallel_cache():
 async def analyze_workflow_optimization(
     workflow_id: str,
     tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """分析工作流优化潜力"""
     try:
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_read_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权访问该工作流")
+
         workflow_def = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
         if not workflow_def:
             raise HTTPException(status_code=404, detail="工作流不存在")
@@ -1732,9 +1961,10 @@ def _generate_optimization_suggestions(workflow_def: WorkflowDefinition) -> List
 # 性能监控相关的端点
 
 @router.get("/performance-dashboard")
-async def get_performance_dashboard():
+async def get_performance_dashboard(current_user: User = Depends(get_current_user)):
     """获取性能仪表板"""
     try:
+        _require_admin(current_user)
         return workflow_execution_engine.get_performance_dashboard()
         
     except Exception as e:
@@ -1743,9 +1973,17 @@ async def get_performance_dashboard():
 
 
 @router.get("/workflow/{workflow_id}/performance-report")
-async def get_workflow_performance_report(workflow_id: str):
+async def get_workflow_performance_report(
+    workflow_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """获取工作流性能报告"""
     try:
+        db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+        if not _can_read_workflow(db_workflow, current_user):
+            raise HTTPException(status_code=403, detail="无权访问该工作流")
         return workflow_execution_engine.get_workflow_performance_report(workflow_id)
         
     except Exception as e:
@@ -1754,9 +1992,13 @@ async def get_workflow_performance_report(workflow_id: str):
 
 
 @router.get("/node/{node_id}/performance-report")
-async def get_node_performance_report(node_id: str):
+async def get_node_performance_report(
+    node_id: str,
+    current_user: User = Depends(get_current_user),
+):
     """获取节点性能报告"""
     try:
+        _require_admin(current_user)
         return workflow_execution_engine.get_node_performance_report(node_id)
         
     except Exception as e:
@@ -1765,9 +2007,10 @@ async def get_node_performance_report(node_id: str):
 
 
 @router.get("/alerts/summary")
-async def get_alert_summary():
+async def get_alert_summary(current_user: User = Depends(get_current_user)):
     """获取告警摘要"""
     try:
+        _require_admin(current_user)
         return workflow_execution_engine.get_alert_summary()
         
     except Exception as e:
@@ -1777,10 +2020,12 @@ async def get_alert_summary():
 
 @router.post("/configure-performance-monitoring")
 async def configure_performance_monitoring(
-    config: Dict[str, Any]
+    config: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
 ):
     """配置性能监控"""
     try:
+        _require_admin(current_user)
         enable = config.get("enable", True)
         
         # 配置性能监控
@@ -1807,10 +2052,12 @@ async def configure_performance_monitoring(
 
 @router.post("/alerts/rules")
 async def add_alert_rule(
-    rule_config: Dict[str, Any]
+    rule_config: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
 ):
     """添加告警规则"""
     try:
+        _require_admin(current_user)
         # 解析告警规则配置
         rule = AlertRule(
             name=rule_config["name"],
@@ -1957,44 +2204,32 @@ def _generate_health_recommendations(system_stats: Dict[str, Any], alerts: Dict[
 
 @router.get("/templates", response_model=List[Dict[str, Any]])
 async def get_workflow_templates(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
     category: Optional[str] = None,
     difficulty: Optional[str] = None,
     sort_by: str = "popular",
     limit: int = 20,
-    offset: int = 0
+    offset: int = 0,
+    query: Optional[str] = None,
+    mine: bool = False,
 ):
     """获取工作流模板列表"""
     try:
-        # 模拟模板数据
-        templates = _get_sample_templates()
-        
-        # 过滤
-        filtered_templates = templates
-        if category:
-            filtered_templates = [t for t in filtered_templates if t.get("category") == category or t.get("subcategory") == category]
-        if difficulty:
-            filtered_templates = [t for t in filtered_templates if t.get("difficulty") == difficulty]
-        
-        # 排序
-        if sort_by == "popular":
-            filtered_templates.sort(key=lambda x: x.get("downloads", 0), reverse=True)
-        elif sort_by == "newest":
-            filtered_templates.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        elif sort_by == "rating":
-            filtered_templates.sort(key=lambda x: x.get("rating", 0), reverse=True)
-        elif sort_by == "name":
-            filtered_templates.sort(key=lambda x: x.get("name", ""))
-        
-        # 分页
-        total = len(filtered_templates)
-        templates_page = filtered_templates[offset:offset + limit]
-        
-        return {
-            "templates": templates_page,
-            "total": total,
-            "offset": offset,
-            "limit": limit
-        }
+        author_id = current_user.id if mine else None
+        visible_to_user_id = None if _is_admin(current_user) else current_user.id
+        templates, _total = workflow_persistence_service.list_workflow_templates(
+            tenant_id=tenant_id,
+            limit=limit,
+            offset=offset,
+            category=category,
+            difficulty=difficulty,
+            sort_by=sort_by,
+            query=query,
+            author_id=author_id,
+            visible_to_user_id=visible_to_user_id,
+        )
+        return templates
         
     except Exception as e:
         logger.error("获取工作流模板失败", error=str(e), exc_info=True)
@@ -2002,15 +2237,20 @@ async def get_workflow_templates(
 
 
 @router.get("/templates/{template_id}", response_model=Dict[str, Any])
-async def get_workflow_template(template_id: str):
+async def get_workflow_template(
+    template_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """获取工作流模板详情"""
     try:
-        templates = _get_sample_templates()
-        template = next((t for t in templates if t["id"] == template_id), None)
-        
+        template = workflow_persistence_service.get_workflow_template(tenant_id=tenant_id, template_id=template_id)
         if not template:
             raise HTTPException(status_code=404, detail="模板不存在")
-        
+
+        if (not _is_admin(current_user)) and (not template.get("is_public")) and template.get("author_id") != current_user.id:
+            raise HTTPException(status_code=403, detail="无权访问该模板")
+
         return template
         
     except HTTPException:
@@ -2021,11 +2261,14 @@ async def get_workflow_template(template_id: str):
 
 
 @router.post("/templates", response_model=Dict[str, Any])
-async def create_workflow_template(request: WorkflowTemplateCreateRequest):
+async def create_workflow_template(
+    request: WorkflowTemplateCreateRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """创建工作流模板"""
     try:
-        # 创建模板ID
-        template_id = f"template_{uuid.uuid4().hex[:8]}"
+        template_id = f"tpl_{uuid.uuid4().hex[:12]}"
         
         # 验证节点和边
         nodes = await _convert_nodes(request.nodes)
@@ -2049,36 +2292,25 @@ async def create_workflow_template(request: WorkflowTemplateCreateRequest):
                 status_code=400,
                 detail=f"工作流模板验证失败: {validation.errors}"
             )
-        
-        # 创建模板数据
-        template_data = {
-            "id": template_id,
-            "name": request.name,
-            "description": request.description,
-            "category": request.category,
-            "subcategory": request.subcategory,
-            "tags": request.tags,
-            "difficulty": request.difficulty,
-            "estimated_time": request.estimated_time,
-            "use_cases": request.use_cases,
-            "requirements": request.requirements,
-            "nodes": request.nodes,
-            "edges": request.edges,
-            "is_public": request.is_public,
-            "author": "用户",
-            "version": "1.0.0",
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-            "downloads": 0,
-            "rating": 0.0,
-            "rating_count": 0,
-            "is_featured": False,
-            "is_premium": False,
-            "similar_templates": []
-        }
-        
-        # 保存到模板数据库
-        templates_db[template_id] = template_data
+
+        workflow_persistence_service.create_workflow_template(
+            tenant_id=tenant_id,
+            author_id=current_user.id,
+            template_id=template_id,
+            name=request.name,
+            description=request.description or "",
+            category=request.category or "custom",
+            subcategory=request.subcategory,
+            tags=request.tags or [],
+            difficulty=request.difficulty or "intermediate",
+            estimated_time=request.estimated_time or "",
+            use_cases=request.use_cases or [],
+            requirements=request.requirements or [],
+            nodes=request.nodes,
+            edges=request.edges,
+            is_public=bool(request.is_public),
+            global_config={},
+        )
         
         logger.info(
             "工作流模板创建成功",
@@ -2090,7 +2322,7 @@ async def create_workflow_template(request: WorkflowTemplateCreateRequest):
             "id": template_id,
             "name": request.name,
             "description": request.description,
-            "created_at": template_data["created_at"],
+            "created_at": datetime.now().isoformat(),
             "status": "created"
         }
         
@@ -2099,23 +2331,168 @@ async def create_workflow_template(request: WorkflowTemplateCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/templates/seed", response_model=Dict[str, Any])
+async def seed_workflow_templates(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    overwrite: bool = False,
+):
+    """导入示例模板到当前租户（落库）。
+
+    - 仅管理员（tenant_admin/super_admin）可操作
+    - overwrite=True 时会覆盖同 ID 模板的结构与基础信息
+    """
+    _require_admin(current_user)
+
+    samples = _get_sample_templates()
+    created: List[str] = []
+    updated: List[str] = []
+    skipped: List[str] = []
+
+    for s in samples:
+        tid = f"seed_{s.get('id')}"
+        existing = workflow_persistence_service.get_workflow_template(tenant_id=tenant_id, template_id=tid)
+        if existing and not overwrite:
+            skipped.append(tid)
+            continue
+
+        # 先验证结构（避免把坏模板落库）
+        nodes = await _convert_nodes(s.get("nodes") or [])
+        edges = await _convert_edges(s.get("edges") or [])
+        tmp = WorkflowDefinition(
+            id=tid,
+            name=s.get("name") or tid,
+            description=s.get("description") or "",
+            version="1.0.0",
+            nodes=nodes,
+            edges=edges,
+            global_config={},
+        )
+        validation = await workflow_execution_engine._validate_workflow(tmp)
+        if not validation.is_valid:
+            logger.warning("示例模板校验失败，跳过导入", template_id=tid, errors=validation.errors)
+            skipped.append(tid)
+            continue
+
+        if not existing:
+            workflow_persistence_service.create_workflow_template(
+                tenant_id=tenant_id,
+                author_id=current_user.id,
+                template_id=tid,
+                name=s.get("name") or tid,
+                description=s.get("description") or "",
+                category=s.get("category") or "custom",
+                subcategory=s.get("subcategory"),
+                tags=s.get("tags") or [],
+                difficulty=s.get("difficulty") or "intermediate",
+                estimated_time=s.get("estimated_time") or "",
+                use_cases=s.get("use_cases") or [],
+                requirements=s.get("requirements") or [],
+                nodes=s.get("nodes") or [],
+                edges=s.get("edges") or [],
+                is_public=True,
+                global_config={},
+            )
+            created.append(tid)
+        else:
+            workflow_persistence_service.update_workflow_template(
+                tenant_id=tenant_id,
+                template_id=tid,
+                patch={
+                    "name": s.get("name") or tid,
+                    "description": s.get("description") or "",
+                    "category": s.get("category") or "custom",
+                    "subcategory": s.get("subcategory"),
+                    "tags": s.get("tags") or [],
+                    "difficulty": s.get("difficulty") or "intermediate",
+                    "estimated_time": s.get("estimated_time") or "",
+                    "use_cases": s.get("use_cases") or [],
+                    "requirements": s.get("requirements") or [],
+                    "nodes": s.get("nodes") or [],
+                    "edges": s.get("edges") or [],
+                    "is_public": True,
+                },
+            )
+            updated.append(tid)
+
+    return {"created": created, "updated": updated, "skipped": skipped, "total_samples": len(samples)}
+
+
+@router.put("/templates/{template_id}", response_model=Dict[str, Any])
+async def update_workflow_template(
+    template_id: str,
+    request: WorkflowTemplateUpdateRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """更新工作流模板（作者/管理员）。"""
+    tpl = workflow_persistence_service.get_workflow_template(tenant_id=tenant_id, template_id=template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    if not (_is_admin(current_user) or tpl.get("author_id") == current_user.id):
+        raise HTTPException(status_code=403, detail="无权修改该模板")
+
+    patch = {k: v for k, v in request.dict().items() if v is not None}
+    if "nodes" in patch or "edges" in patch:
+        # 若更新结构，先做一次结构校验
+        nodes = await _convert_nodes(patch.get("nodes") or tpl.get("nodes") or [])
+        edges = await _convert_edges(patch.get("edges") or tpl.get("edges") or [])
+        tmp = WorkflowDefinition(
+            id=template_id,
+            name=patch.get("name") or tpl.get("name") or template_id,
+            description=patch.get("description") or tpl.get("description") or "",
+            version="1.0.0",
+            nodes=nodes,
+            edges=edges,
+            global_config={},
+        )
+        validation = await workflow_execution_engine._validate_workflow(tmp)
+        if not validation.is_valid:
+            raise HTTPException(status_code=400, detail=f"工作流模板验证失败: {validation.errors}")
+
+    workflow_persistence_service.update_workflow_template(tenant_id=tenant_id, template_id=template_id, patch=patch)
+    return {"id": template_id, "status": "updated"}
+
+
+@router.delete("/templates/{template_id}", response_model=Dict[str, Any])
+async def delete_workflow_template(
+    template_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
+    """删除工作流模板（作者/管理员）。"""
+    tpl = workflow_persistence_service.get_workflow_template(tenant_id=tenant_id, template_id=template_id)
+    if not tpl:
+        raise HTTPException(status_code=404, detail="模板不存在")
+    if not (_is_admin(current_user) or tpl.get("author_id") == current_user.id):
+        raise HTTPException(status_code=403, detail="无权删除该模板")
+
+    workflow_persistence_service.delete_workflow_template(tenant_id=tenant_id, template_id=template_id)
+    return {"id": template_id, "status": "deleted"}
+
+
 @router.post("/templates/{template_id}/use", response_model=Dict[str, Any])
-async def use_workflow_template(template_id: str, workflow_name: Optional[str] = None):
+async def use_workflow_template(
+    template_id: str,
+    workflow_name: Optional[str] = None,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """使用工作流模板创建工作流"""
     try:
-        # 获取模板
-        templates = _get_sample_templates()
-        template = next((t for t in templates if t["id"] == template_id), None)
-        
+        template = workflow_persistence_service.get_workflow_template(tenant_id=tenant_id, template_id=template_id)
         if not template:
             raise HTTPException(status_code=404, detail="模板不存在")
+
+        if (not _is_admin(current_user)) and (not template.get("is_public")) and template.get("author_id") != current_user.id:
+            raise HTTPException(status_code=403, detail="无权使用该模板")
         
         # 创建工作流请求
         workflow_request = WorkflowCreateRequest(
-            name=workflow_name or f"{template['name']} - 副本",
-            description=template["description"],
-            nodes=template["nodes"],
-            edges=template["edges"],
+            name=workflow_name or f"{template.get('name')} - 副本",
+            description=template.get("description"),
+            nodes=template.get("nodes") or [],
+            edges=template.get("edges") or [],
             global_config={}
         )
         
@@ -2130,13 +2507,15 @@ async def use_workflow_template(template_id: str, workflow_name: Optional[str] =
                 detail=f"工作流验证失败: {validation.errors}"
             )
         
-        # 保存工作流
-        workflows_db[workflow_definition.id] = workflow_definition
-        executions_db[workflow_definition.id] = []
-        
-        # 更新模板使用次数
-        if template_id in templates_db:
-            templates_db[template_id]["downloads"] += 1
+        # 保存工作流（落库）
+        workflow_persistence_service.save_workflow_definition(
+            workflow_definition,
+            tenant_id,
+            current_user.id,
+            is_public=False,
+        )
+
+        workflow_persistence_service.bump_template_downloads(tenant_id=tenant_id, template_id=template_id)
         
         logger.info(
             "使用模板创建工作流成功",
@@ -2161,112 +2540,71 @@ async def use_workflow_template(template_id: str, workflow_name: Optional[str] =
 
 
 @router.get("/templates/categories", response_model=List[Dict[str, Any]])
-async def get_template_categories():
+async def get_template_categories(
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """获取模板分类列表"""
     try:
-        categories = [
-            {
-                "id": "customer_service",
-                "name": "客户服务",
-                "color": "#2196f3",
-                "count": 12,
-                "subcategories": [
-                    {"id": "chatbot", "name": "聊天机器人", "color": "#2196f3", "count": 8},
-                    {"id": "ticket_system", "name": "工单系统", "color": "#2196f3", "count": 4},
-                ]
-            },
-            {
-                "id": "document_processing",
-                "name": "文档处理",
-                "color": "#4caf50",
-                "count": 15,
-                "subcategories": [
-                    {"id": "document_analysis", "name": "文档分析", "color": "#4caf50", "count": 8},
-                    {"id": "translation", "name": "翻译处理", "color": "#4caf50", "count": 7},
-                ]
-            },
-            {
-                "id": "ai_assistant",
-                "name": "AI助手",
-                "color": "#ff9800",
-                "count": 10,
-                "subcategories": [
-                    {"id": "qa_system", "name": "问答系统", "color": "#ff9800", "count": 6},
-                    {"id": "writing_assistant", "name": "写作助手", "color": "#ff9800", "count": 4},
-                ]
-            },
-            {
-                "id": "data_analysis",
-                "name": "数据分析",
-                "color": "#9c27b0",
-                "count": 8,
-                "subcategories": [
-                    {"id": "report_generation", "name": "报表生成", "color": "#9c27b0", "count": 5},
-                    {"id": "trend_analysis", "name": "趋势分析", "color": "#9c27b0", "count": 3},
-                ]
-            },
-        ]
-        
-        return categories
+        visible_to_user_id = None if _is_admin(current_user) else current_user.id
+        templates, _ = workflow_persistence_service.list_workflow_templates(
+            tenant_id=tenant_id,
+            limit=1000,
+            offset=0,
+            sort_by="popular",
+            visible_to_user_id=visible_to_user_id,
+        )
+
+        # 统计 category/subcategory
+        cat_map: Dict[str, Dict[str, Any]] = {}
+        for t in templates:
+            cat = t.get("category") or "custom"
+            sub = t.get("subcategory")
+            if cat not in cat_map:
+                cat_map[cat] = {"id": cat, "name": cat, "count": 0, "subcategories": {}}
+            cat_map[cat]["count"] += 1
+            if sub:
+                subs = cat_map[cat]["subcategories"]
+                if sub not in subs:
+                    subs[sub] = {"id": sub, "name": sub, "count": 0}
+                subs[sub]["count"] += 1
+
+        out = []
+        for cat, v in sorted(cat_map.items(), key=lambda x: x[0]):
+            subs = list(v["subcategories"].values())
+            subs.sort(key=lambda x: x["id"])
+            out.append({"id": v["id"], "name": v["name"], "count": v["count"], "subcategories": subs})
+        return out
         
     except Exception as e:
         logger.error("获取模板分类失败", error=str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/templates/search", response_model=List[Dict[str, Any]])
-async def search_workflow_templates(request: WorkflowTemplateSearchRequest):
+@router.post("/templates/search", response_model=Dict[str, Any])
+async def search_workflow_templates(
+    request: WorkflowTemplateSearchRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+):
     """搜索工作流模板"""
     try:
-        templates = _get_sample_templates()
-        
-        # 过滤
-        filtered_templates = templates
-        
-        # 文本搜索
-        if request.query:
-            query = request.query.lower()
-            filtered_templates = [
-                t for t in filtered_templates
-                if (query in t.get("name", "").lower() or
-                    query in t.get("description", "").lower() or
-                    any(query in tag.lower() for tag in t.get("tags", [])))
-            ]
-        
-        # 分类过滤
-        if request.category:
-            filtered_templates = [
-                t for t in filtered_templates
-                if t.get("category") == request.category or t.get("subcategory") == request.category
-            ]
-        
-        # 难度过滤
-        if request.difficulty:
-            filtered_templates = [t for t in filtered_templates if t.get("difficulty") == request.difficulty]
-        
-        # 标签过滤
-        if request.tags:
-            filtered_templates = [
-                t for t in filtered_templates
-                if any(tag in t.get("tags", []) for tag in request.tags)
-            ]
-        
-        # 排序
-        if request.sort_by == "popular":
-            filtered_templates.sort(key=lambda x: x.get("downloads", 0), reverse=True)
-        elif request.sort_by == "newest":
-            filtered_templates.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        elif request.sort_by == "rating":
-            filtered_templates.sort(key=lambda x: x.get("rating", 0), reverse=True)
-        elif request.sort_by == "name":
-            filtered_templates.sort(key=lambda x: x.get("name", ""))
-        
-        # 分页
-        total = len(filtered_templates)
-        templates_page = filtered_templates[request.offset:request.offset + request.limit]
+        # 保持接口形态，后端统一走 DB 查询
+        visible_to_user_id = None if _is_admin(current_user) else current_user.id
+        templates, total = workflow_persistence_service.list_workflow_templates(
+            tenant_id=tenant_id,
+            limit=request.limit,
+            offset=request.offset,
+            category=request.category,
+            difficulty=request.difficulty,
+            sort_by=request.sort_by,
+            query=request.query,
+            tags=request.tags,
+            visible_to_user_id=visible_to_user_id,
+        )
         
         return {
-            "templates": templates_page,
+            "templates": templates,
             "total": total,
             "offset": request.offset,
             "limit": request.limit,

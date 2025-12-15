@@ -1348,15 +1348,30 @@ class LLMService:
             return None
         return model_config_service.get_provider(provider, tenant_id=tenant_id)
 
-    def _resolve_allow_tenant_fallback(self, user_id: int | None, allow_tenant_fallback: bool | None) -> bool:
-        """Determine whether tenant-shared model configs can be used for this user."""
+    def _resolve_allow_tenant_fallback(
+        self,
+        user_id: int | None,
+        tenant_id: int | None,
+        allow_tenant_fallback: bool | None,
+    ) -> bool:
+        """Determine whether tenant-shared model configs can be used for this user.
+
+        Rules:
+        - system/unauthenticated (user_id=None) can use tenant configs
+        - admins can always use tenant configs
+        - normal users need tenant setting `allow_shared_models=true` AND (role permission OR allowlist)
+        """
         if user_id is None:
             return True
-        if allow_tenant_fallback is not None:
-            return bool(allow_tenant_fallback)
+        if allow_tenant_fallback is False:
+            return False
+        if tenant_id is None:
+            return False
+
         try:
             from app.db.database import SessionLocal
             from app.db.models.user import User
+            from app.db.models.tenant import Tenant
             from app.db.models.permission import Permission, RolePermission, PermissionType
 
             db = SessionLocal()
@@ -1366,6 +1381,22 @@ class LLMService:
                     return False
                 if u.role in ("super_admin", "tenant_admin"):
                     return True
+
+                t = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+                settings = (t.settings if t and isinstance(t.settings, dict) else {}) or {}
+                if not bool(settings.get("allow_shared_models", False)):
+                    return False
+
+                # Explicit allowlist (tenant setting) can grant access to specific users
+                allowlist = settings.get("shared_model_user_ids") or []
+                try:
+                    allowlist_set = {int(x) for x in allowlist if str(x).isdigit()}
+                except Exception:
+                    allowlist_set = set()
+                if user_id in allowlist_set:
+                    return True
+
+                # Role-based permission
                 perm = (
                     db.query(Permission)
                     .join(RolePermission, Permission.id == RolePermission.permission_id)
@@ -1473,7 +1504,7 @@ class LLMService:
         Returns:
             Dict with chat response
         """
-        allow_fallback = self._resolve_allow_tenant_fallback(user_id, allow_tenant_fallback)
+        allow_fallback = self._resolve_allow_tenant_fallback(user_id, tenant_id, allow_tenant_fallback)
 
         # Use configured provider and model if not specified
         if model is None:
@@ -1695,7 +1726,7 @@ class LLMService:
         Yields:
             Dict with streaming response chunks
         """
-        allow_fallback = self._resolve_allow_tenant_fallback(user_id, allow_tenant_fallback)
+        allow_fallback = self._resolve_allow_tenant_fallback(user_id, tenant_id, allow_tenant_fallback)
 
         # Use configured provider and model if not specified
         if model is None:
@@ -1922,7 +1953,7 @@ class LLMService:
         """
         Get text embeddings using configured provider.
         """
-        allow_fallback = self._resolve_allow_tenant_fallback(user_id, allow_tenant_fallback)
+        allow_fallback = self._resolve_allow_tenant_fallback(user_id, tenant_id, allow_tenant_fallback)
 
         # Use configured provider and model if not specified
         embedding_custom_params: dict[str, Any] | None = None
@@ -2277,7 +2308,7 @@ class LLMService:
         """
         Reranks documents using configured provider.
         """
-        allow_fallback = self._resolve_allow_tenant_fallback(user_id, allow_tenant_fallback)
+        allow_fallback = self._resolve_allow_tenant_fallback(user_id, tenant_id, allow_tenant_fallback)
 
         # Use configured provider and model if not specified
         if model is None:

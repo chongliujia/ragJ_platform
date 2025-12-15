@@ -17,6 +17,7 @@ import WorkflowEditor from './pages/WorkflowEditor';
 import WorkflowManagement from './pages/WorkflowManagement';
 import WorkflowTemplateLibrary from './components/WorkflowTemplateLibrary';
 import WorkflowTester from './pages/WorkflowTester';
+import WorkflowExecutions from './pages/WorkflowExecutions';
 import Test from './pages/Test';
 import UserManagement from './pages/UserManagement';
 import TenantManagement from './pages/TenantManagement';
@@ -497,6 +498,7 @@ function App() {
                       <Route path="/workflows/new" element={<WorkflowEditor />} />
                       <Route path="/workflows/:id/edit" element={<WorkflowEditor />} />
                       <Route path="/workflows/templates" element={<WorkflowTemplateLibrary />} />
+                      <Route path="/workflows/:id/executions" element={<WorkflowExecutions />} />
                       <Route path="/workflows/:id/test" element={<WorkflowTester />} />
                       <Route path="/settings" element={<Settings />} />
                       <Route 
