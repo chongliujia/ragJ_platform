@@ -6,13 +6,14 @@
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, root_validator
 import json
 import asyncio
 import uuid
 from datetime import datetime
 import structlog
 from sqlalchemy.orm import Session
+import networkx as nx
 
 from app.schemas.workflow import (
     WorkflowDefinition,
@@ -87,6 +88,7 @@ class WorkflowCreateRequest(BaseModel):
     nodes: List[Dict[str, Any]]
     edges: List[Dict[str, Any]]
     global_config: Dict[str, Any] = {}
+    metadata: Optional[Dict[str, Any]] = None
     is_public: bool = False
 
 
@@ -96,6 +98,16 @@ class WorkflowExecuteRequest(BaseModel):
     debug: bool = False
     enable_parallel: Optional[bool] = None
 
+    @root_validator(pre=True)
+    def _coerce_input_alias(cls, values: Any):
+        # 兼容历史字段 input -> input_data
+        if isinstance(values, dict):
+            if values.get("input_data") is None:
+                values["input_data"] = {}
+            if ("input_data" not in values or values.get("input_data") == {}) and isinstance(values.get("input"), dict):
+                values["input_data"] = values.get("input") or {}
+        return values
+
 
 class WorkflowUpdateRequest(BaseModel):
     name: Optional[str] = None
@@ -103,6 +115,7 @@ class WorkflowUpdateRequest(BaseModel):
     nodes: Optional[List[Dict[str, Any]]] = None
     edges: Optional[List[Dict[str, Any]]] = None
     global_config: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
     is_public: Optional[bool] = None
 
 
@@ -295,6 +308,8 @@ async def update_workflow(
             updates["description"] = request.description
         if request.global_config is not None:
             updates["global_config"] = request.global_config
+        if request.metadata is not None:
+            updates["workflow_metadata"] = request.metadata
         if request.is_public is not None:
             updates["is_public"] = bool(request.is_public)
         if request.nodes is not None:
@@ -473,43 +488,9 @@ async def execute_workflow_stream(
                     debug=request.debug,
                     enable_parallel=request.enable_parallel
                 )
-                
-                # 从步骤中提取最终输出
-                final_output = {}
-                if execution_context.steps:
-                    logger.info(f"处理执行步骤，总数: {len(execution_context.steps)}")
-                    
-                    # 从最后一个输出节点或LLM节点提取结果
-                    for step in reversed(execution_context.steps):
-                        logger.info(f"检查步骤: {step.node_name}, 输出数据: {step.output_data}")
-                        if step.output_data:
-                            # 检查输出节点
-                            if step.node_name in ['输出', 'Output', 'output'] and step.output_data.get('result'):
-                                result_data = step.output_data.get('result', {})
-                                if isinstance(result_data, dict):
-                                    final_output = result_data
-                                    logger.info(f"从输出节点提取结果: {final_output}")
-                                    break
-                            # 检查LLM节点
-                            elif 'LLM' in step.node_name and step.output_data.get('content'):
-                                final_output = step.output_data
-                                logger.info(f"从LLM节点提取结果: {final_output}")
-                                break
-                    
-                    # 如果没有找到特定的输出，使用最后一个非空输出
-                    if not final_output:
-                        logger.info("未找到特定输出，查找最后一个非空输出")
-                        for step in reversed(execution_context.steps):
-                            if step.output_data and isinstance(step.output_data, dict):
-                                if step.output_data.get('content') or step.output_data.get('result'):
-                                    final_output = step.output_data
-                                    logger.info(f"使用最后一个非空输出: {final_output}")
-                                    break
-                
-                logger.info(f"最终输出数据: {final_output}")
-                
-                # 更新执行上下文的输出数据
-                execution_context.output_data = final_output
+
+                # 输出由执行引擎统一组装（串行/并行一致）
+                final_output = execution_context.output_data or {}
                 
                 # 流式返回执行状态
                 for i, step in enumerate(execution_context.steps):
@@ -547,10 +528,7 @@ async def execute_workflow_stream(
                         "metrics": execution_context.metrics
                     }
                 }
-                
-                logger.info(f"发送完成事件: {final_result}")
                 yield f"data: {json.dumps(final_result)}\n\n"
-                logger.info("发送 [DONE] 事件")
                 yield "data: [DONE]\n\n"
                 
                 # 保存执行记录
@@ -886,6 +864,304 @@ async def validate_workflow(request: WorkflowCreateRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _datatype_to_jsonschema(dt: DataType) -> Dict[str, Any]:
+    mapping = {
+        DataType.STRING: {"type": "string"},
+        DataType.NUMBER: {"type": "number"},
+        DataType.BOOLEAN: {"type": "boolean"},
+        DataType.ARRAY: {"type": "array"},
+        DataType.OBJECT: {"type": "object"},
+        DataType.FILE: {"type": "string"},
+        DataType.IMAGE: {"type": "string"},
+        DataType.AUDIO: {"type": "string"},
+        DataType.VIDEO: {"type": "string"},
+    }
+    return mapping.get(dt, {"type": "string"})
+
+
+def _node_schema_to_property(s: Any) -> Dict[str, Any]:
+    """Convert NodeInputSchema/NodeOutputSchema to a JSONSchema-ish property."""
+    try:
+        base = _datatype_to_jsonschema(s.type)
+    except Exception:
+        base = {"type": "object"}
+    prop: Dict[str, Any] = {**base}
+    if getattr(s, "description", None):
+        prop["description"] = s.description
+    if getattr(s, "default", None) is not None:
+        prop["default"] = s.default
+    if getattr(s, "example", None) is not None:
+        prop["examples"] = [s.example]
+    validation = getattr(s, "validation", None)
+    if isinstance(validation, dict):
+        for k_in, k_out in [
+            ("min", "minimum"),
+            ("max", "maximum"),
+            ("min_length", "minLength"),
+            ("max_length", "maxLength"),
+            ("pattern", "pattern"),
+        ]:
+            if validation.get(k_in) is not None:
+                prop[k_out] = validation[k_in]
+        if isinstance(validation.get("enum"), list):
+            prop["enum"] = validation["enum"]
+    return prop
+
+
+def _resolve_target_input_alias(target_node: WorkflowNode, target_input: str) -> str:
+    """Align with engine aliasing behavior so schema inference matches runtime."""
+    names = [inp.name for inp in (target_node.function_signature.inputs or [])]
+    key = target_input or ""
+    if isinstance(key, str) and key.startswith("input"):
+        key = "input"
+    if key in names and key:
+        return key
+    # Prefer common carrier keys if present
+    priority = ["data", "prompt", "query", "text", "value", "url"]
+    for p in priority:
+        if p in names:
+            return p
+    return names[0] if names else key
+
+
+def _infer_workflow_io_schema(workflow_def: WorkflowDefinition) -> Dict[str, Any]:
+    # If user defined workflow-level inputs in metadata, prefer it (Dify-like variable panel).
+    try:
+        md = workflow_def.metadata or {}
+        ui = md.get("ui") if isinstance(md, dict) else {}
+        ui_inputs = None
+        if isinstance(ui, dict) and isinstance(ui.get("inputs"), list):
+            ui_inputs = ui.get("inputs")
+        elif isinstance(md, dict) and isinstance(md.get("inputs"), list):
+            ui_inputs = md.get("inputs")
+        if isinstance(ui_inputs, list) and ui_inputs:
+            props: Dict[str, Any] = {}
+            required: list[str] = []
+
+            def _t_to_schema(t: Any) -> Dict[str, Any]:
+                if isinstance(t, DataType):
+                    return _datatype_to_jsonschema(t)
+                if isinstance(t, str):
+                    tt = t.strip().lower()
+                    if tt in ("string", "text"):
+                        return {"type": "string"}
+                    if tt in ("number", "float", "int", "integer"):
+                        return {"type": "number"}
+                    if tt in ("boolean", "bool"):
+                        return {"type": "boolean"}
+                    if tt in ("object", "json", "dict"):
+                        return {"type": "object"}
+                    if tt in ("array", "list"):
+                        return {"type": "array"}
+                return {"type": "string"}
+
+            for item in ui_inputs:
+                if not isinstance(item, dict):
+                    continue
+                key = str(item.get("key") or item.get("name") or "").strip()
+                if not key:
+                    continue
+                schema = _t_to_schema(item.get("type"))
+                if item.get("description"):
+                    schema["description"] = str(item.get("description"))
+                if item.get("default") is not None:
+                    schema["default"] = item.get("default")
+                enum_vals = item.get("enum")
+                if isinstance(enum_vals, list) and enum_vals:
+                    schema["enum"] = enum_vals
+                props[key] = schema
+                if bool(item.get("required")):
+                    required.append(key)
+
+            # Always keep common convenience fields
+            props.setdefault(
+                "input",
+                {"type": "string", "description": "常用输入文本（Tester 会同时映射到 input/prompt/query/text）。"},
+            )
+            props.setdefault(
+                "data",
+                {"type": "object", "description": "结构化输入（JSON 对象），用于透传到 data。"},
+            )
+
+            input_schema = {
+                "type": "object",
+                "title": "WorkflowInput",
+                "properties": props,
+                "required": sorted(list(set(required))),
+                "additionalProperties": True,
+            }
+
+            # Output schema still inferred from graph
+            base = _infer_workflow_io_schema(WorkflowDefinition(
+                id=workflow_def.id,
+                name=workflow_def.name,
+                description=workflow_def.description,
+                version=workflow_def.version,
+                nodes=workflow_def.nodes,
+                edges=workflow_def.edges,
+                global_config=workflow_def.global_config,
+                metadata={},  # avoid recursion using metadata path
+            ))
+            base["input_schema"] = input_schema
+            return base
+    except Exception:
+        pass
+
+    nodes = {n.id: n for n in (workflow_def.nodes or [])}
+
+    graph = nx.DiGraph()
+    for n in workflow_def.nodes or []:
+        graph.add_node(n.id)
+    for e in workflow_def.edges or []:
+        graph.add_edge(e.source, e.target, edge=e)
+
+    provided_by_edges: Dict[str, set[str]] = {nid: set() for nid in nodes.keys()}
+    for e in workflow_def.edges or []:
+        target = nodes.get(e.target)
+        if not target:
+            continue
+        resolved = _resolve_target_input_alias(target, e.target_input)
+        provided_by_edges[e.target].add(resolved)
+
+    provided_by_overrides: Dict[str, set[str]] = {nid: set() for nid in nodes.keys()}
+    for nid, n in nodes.items():
+        cfg = n.config or {}
+        overrides = cfg.get("overrides") if isinstance(cfg, dict) else None
+        if isinstance(overrides, dict):
+            provided_by_overrides[nid] = {str(k) for k in overrides.keys() if k}
+
+    # Compute workflow-level input candidates (best-effort)
+    required_props: Dict[str, Dict[str, Any]] = {}
+    required_names: set[str] = set()
+
+    for nid, n in nodes.items():
+        sig_inputs = list(getattr(n.function_signature, "inputs", []) or [])
+        missing_required = []
+        for inp in sig_inputs:
+            if not getattr(inp, "required", False):
+                continue
+            name = inp.name
+            if not name:
+                continue
+            if name in provided_by_overrides.get(nid, set()):
+                continue
+            provided = provided_by_edges.get(nid, set())
+            # Heuristic: if 'data' is provided, treat prompt/query/text as satisfied (they can live inside data)
+            if name in ("prompt", "query", "text") and "data" in provided:
+                continue
+            if name in provided:
+                continue
+            missing_required.append(inp)
+
+        # For nodes without predecessors, required inputs are pulled from workflow input_data
+        # For others, missing required likely indicates the workflow expects global input too.
+        for inp in missing_required:
+            required_names.add(inp.name)
+            required_props[inp.name] = _node_schema_to_property(inp)
+
+    # Normalize common text-like required fields into a single `input` entry (Dify-like)
+    text_like = {"prompt", "query", "text", "input"}
+    if required_names & text_like:
+        for k in list(required_props.keys()):
+            if k in text_like:
+                required_props.pop(k, None)
+        required_names -= text_like
+        required_names.add("input")
+        required_props.setdefault(
+            "input",
+            {
+                "type": "string",
+                "description": "常用输入文本（Tester 会同时映射到 input/prompt/query/text）。",
+            },
+        )
+
+    # Always offer common inputs for convenience (non-required unless inferred)
+    props: Dict[str, Any] = {
+        "input": {
+            "type": "string",
+            "description": "常用输入文本（Tester 会同时映射到 input/prompt/query/text）。",
+        },
+        "text": {
+            "type": "string",
+            "description": "兼容字段：text（若提供也会映射到 prompt/query/input）。",
+        },
+        "data": {
+            "type": "object",
+            "description": "结构化输入（JSON 对象），用于透传到 data。",
+        },
+    }
+    props.update(required_props)
+
+    input_required = sorted(list(required_names)) if required_names else []
+    input_schema = {
+        "type": "object",
+        "title": "WorkflowInput",
+        "properties": props,
+        "required": input_required,
+        "additionalProperties": True,
+    }
+
+    # Output schema: prefer output nodes; otherwise last node outputs
+    output_nodes = [n for n in (workflow_def.nodes or []) if n.type == "output"]
+    output_props: Dict[str, Any] = {}
+    output_required: list[str] = []
+
+    if output_nodes:
+        for out_node in output_nodes:
+            for o in list(getattr(out_node.function_signature, "outputs", []) or []):
+                output_props[o.name] = _node_schema_to_property(o)
+                if getattr(o, "required", False):
+                    output_required.append(o.name)
+    else:
+        last_node: Optional[WorkflowNode] = None
+        try:
+            order = list(nx.topological_sort(graph))
+            if order:
+                last_node = nodes.get(order[-1])
+        except Exception:
+            last_node = None
+        if not last_node and workflow_def.nodes:
+            last_node = workflow_def.nodes[-1]
+        if last_node:
+            for o in list(getattr(last_node.function_signature, "outputs", []) or []):
+                output_props[o.name] = _node_schema_to_property(o)
+                if getattr(o, "required", False):
+                    output_required.append(o.name)
+
+    output_schema = {
+        "type": "object",
+        "title": "WorkflowOutput",
+        "properties": output_props or {"output_data": {"type": "object"}},
+        "required": sorted(list(set(output_required))),
+        "additionalProperties": True,
+    }
+
+    return {
+        "workflow_id": workflow_def.id,
+        "input_schema": input_schema,
+        "output_schema": output_schema,
+    }
+
+
+@router.get("/{workflow_id}/io-schema", response_model=Dict[str, Any])
+async def get_workflow_io_schema(
+    workflow_id: str,
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """推导工作流级入参/出参 schema（用于前端 Tester 自动生成表单）。"""
+    db_workflow = _get_db_workflow_or_404(db, tenant_id, workflow_id)
+    if not _can_read_workflow(db_workflow, current_user):
+        raise HTTPException(status_code=403, detail="无权访问该工作流")
+
+    wf = workflow_persistence_service.get_workflow_definition(workflow_id, tenant_id)
+    if not wf:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+
+    return _infer_workflow_io_schema(wf)
+
+
 @router.post("/generate-code", response_model=Dict[str, Any])
 async def generate_workflow_code(request: WorkflowCreateRequest):
     """生成工作流代码"""
@@ -1012,7 +1288,8 @@ async def _convert_to_workflow_definition(request: WorkflowCreateRequest) -> Wor
         description=request.description,
         nodes=nodes,
         edges=edges,
-        global_config=request.global_config
+        global_config=request.global_config,
+        metadata=request.metadata or {},
     )
 
 
@@ -1332,6 +1609,12 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     type=DataType.OBJECT,
                     description="输入数据",
                     required=True
+                ),
+                NodeOutputSchema(
+                    name="input",
+                    type=DataType.STRING,
+                    description="常用字段：input（可选；用于作为 LLM prompt 的默认来源）",
+                    required=False
                 ),
                 NodeOutputSchema(
                     name="prompt",

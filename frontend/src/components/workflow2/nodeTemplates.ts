@@ -26,6 +26,7 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
       temperature: 0.7,
       max_tokens: 1000,
       system_prompt: '',
+      prompt_key: '',
     },
   },
   {
@@ -86,6 +87,7 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
     defaultConfig: {
       format: 'json',
       template: '',
+      select_path: '',
     },
   },
 ];

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert, Stack, LinearProgress, useMediaQuery } from '@mui/material';
+import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert, Stack, LinearProgress, useMediaQuery, MenuItem, Switch, FormControlLabel } from '@mui/material';
 import { ArrowBack as BackIcon, Send as SendIcon, PlayArrow as PlayIcon, Stop as StopIcon, History as HistoryIcon } from '@mui/icons-material';
 import { workflowApi } from '../services/api';
 import { useTranslation } from 'react-i18next';
@@ -25,26 +25,141 @@ const WorkflowTester: React.FC = () => {
   const listRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<null | (() => void)>(null);
   const [progress, setProgress] = useState<any[]>([]);
+  const [ioSchema, setIoSchema] = useState<any | null>(null);
+  const [schemaLoading, setSchemaLoading] = useState(false);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
+  const [paramValues, setParamValues] = useState<Record<string, any>>({ data: '{}' });
+  const [paramErrors, setParamErrors] = useState<string[]>([]);
+  const gotResultRef = useRef(false);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
 
-  const runOnce = async (text: string) => {
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    setSchemaLoading(true);
+    setSchemaError(null);
+    workflowApi
+      .getIOSchema(id)
+      .then((res: any) => {
+        if (!alive) return;
+        const data = res?.data || null;
+        setIoSchema(data);
+
+        const props = (data?.input_schema?.properties || {}) as Record<string, any>;
+        const next: Record<string, any> = {};
+        for (const [k, v] of Object.entries(props)) {
+          if (k === 'text' || k === 'input') continue; // reuse bottom input bar
+          const typ = String((v as any)?.type || 'string');
+          if ((v as any)?.default !== undefined) {
+            next[k] = typ === 'object' || typ === 'array' ? JSON.stringify((v as any).default, null, 2) : (v as any).default;
+          } else if (k === 'data') {
+            next[k] = '{}';
+          } else if (typ === 'boolean') {
+            next[k] = false;
+          } else {
+            next[k] = '';
+          }
+        }
+        setParamValues((prev) => ({ ...next, data: next.data ?? prev.data ?? '{}' }));
+      })
+      .catch((e: any) => {
+        if (!alive) return;
+        setSchemaError(e?.response?.data?.detail || e?.message || '加载 schema 失败');
+        setIoSchema(null);
+      })
+      .finally(() => {
+        if (!alive) return;
+        setSchemaLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [id]);
+
+  const buildInputData = () => {
+    const props = (ioSchema?.input_schema?.properties || {}) as Record<string, any>;
+    const required = (ioSchema?.input_schema?.required || []) as string[];
+    const errors: string[] = [];
+
+    const inputData: any = {};
+    const text = input.trim();
+    const hasOtherParams = (() => {
+      for (const [k, v] of Object.entries(paramValues || {})) {
+        if (k === 'text' || k === 'input') continue;
+        if (v === undefined || v === null) continue;
+        const s = typeof v === 'string' ? v.trim() : v;
+        if (k === 'data' && typeof s === 'string' && (s === '' || s === '{}' || s === 'null')) continue;
+        if (typeof s === 'string' && s === '') continue;
+        if (typeof s === 'boolean' && s === false) continue;
+        return true;
+      }
+      return false;
+    })();
+    if ((required.includes('text') || required.includes('input')) && !text) {
+      errors.push(`缺少必填参数：${required.includes('input') ? 'input' : 'text'}`);
+    }
+    if (!text && !hasOtherParams) {
+      errors.push('请输入 input 或填写参数后再执行');
+    }
+    if (text) {
+      inputData.input = text;
+      inputData.text = text;
+      inputData.prompt = text;
+      inputData.query = text;
+    }
+
+    for (const key of Object.keys(props)) {
+      if (key === 'text' || key === 'input') continue;
+      const schemaProp: any = props[key] || {};
+      const typ = String(schemaProp?.type || 'string');
+      const raw = paramValues[key];
+
+      const isMissing =
+        raw === undefined || raw === null || raw === '' || (typ === 'object' && String(raw || '').trim() === '') || (typ === 'array' && String(raw || '').trim() === '');
+      if (required.includes(key) && isMissing) errors.push(`缺少必填参数：${key}`);
+
+      if (isMissing) continue;
+
+      if (typ === 'number') {
+        const n = Number(raw);
+        if (!Number.isFinite(n)) errors.push(`参数 ${key} 需要是数字`);
+        else inputData[key] = n;
+      } else if (typ === 'boolean') {
+        inputData[key] = !!raw;
+      } else if (typ === 'object' || typ === 'array') {
+        try {
+          inputData[key] = JSON.parse(String(raw));
+        } catch {
+          errors.push(`参数 ${key} 不是合法 JSON`);
+        }
+      } else {
+        inputData[key] = raw;
+      }
+    }
+
+    setParamErrors(errors);
+    if (errors.length) return { ok: false as const, inputData: null as any };
+    return { ok: true as const, inputData };
+  };
+
+  const runOnce = async () => {
     if (!id) return;
     setRunning(true);
     setError(null);
     setProgress([]);
+    setParamErrors([]);
+    gotResultRef.current = false;
 
-    // 将用户输入映射到常见字段，便于多种工作流直接复用
-    const payload = {
-      input_data: {
-        prompt: text,
-        query: text,
-        text
-      },
-      debug: false
-    };
+    const built = buildInputData();
+    if (!built.ok) {
+      setRunning(false);
+      return;
+    }
+
+    const payload = { input_data: built.inputData, debug: false };
 
     try {
       const { cancel, promise } = workflowApi.executeStreamCancelable(
@@ -60,13 +175,24 @@ const WorkflowTester: React.FC = () => {
         (result) => {
           try {
             if (result == null) {
-              setMessages((msgs) =>
-                msgs.concat([{ role: 'assistant', content: '执行完成，但没有返回结果（可能被中断或后端未返回 complete payload）', timestamp: Date.now() }])
-              );
+              if (!gotResultRef.current) {
+                setMessages((msgs) =>
+                  msgs.concat([{ role: 'assistant', content: '执行完成，但没有返回结果（可能被中断或后端未返回 complete payload）', timestamp: Date.now() }])
+                );
+              }
               return;
             }
-            const out = result?.result?.output_data ?? result?.output_data ?? result;
-            const textOut = typeof out === 'string' ? out : (out?.content || out?.text || JSON.stringify(out));
+            gotResultRef.current = true;
+            let out = result?.result?.output_data ?? result?.output_data ?? result;
+            // Unwrap common {result: ...} shape
+            if (out && typeof out === 'object' && 'result' in out && Object.keys(out).length <= 2) {
+              const r: any = (out as any).result;
+              if (r !== undefined) out = r;
+            }
+            const textOut =
+              typeof out === 'string'
+                ? out
+                : (out?.content || out?.text || out?.message || out?.answer || JSON.stringify(out));
             setMessages((msgs) => msgs.concat([{ role: 'assistant', content: textOut, timestamp: Date.now() }]));
           } finally {
             setRunning(false);
@@ -84,10 +210,12 @@ const WorkflowTester: React.FC = () => {
 
   const onSend = async () => {
     const text = input.trim();
-    if (!text || running) return;
-    setMessages((msgs) => msgs.concat([{ role: 'user', content: text, timestamp: Date.now() }]));
-    setInput('');
-    await runOnce(text);
+    if (running) return;
+    if (text) {
+      setMessages((msgs) => msgs.concat([{ role: 'user', content: text, timestamp: Date.now() }]));
+      setInput('');
+    }
+    await runOnce();
   };
 
   const ProgressPanel = (
@@ -153,6 +281,112 @@ const WorkflowTester: React.FC = () => {
           />
         </Box>
       ))}
+    </Paper>
+  );
+
+  const ParameterPanel = (
+    <Paper variant="outlined" sx={{ p: 1.5 }}>
+      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+        参数
+      </Typography>
+      {schemaLoading && (
+        <Typography variant="caption" color="text.secondary">
+          加载 schema...
+        </Typography>
+      )}
+      {schemaError && (
+        <Alert severity="warning" sx={{ mb: 1 }}>
+          {schemaError}
+        </Alert>
+      )}
+      {paramErrors.length > 0 && (
+        <Alert severity="error" sx={{ mb: 1 }}>
+          {paramErrors.join('；')}
+        </Alert>
+      )}
+      {(() => {
+        const props = (ioSchema?.input_schema?.properties || {}) as Record<string, any>;
+        const required = (ioSchema?.input_schema?.required || []) as string[];
+        const keys = Object.keys(props).filter((k) => k !== 'text' && k !== 'input');
+        if (!keys.length) {
+          return (
+            <Typography variant="caption" color="text.secondary">
+              未推导出结构化参数：可直接在底部输入文本执行。
+            </Typography>
+          );
+        }
+        return (
+          <Stack spacing={1}>
+            {keys.map((k) => {
+              const p: any = props[k] || {};
+              const typ = String(p?.type || 'string');
+              const isRequired = required.includes(k);
+              const label = `${k}${isRequired ? '（必填）' : ''}`;
+              const helper = String(p?.description || '');
+              const enumVals: any[] | null = Array.isArray(p?.enum) ? p.enum : null;
+
+              if (typ === 'boolean') {
+                return (
+                  <FormControlLabel
+                    key={k}
+                    control={
+                      <Switch
+                        checked={!!paramValues[k]}
+                        onChange={(e) => setParamValues((prev) => ({ ...prev, [k]: e.target.checked }))}
+                      />
+                    }
+                    label={label}
+                  />
+                );
+              }
+
+              if (enumVals) {
+                return (
+                  <TextField
+                    key={k}
+                    select
+                    fullWidth
+                    size="small"
+                    label={label}
+                    value={paramValues[k] ?? ''}
+                    onChange={(e) => setParamValues((prev) => ({ ...prev, [k]: e.target.value }))}
+                    helperText={helper || '请选择'}
+                  >
+                    {enumVals.map((v, idx) => (
+                      <MenuItem key={idx} value={v}>
+                        {String(v)}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                );
+              }
+
+              const isJson = typ === 'object' || typ === 'array';
+              return (
+                <TextField
+                  key={k}
+                  fullWidth
+                  size="small"
+                  label={label}
+                  value={paramValues[k] ?? ''}
+                  onChange={(e) => setParamValues((prev) => ({ ...prev, [k]: e.target.value }))}
+                  helperText={helper || (isJson ? '输入 JSON' : '')}
+                  multiline={isJson}
+                  minRows={isJson ? 4 : undefined}
+                  inputProps={typ === 'number' ? { inputMode: 'numeric' } : undefined}
+                />
+              );
+            })}
+          </Stack>
+        );
+      })()}
+      {ioSchema?.output_schema?.properties && (
+        <Box sx={{ mt: 1 }}>
+          <Typography variant="caption" color="text.secondary">
+            预期输出字段：{Object.keys(ioSchema.output_schema.properties || {}).join(', ') || '（未知）'}
+          </Typography>
+        </Box>
+      )}
     </Paper>
   );
 
@@ -223,12 +457,16 @@ const WorkflowTester: React.FC = () => {
           )}
           {!isMdUp && (
             <Box sx={{ mt: 2 }}>
+              {ParameterPanel}
+              <Box sx={{ mt: 2 }} />
               {ProgressPanel}
             </Box>
           )}
         </Box>
         {isMdUp && (
           <Box sx={{ p: 2, pr: 0, overflow: 'auto' }}>
+            {ParameterPanel}
+            <Box sx={{ mt: 2 }} />
             {ProgressPanel}
           </Box>
         )}

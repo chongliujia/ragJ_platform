@@ -30,7 +30,7 @@ type InputEl = HTMLInputElement | HTMLTextAreaElement;
 function outputsForKind(kind: WorkflowNodeData['kind'] | undefined): string[] {
   switch (kind) {
     case 'input':
-      return ['data', 'prompt', 'query', 'text'];
+      return ['data', 'input', 'prompt', 'query', 'text'];
     case 'llm':
       return ['content', 'metadata'];
     case 'rag_retriever':
@@ -196,7 +196,7 @@ export default function NodeInspector({
 
   const globalTemplateHints = useMemo(() => {
     // Global/runtime context (WorkflowTester provides prompt/query/text; backend supports {{context.*}})
-    return ['input.prompt', 'input.query', 'input.text', 'context.tenant_id', 'context.user_id'];
+    return ['input.input', 'input.prompt', 'input.query', 'input.text', 'context.tenant_id', 'context.user_id'];
   }, []);
 
   const templateSuggestions = useMemo(() => {
@@ -242,6 +242,42 @@ export default function NodeInspector({
     return Array.from(out);
   }, [globalTemplateHints, incomingMappings, variableHints]);
 
+  const outputSelectOptions = useMemo(() => {
+    if (kind !== 'output') return [] as SchemaOption[];
+    const seen = new Set<string>();
+    const items: SchemaOption[] = [];
+
+    const add = (value: string, label?: string) => {
+      if (seen.has(value)) return;
+      seen.add(value);
+      items.push({ value, label: label ?? value });
+    };
+
+    add('', '自动（默认输出 data/input）');
+    add('data', 'data（整体）');
+    add('input', 'input（整体）');
+
+    for (const m of incomingMappings) {
+      const base = m.targetKey;
+      if (!base) continue;
+      add(base, `${base} ← ${m.srcName}.${m.sourceOutput}`);
+      const outs = outputsForKind(m.srcKind);
+      const hintOutputs = Array.from(new Set([m.sourceOutput, ...outs])).filter(Boolean);
+      for (const o of hintOutputs) {
+        add(`${base}.${o}`, `${base}.${o}（当 ${base} 为对象时）`);
+      }
+    }
+
+    const preferred = ['content', 'result', 'response_data', 'documents', 'stdout'];
+    items.sort((a, b) => {
+      const ap = preferred.some((p) => a.value === p || a.value.endsWith(`.${p}`)) ? -1 : 0;
+      const bp = preferred.some((p) => b.value === p || b.value.endsWith(`.${p}`)) ? -1 : 0;
+      if (ap !== bp) return ap - bp;
+      return a.value.localeCompare(b.value);
+    });
+    return items;
+  }, [incomingMappings, kind]);
+
   const referenceWarnings = useMemo(() => {
     if (!node) return [];
     const texts: string[] = [];
@@ -268,7 +304,7 @@ export default function NodeInspector({
 
     const hintSet = new Set(variableHints);
     // Backends can resolve these from global input even without edges; avoid noisy warnings.
-    for (const k of ['prompt', 'query', 'text', 'data', 'tenant_id', 'user_id']) hintSet.add(k);
+    for (const k of ['input', 'prompt', 'query', 'text', 'data', 'tenant_id', 'user_id']) hintSet.add(k);
     const warnings: string[] = [];
     for (const expr of tokens) {
       if (expr.startsWith('input.') || expr.startsWith('context.') || expr.startsWith('data.')) continue;
@@ -329,6 +365,8 @@ export default function NodeInspector({
       const f = String(cfg.format || 'json');
       if (!['json', 'text', 'markdown'].includes(f)) errors.push('format 不支持');
       const tpl = String(cfg.template || '');
+      const sel = String(cfg.select_path || cfg.select || '');
+      if (sel && tpl) warnings.push('已设置 select_path，但 template 非空时会覆盖 select_path');
       if (tpl && !tpl.includes('{{') && !tpl.includes('{')) warnings.push('未配置模板：将直接输出 input_data');
     }
 
@@ -636,10 +674,25 @@ export default function NodeInspector({
   const renderField = (f: NodeFieldSchema) => {
     const val = (cfg as any)?.[f.key];
     if (f.type === 'select') {
-      const opts: SchemaOption[] =
+      let opts: SchemaOption[] =
         typeof f.options === 'function'
           ? f.options({ knowledgeBases, availableChatModels })
           : (f.options || []);
+
+      // Dify-like: LLM prompt_key can pick from incoming mapped keys
+      if (kind === 'llm' && f.key === 'prompt_key') {
+        const dynamic = Array.from(new Set(variableHints.filter((k) => ['input', 'prompt', 'query', 'text'].includes(k))));
+        const dynOpts = dynamic.map((k) => ({ value: k, label: `来自连线：${k}` }));
+        // De-dup by value, keep dynamic earlier
+        const seen = new Set<string>();
+        const merged: SchemaOption[] = [];
+        for (const o of [...dynOpts, ...opts]) {
+          if (seen.has(o.value)) continue;
+          seen.add(o.value);
+          merged.push(o);
+        }
+        opts = merged;
+      }
       return (
         <FormControl key={f.key} fullWidth size="small">
           <InputLabel>{f.label}</InputLabel>
@@ -1020,9 +1073,28 @@ export default function NodeInspector({
                 )}
 
                 {kind === 'output' && g === '模板' && (
-                  <Typography variant="caption" color="text.secondary">
-                    输出模板支持 <code>{'{{变量}}'}</code>（推荐）或 Python format <code>{'{content}'}</code>（兼容旧用法，模板不包含 <code>{'{{'}</code> 时启用）。
-                  </Typography>
+                  <>
+                    <FormControl size="small" fullWidth>
+                      <InputLabel>select_path（可选）</InputLabel>
+                      <Select
+                        label="select_path（可选）"
+                        value={String(cfg.select_path || '')}
+                        onChange={(e) => updateConfig('select_path', e.target.value)}
+                      >
+                        {outputSelectOptions.map((opt) => (
+                          <MenuItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <Typography variant="caption" color="text.secondary">
+                      优先级：若填写了 template，则以 template 为准；否则按 <code>select_path</code> 从输入里取值（例如 <code>data.content</code>）。
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      输出模板支持 <code>{'{{变量}}'}</code>（推荐）或 Python format <code>{'{content}'}</code>（兼容旧用法，模板不包含 <code>{'{{'}</code> 时启用）。
+                    </Typography>
+                  </>
                 )}
               </Box>
             )}

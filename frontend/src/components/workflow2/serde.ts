@@ -32,6 +32,9 @@ export function toReactFlowEdges(edges: BackendWorkflowEdge[]): Edge<WorkflowEdg
     source: e.source,
     target: e.target,
     type: 'default',
+    // Keep handles in sync so edges attach to the right ports after reload
+    sourceHandle: e.source_output || 'output',
+    targetHandle: e.target_input || 'input',
     data: {
       source_output: e.source_output,
       target_input: e.target_input,
@@ -58,10 +61,9 @@ export function toBackendEdges(edges: Edge<WorkflowEdgeData>[]): BackendWorkflow
     id: e.id,
     source: e.source,
     target: e.target,
-    source_output: e.data?.source_output || 'output',
-    target_input: e.data?.target_input || 'input',
+    source_output: e.sourceHandle || e.data?.source_output || 'output',
+    target_input: e.targetHandle || e.data?.target_input || 'input',
     condition: e.data?.condition,
     transform: e.data?.transform,
   }));
 }
-

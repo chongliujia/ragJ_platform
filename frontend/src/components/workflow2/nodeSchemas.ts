@@ -61,6 +61,20 @@ export const NODE_SCHEMAS: Record<WorkflowNodeKind, NodeFieldSchema[]> = {
       minRows: 4,
       helperText: '支持模板：{{变量}}（运行时按 data/input/context 解析）。',
     },
+    {
+      group: '提示词',
+      key: 'prompt_key',
+      label: 'prompt_key（可选）',
+      type: 'select',
+      options: [
+        { value: '', label: '自动（优先 prompt，其次 input/text/query）' },
+        { value: 'prompt', label: 'prompt' },
+        { value: 'input', label: 'input（推荐，Dify 风格）' },
+        { value: 'text', label: 'text' },
+        { value: 'query', label: 'query' },
+        { value: 'message', label: 'message' },
+      ],
+    },
   ],
   rag_retriever: [
     {

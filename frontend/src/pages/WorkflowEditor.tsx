@@ -98,13 +98,17 @@ function defaultGraph(): { nodes: Node<WorkflowNodeData>[]; edges: Edge<Workflow
         source: inputId,
         target: llmId,
         type: 'default',
-        data: { source_output: 'prompt', target_input: 'prompt' },
+        sourceHandle: 'input',
+        targetHandle: 'input',
+        data: { source_output: 'input', target_input: 'input' },
       },
       {
         id: genId('e'),
         source: llmId,
         target: outputId,
         type: 'default',
+        sourceHandle: 'content',
+        targetHandle: 'data',
         data: { source_output: 'content', target_input: 'data' },
       },
     ],
@@ -141,6 +145,47 @@ const WorkflowEditor: React.FC = () => {
     () => edges.find((e) => e.id === selectedEdgeId) || null,
     [edges, selectedEdgeId]
   );
+
+  const inputsForKind = useCallback((kind?: WorkflowNodeKind): string[] => {
+    switch (kind) {
+      case 'llm':
+        return ['data', 'prompt', 'input'];
+      case 'rag_retriever':
+        return ['data', 'query', 'input'];
+      case 'http_request':
+        return ['data', 'url'];
+      case 'condition':
+        return ['data', 'value', 'input'];
+      case 'code_executor':
+        return ['data', 'input'];
+      case 'output':
+        return ['data', 'input'];
+      case 'input':
+      default:
+        return [];
+    }
+  }, []);
+
+  const outputsForKind = useCallback((kind?: WorkflowNodeKind): string[] => {
+    switch (kind) {
+      case 'input':
+        return ['data', 'input', 'prompt', 'query', 'text'];
+      case 'llm':
+        return ['content', 'metadata'];
+      case 'rag_retriever':
+        return ['documents', 'query', 'total_results'];
+      case 'http_request':
+        return ['response_data', 'status_code', 'success', 'headers'];
+      case 'condition':
+        return ['condition_result', 'data'];
+      case 'code_executor':
+        return ['result', 'stdout'];
+      case 'output':
+        return ['result'];
+      default:
+        return ['data'];
+    }
+  }, []);
 
   const [knowledgeBases, setKnowledgeBases] = useState<string[]>([]);
   const [availableChatModels, setAvailableChatModels] = useState<string[]>([]);
@@ -692,11 +737,26 @@ const WorkflowEditor: React.FC = () => {
                   ? nodes.find((n) => n.id === selectedEdge.target)?.data?.name
                   : undefined
               }
+              sourceOutputs={(() => {
+                const src = selectedEdge ? nodes.find((n) => n.id === selectedEdge.source) : null;
+                return outputsForKind(src?.data?.kind);
+              })()}
+              targetInputs={(() => {
+                const tgt = selectedEdge ? nodes.find((n) => n.id === selectedEdge.target) : null;
+                return inputsForKind(tgt?.data?.kind);
+              })()}
               onChange={(patch) => {
                 if (!selectedEdgeId) return;
                 setEdges((es) =>
                   es.map((e) =>
-                    e.id === selectedEdgeId ? { ...e, data: { ...(e.data || {}), ...patch } } : e
+                    e.id === selectedEdgeId
+                      ? {
+                          ...e,
+                          sourceHandle: (patch as any)?.source_output ?? e.sourceHandle,
+                          targetHandle: (patch as any)?.target_input ?? e.targetHandle,
+                          data: { ...(e.data || {}), ...patch },
+                        }
+                      : e
                   )
                 );
                 setValidation(null);

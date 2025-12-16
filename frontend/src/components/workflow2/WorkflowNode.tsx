@@ -31,7 +31,7 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
   const inputs = useMemo(() => {
     switch (data.kind) {
       case 'llm':
-        return ['data', 'prompt'];
+        return ['data', 'prompt', 'input'];
       case 'rag_retriever':
         return ['data', 'query'];
       case 'http_request':
@@ -51,7 +51,7 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
   const outputs = useMemo(() => {
     switch (data.kind) {
       case 'input':
-        return ['data', 'prompt', 'query', 'text'];
+        return ['data', 'input', 'prompt', 'query', 'text'];
       case 'llm':
         return ['content', 'metadata'];
       case 'rag_retriever':

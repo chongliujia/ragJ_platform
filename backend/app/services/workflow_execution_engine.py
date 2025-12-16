@@ -787,6 +787,12 @@ class WorkflowExecutionEngine:
             # 允许前端默认句柄名 'input' 作别名
             if name in target_inputs and name:
                 return name
+            # 特例：LLM/RAG 等常见节点希望把 'input' 视为 prompt/query，而不是 data
+            if name == 'input':
+                if 'prompt' in target_inputs:
+                    return 'prompt'
+                if 'query' in target_inputs:
+                    return 'query'
             # 常见优先级
             priority = ['data', 'prompt', 'text']
             for p in priority:
@@ -829,9 +835,11 @@ class WorkflowExecutionEngine:
                             chosen = source_outputs[0]
                         src_key = chosen or src_key
 
-                value = source_payload.get(src_key) if isinstance(source_payload, dict) else None
-                if value is None:
-                    # 回退到整体传递
+                # 仅在“键不存在”时回退到整体传递；键存在但值为 None 时应保持 None
+                if isinstance(source_payload, dict) and src_key in source_payload:
+                    value = source_payload[src_key]
+                else:
+                    # 回退到整体传递（兼容历史配置）
                     value = source_payload
 
                 # 应用数据转换
@@ -1241,15 +1249,24 @@ class WorkflowExecutionEngine:
             merged_data.update(actual_data['data'])
             actual_data = merged_data
         
-        # 尝试从多个可能的键中获取提示词
-        prompt = (
-            actual_data.get('prompt') or 
-            actual_data.get('text') or 
-            actual_data.get('input') or 
-            actual_data.get('query') or
-            actual_data.get('message') or
-            (str(actual_data) if isinstance(actual_data, str) else '')
-        )
+        # 允许显式选择 prompt 来源字段（Dify-like）
+        prompt_key = config.get('prompt_key') or config.get('prompt_field')
+        prompt = None
+        if isinstance(prompt_key, str) and prompt_key.strip():
+            k = prompt_key.strip()
+            if isinstance(actual_data, dict) and k in actual_data:
+                prompt = actual_data.get(k)
+
+        # 尝试从多个可能的键中获取提示词（兜底）
+        if prompt is None:
+            prompt = (
+                actual_data.get('prompt') or
+                actual_data.get('input') or
+                actual_data.get('text') or
+                actual_data.get('query') or
+                actual_data.get('message') or
+                (str(actual_data) if isinstance(actual_data, str) else '')
+            )
         
         # 确保prompt是字符串
         if not isinstance(prompt, str):
@@ -1276,11 +1293,6 @@ class WorkflowExecutionEngine:
             full_prompt = f"{system_prompt}\n\n{prompt}"
         else:
             full_prompt = prompt
-        
-        print(f"DEBUG: LLM node received input_data: {input_data}")
-        print(f"DEBUG: After processing, actual_data: {actual_data}")
-        print(f"DEBUG: Extracted prompt: '{prompt}'")
-        print(f"DEBUG: Full prompt: '{full_prompt}'")
         
         # 调用LLM服务
         tenant_id = (
@@ -1784,18 +1796,34 @@ class WorkflowExecutionEngine:
         context: WorkflowExecutionContext
     ) -> Dict[str, Any]:
         """执行输入节点"""
-        print(f"DEBUG: Input node received: {input_data}")
-        
-        # 检查输入数据是否已经被包装在'data'中
-        if 'data' in input_data and isinstance(input_data['data'], dict):
-            # 如果已经包装，直接返回包装的数据
-            result = input_data['data']
-            print(f"DEBUG: Input node returning unwrapped data: {result}")
-            return result
+
+        # 输入节点输出应稳定包含：data / prompt / query / text（便于 edge 映射）
+        actual = self._normalize_input_payload(input_data)
+        # 若存在 data 包装，则将其视为主要 payload，同时合并外层字段（如 tenant_id/user_id）
+        if isinstance(actual.get("data"), dict):
+            merged = {**actual["data"], **{k: v for k, v in actual.items() if k != "data"}}
         else:
-            # 如果没有包装，返回完整的input_data
-            print(f"DEBUG: Input node returning original data: {input_data}")
-            return input_data
+            merged = dict(actual)
+
+        prompt = merged.get("prompt") or merged.get("text") or merged.get("query") or ""
+        query = merged.get("query") or merged.get("prompt") or merged.get("text") or ""
+        text = merged.get("text") or merged.get("prompt") or merged.get("query") or ""
+
+        # 避免 None 触发上游“整体回退”的历史行为：用空串/空对象兜底
+        if prompt is None:
+            prompt = ""
+        if query is None:
+            query = ""
+        if text is None:
+            text = ""
+
+        return {
+            "data": merged,
+            "input": prompt,
+            "prompt": prompt,
+            "query": query,
+            "text": text,
+        }
     
     async def _execute_output_node(
         self,
@@ -1812,6 +1840,25 @@ class WorkflowExecutionEngine:
         # 兼容 'data' 包装
         actual_data = self._normalize_input_payload(input_data)
         payload = actual_data.get('data', actual_data)
+
+        # 允许配置 select_path 选择输出字段（template 为空时生效）
+        select_path = config.get('select_path') or config.get('select')
+        if isinstance(select_path, str) and select_path.strip() and not template:
+            path = select_path.strip()
+            # roots: data/input/context；同时将 payload 的字段提升一层便于直接写 content/result 等
+            roots: Dict[str, Any] = {
+                "data": payload,
+                "input": context.input_data or {},
+                "context": context.global_context or {},
+            }
+            if isinstance(payload, dict):
+                roots.update(payload)
+
+            selected = self._get_value_by_path(roots, path)
+            if selected is None:
+                # fallback to default payload
+                selected = payload
+            return {"result": selected}
 
         if template:
             # 使用模板格式化输出，避免缺失键报错
@@ -2128,6 +2175,35 @@ class WorkflowExecutionEngine:
             else:
                 return None
         
+        return current
+
+    def _get_value_by_path(self, root: Any, path: str) -> Any:
+        """Get nested value from dict/list via dotted path, supporting [index] syntax."""
+        if root is None:
+            return None
+        if not path:
+            return root
+        if not isinstance(path, str):
+            return None
+        normalized = re.sub(r"\[(\d+)\]", r".\1", path.strip())
+        parts = [p for p in normalized.split(".") if p]
+        current: Any = root
+        for part in parts:
+            if isinstance(current, dict):
+                if part in current:
+                    current = current[part]
+                else:
+                    return None
+            elif isinstance(current, list):
+                try:
+                    idx = int(part)
+                except Exception:
+                    return None
+                if idx < 0 or idx >= len(current):
+                    return None
+                current = current[idx]
+            else:
+                return None
         return current
     
     async def get_execution_status(self, execution_id: str) -> Optional[WorkflowExecutionContext]:

@@ -14,6 +14,8 @@ import structlog
 from collections import defaultdict, deque
 import heapq
 
+import networkx as nx
+
 from app.schemas.workflow import (
     WorkflowDefinition, 
     WorkflowNode, 
@@ -171,12 +173,23 @@ class WorkflowParallelExecutor:
         
         # 1. 分析工作流依赖和构建执行图
         execution_graph = self._build_execution_graph(workflow_definition)
+
+        # 用于参数映射/条件/transform 的数据流图（复用串行执行的映射逻辑）
+        dataflow_graph: Optional[nx.DiGraph] = None
+        try:
+            if hasattr(node_executor, "_build_execution_graph"):
+                dataflow_graph = node_executor._build_execution_graph(workflow_definition)  # type: ignore[attr-defined]
+        except Exception:
+            dataflow_graph = None
         
         # 2. 优化执行计划
         execution_plan = await self._optimize_execution_plan(execution_graph, context)
         
         # 3. 执行批次
-        await self._execute_batches(execution_plan, context, node_executor, debug)
+        node_data = await self._execute_batches(execution_plan, context, node_executor, dataflow_graph, debug)
+
+        # 4. 组装最终输出（并行执行需要显式设置 output_data）
+        self._set_final_output(workflow_definition, node_data, context, dataflow_graph)
         
         logger.info(
             "并行执行工作流完成",
@@ -561,8 +574,9 @@ class WorkflowParallelExecutor:
         execution_plan: List[ExecutionBatch],
         context: WorkflowExecutionContext,
         node_executor,
+        dataflow_graph: Optional[nx.DiGraph],
         debug: bool = False
-    ) -> None:
+    ) -> Dict[str, Any]:
         """执行批次"""
         
         node_data = {}
@@ -589,7 +603,7 @@ class WorkflowParallelExecutor:
             try:
                 # 并行执行批次中的节点
                 await self._execute_batch_parallel(
-                    batch, node_data, context, node_executor, debug
+                    batch, node_data, context, node_executor, dataflow_graph, debug
                 )
                 
             finally:
@@ -601,6 +615,8 @@ class WorkflowParallelExecutor:
                 batch_id=batch.batch_id,
                 resource_utilization=self.resource_pool.get_utilization()
             )
+
+        return node_data
     
     async def _execute_batch_parallel(
         self,
@@ -608,6 +624,7 @@ class WorkflowParallelExecutor:
         node_data: Dict[str, Any],
         context: WorkflowExecutionContext,
         node_executor,
+        dataflow_graph: Optional[nx.DiGraph],
         debug: bool = False
     ) -> None:
         """并行执行批次中的节点"""
@@ -615,14 +632,15 @@ class WorkflowParallelExecutor:
         # 创建并行任务
         tasks = []
         for node_info in batch.nodes:
-            # 收集输入数据
-            input_data = self._collect_node_input_data(node_info, node_data, context)
-            
-            # 创建执行任务
-            task = self._execute_node_with_monitoring(
-                node_info, input_data, context, node_executor, debug
-            )
-            tasks.append(task)
+            async def _run_one(ni: NodeExecutionInfo):
+                input_data = await self._collect_node_input_data(
+                    ni, node_data, context, node_executor, dataflow_graph
+                )
+                return await self._execute_node_with_monitoring(
+                    ni, input_data, context, node_executor, debug
+                )
+
+            tasks.append(_run_one(node_info))
         
         # 等待所有任务完成
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -645,27 +663,79 @@ class WorkflowParallelExecutor:
                 
                 # 更新性能统计
                 self._update_node_performance(node_info.node.id, result.get('duration', 0))
-    
-    def _collect_node_input_data(
+
+    async def _collect_node_input_data(
         self,
         node_info: NodeExecutionInfo,
         node_data: Dict[str, Any],
-        context: WorkflowExecutionContext
+        context: WorkflowExecutionContext,
+        node_executor,
+        dataflow_graph: Optional[nx.DiGraph],
     ) -> Dict[str, Any]:
         """收集节点输入数据"""
-        
-        input_data = {}
-        
-        # 从依赖节点收集数据
+
+        # 优先复用串行执行的 edge 映射/条件/transform 逻辑，保证参数流转一致
+        if dataflow_graph is not None and hasattr(node_executor, "_collect_node_input_data"):
+            try:
+                return await node_executor._collect_node_input_data(  # type: ignore[attr-defined]
+                    node_info.node.id,
+                    dataflow_graph,
+                    node_data,
+                    context,
+                )
+            except Exception:
+                pass
+
+        return self._collect_node_input_data_simple(node_info, node_data, context)
+
+    def _collect_node_input_data_simple(
+        self,
+        node_info: NodeExecutionInfo,
+        node_data: Dict[str, Any],
+        context: WorkflowExecutionContext,
+    ) -> Dict[str, Any]:
+        """简化版输入收集（无 edge 映射/条件/transform），仅做兜底。"""
+        input_data: Dict[str, Any] = {}
         for dependency_id in node_info.dependencies:
-            if dependency_id in node_data:
+            if dependency_id in node_data and isinstance(node_data[dependency_id], dict):
                 input_data.update(node_data[dependency_id])
-        
-        # 如果没有依赖，使用全局输入数据
         if not input_data:
             input_data = context.input_data.copy()
-        
         return input_data
+
+    def _set_final_output(
+        self,
+        workflow_definition: WorkflowDefinition,
+        node_data: Dict[str, Any],
+        context: WorkflowExecutionContext,
+        dataflow_graph: Optional[nx.DiGraph],
+    ) -> None:
+        """设置 context.output_data，行为与串行执行保持一致。"""
+        output_nodes = [n for n in workflow_definition.nodes if n.type == "output"]
+        if output_nodes:
+            final_output: Dict[str, Any] = {}
+            for out_node in output_nodes:
+                payload = node_data.get(out_node.id)
+                if isinstance(payload, dict):
+                    final_output.update(payload)
+            context.output_data = final_output
+            return
+
+        # 无 output 节点：回退到拓扑序最后一个节点的输出
+        last_node_id: Optional[str] = None
+        try:
+            if dataflow_graph is not None:
+                order = list(nx.topological_sort(dataflow_graph))
+                if order:
+                    last_node_id = order[-1]
+        except Exception:
+            last_node_id = None
+
+        if last_node_id is None and workflow_definition.nodes:
+            last_node_id = workflow_definition.nodes[-1].id
+
+        payload = node_data.get(last_node_id) if last_node_id else None
+        context.output_data = payload if isinstance(payload, dict) else {}
     
     async def _execute_node_with_monitoring(
         self,

@@ -286,6 +286,9 @@ export const workflowApi = {
   
   // 获取工作流详情
   getDetail: (id: string) => api.get(`/api/v1/workflows/${id}`),
+
+  // 推导工作流级入参/出参 schema（用于 Tester 自动生成表单）
+  getIOSchema: (id: string) => api.get(`/api/v1/workflows/${id}/io-schema`),
   
   // 更新工作流
   update: (id: string, data: {
@@ -322,6 +325,7 @@ export const workflowApi = {
   ) => {
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+      let gotComplete = false;
       await streamSSE(
         `${API_BASE_URL}/api/v1/workflows/${id}/execute/stream`,
         {
@@ -335,11 +339,16 @@ export const workflowApi = {
         {
           onEvent: (evt) => {
             if (evt?.type === 'progress') onProgress(evt);
-            else if (evt?.type === 'complete') onComplete(evt);
-            else if (evt?.type === 'error') onError(evt);
+            else if (evt?.type === 'complete') {
+              gotComplete = true;
+              onComplete(evt);
+            } else if (evt?.type === 'error') onError(evt);
           },
           onError,
-          onComplete: () => onComplete(null),
+          onComplete: () => {
+            // Only send null-complete when backend didn't emit a complete payload.
+            if (!gotComplete) onComplete(null);
+          },
         },
         { retries: 1, retryDelayBaseMs: 800 }
       );
@@ -357,6 +366,7 @@ export const workflowApi = {
     onComplete: (result: any) => void
   ) => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    let gotComplete = false;
     return streamSSECancelable(
       `${API_BASE_URL}/api/v1/workflows/${id}/execute/stream`,
       {
@@ -370,11 +380,16 @@ export const workflowApi = {
       {
         onEvent: (evt) => {
           if (evt?.type === 'progress') onProgress(evt);
-          else if (evt?.type === 'complete') onComplete(evt);
+          else if (evt?.type === 'complete') {
+            gotComplete = true;
+            onComplete(evt);
+          }
           else if (evt?.type === 'error') onError(evt);
         },
         onError,
-        onComplete: () => onComplete(null),
+        onComplete: () => {
+          if (!gotComplete) onComplete(null);
+        },
       },
       { retries: 1, retryDelayBaseMs: 800 }
     );
