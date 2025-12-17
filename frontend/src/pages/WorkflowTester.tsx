@@ -141,8 +141,8 @@ const WorkflowTester: React.FC = () => {
     }
 
     setParamErrors(errors);
-    if (errors.length) return { ok: false as const, inputData: null as any };
-    return { ok: true as const, inputData };
+    if (errors.length) return { ok: false as const, inputData: null as any, errors };
+    return { ok: true as const, inputData, errors: [] as string[] };
   };
 
   const runOnce = async () => {
@@ -155,6 +155,8 @@ const WorkflowTester: React.FC = () => {
 
     const built = buildInputData();
     if (!built.ok) {
+      // Avoid “没反应”：把参数错误也显示到主区域
+      setError(built.errors.join('；') || '参数校验失败');
       setRunning(false);
       return;
     }
@@ -184,10 +186,14 @@ const WorkflowTester: React.FC = () => {
             }
             gotResultRef.current = true;
             let out = result?.result?.output_data ?? result?.output_data ?? result;
-            // Unwrap common {result: ...} shape
+            // Unwrap common {result: ...} shape, but keep object when result is empty (avoid “没反应”)
             if (out && typeof out === 'object' && 'result' in out && Object.keys(out).length <= 2) {
               const r: any = (out as any).result;
-              if (r !== undefined) out = r;
+              if (typeof r === 'string') {
+                if (r.trim() !== '') out = r;
+              } else if (r !== undefined) {
+                out = r;
+              }
             }
             const textOut =
               typeof out === 'string'
@@ -243,17 +249,21 @@ const WorkflowTester: React.FC = () => {
                 stepLike.step ??
                 null;
 
-              if (typeof label === 'string' || typeof label === 'number') return String(label);
-              if (label && typeof label === 'object') {
-                // Avoid rendering raw objects in React children
-                return (
-                  stepLike.nodeName ||
-                  stepLike.node_name ||
-                  stepLike.id ||
-                  t('workflowTester.progress.step', { index: i + 1 })
-                );
-              }
-              return t('workflowTester.progress.step', { index: i + 1 });
+              const base = (typeof label === 'string' || typeof label === 'number')
+                ? String(label)
+                : (
+                    stepLike.nodeName ||
+                    stepLike.node_name ||
+                    stepLike.id ||
+                    t('workflowTester.progress.step', { index: i + 1 })
+                  );
+
+              const status = stepLike.status ? String(stepLike.status) : '';
+              const dur = Number(stepLike.duration);
+              const durTxt = Number.isFinite(dur) && dur > 0 ? `${dur.toFixed(2)}s` : '';
+              const extra = [status, durTxt].filter(Boolean).join(' · ');
+
+              return extra ? `${base} · ${extra}` : base;
             })()}
           </Typography>
           <LinearProgress

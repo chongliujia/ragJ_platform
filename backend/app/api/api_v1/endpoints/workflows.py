@@ -25,7 +25,8 @@ from app.schemas.workflow import (
     NodeFunctionSignature,
     NodeInputSchema,
     NodeOutputSchema,
-    DataType
+    DataType,
+    ExecutionStep,
 )
 from app.services.workflow_execution_engine import workflow_execution_engine
 from app.services.workflow_error_handler import workflow_error_handler, RecoveryStrategy, RetryConfig, RecoveryAction, RetryStrategy
@@ -475,81 +476,106 @@ async def execute_workflow_stream(
             raise HTTPException(status_code=404, detail="工作流不存在")
         
         async def stream_execution():
-            try:
-                # 创建执行上下文
-                # 注入租户/用户上下文信息
-                input_data = dict(request.input_data or {})
-                input_data.setdefault("tenant_id", tenant_id)
-                input_data.setdefault("user_id", current_user.id)
+            # Real streaming: emit progress as each step completes.
+            q: "asyncio.Queue[dict | None]" = asyncio.Queue()
+            include_payload = bool(request.debug)
 
-                execution_context = await workflow_execution_engine.execute_workflow(
-                    workflow_definition=workflow_def,
-                    input_data=input_data,
-                    debug=request.debug,
-                    enable_parallel=request.enable_parallel
+            def _step_to_dict(step: ExecutionStep) -> Dict[str, Any]:
+                base: Dict[str, Any] = {
+                    "id": step.step_id,
+                    "nodeId": step.node_id,
+                    "nodeName": step.node_name,
+                    "status": step.status,
+                    "startTime": step.start_time,
+                    "endTime": step.end_time,
+                    "duration": step.duration,
+                    "error": step.error,
+                    "memory": step.memory_usage,
+                }
+                if include_payload:
+                    base["input"] = step.input_data
+                    base["output"] = step.output_data
+                else:
+                    try:
+                        base["outputKeys"] = list((step.output_data or {}).keys())
+                    except Exception:
+                        base["outputKeys"] = []
+                return base
+
+            async def _on_step(step: ExecutionStep, current: int, total: int) -> None:
+                await q.put(
+                    {
+                        "type": "progress",
+                        "step": _step_to_dict(step),
+                        "progress": {"current": current, "total": total},
+                    }
                 )
 
-                # 输出由执行引擎统一组装（串行/并行一致）
-                final_output = execution_context.output_data or {}
-                
-                # 流式返回执行状态
-                for i, step in enumerate(execution_context.steps):
-                    progress_data = {
-                        "type": "progress",
-                        "step": {
-                            "id": step.step_id,
-                            "nodeId": step.node_id,
-                            "nodeName": step.node_name,
-                            "status": step.status,
-                            "startTime": step.start_time,
-                            "endTime": step.end_time,
-                            "duration": step.duration,
-                            "input": step.input_data,
-                            "output": step.output_data,
-                            "error": step.error,
-                            "memory": step.memory_usage
-                        },
-                        "progress": {
-                            "current": i + 1,
-                            "total": len(execution_context.steps)
-                        }
-                    }
-                    
-                    yield f"data: {json.dumps(progress_data)}\n\n"
-                
-                # 返回最终结果
-                final_result = {
-                    "type": "complete",
-                    "result": {
-                        "execution_id": execution_context.execution_id,
-                        "status": execution_context.status,
-                        "output_data": final_output,
-                        "error": execution_context.error,
-                        "metrics": execution_context.metrics
-                    }
-                }
-                yield f"data: {json.dumps(final_result)}\n\n"
-                yield "data: [DONE]\n\n"
-                
-                # 保存执行记录
+            async def _runner() -> None:
                 try:
-                    workflow_persistence_service.save_workflow_execution(
-                        execution_context, tenant_id, current_user.id
+                    input_data = dict(request.input_data or {})
+                    input_data.setdefault("tenant_id", tenant_id)
+                    input_data.setdefault("user_id", current_user.id)
+
+                    # For real-time progress, run serially (parallel executor currently batches steps).
+                    execution_context = await workflow_execution_engine.execute_workflow(
+                        workflow_definition=workflow_def,
+                        input_data=input_data,
+                        debug=request.debug,
+                        enable_parallel=False,
+                        on_step=_on_step,
                     )
-                except Exception as save_error:
-                    logger.error("保存执行记录失败", error=str(save_error))
-                
-            except Exception as e:
-                logger.error("流式工作流执行异常", error=str(e), exc_info=True)
-                error_data = {
-                    "type": "error",
-                    "error": {
-                        "message": str(e),
-                        "type": type(e).__name__
-                    }
-                }
-                yield f"data: {json.dumps(error_data)}\n\n"
+
+                    final_output = execution_context.output_data or {}
+                    await q.put(
+                        {
+                            "type": "complete",
+                            "result": {
+                                "execution_id": execution_context.execution_id,
+                                "status": execution_context.status,
+                                "output_data": final_output,
+                                "error": execution_context.error,
+                                "metrics": execution_context.metrics,
+                            },
+                        }
+                    )
+
+                    try:
+                        workflow_persistence_service.save_workflow_execution(
+                            execution_context, tenant_id, current_user.id
+                        )
+                    except Exception as save_error:
+                        logger.error("保存执行记录失败", error=str(save_error))
+                except Exception as e:
+                    logger.error("流式工作流执行异常", error=str(e), exc_info=True)
+                    await q.put(
+                        {
+                            "type": "error",
+                            "error": {"message": str(e), "type": type(e).__name__},
+                        }
+                    )
+                finally:
+                    await q.put(None)
+
+            task = asyncio.create_task(_runner())
+
+            try:
+                # Immediately notify the client that execution started (avoid "no response").
+                yield f"data: {json.dumps({'type': 'started'})}\n\n"
+                while True:
+                    item = await q.get()
+                    if item is None:
+                        break
+                    yield f"data: {json.dumps(item)}\n\n"
                 yield "data: [DONE]\n\n"
+            except asyncio.CancelledError:
+                task.cancel()
+                raise
+            finally:
+                try:
+                    await task
+                except Exception:
+                    pass
         
         return StreamingResponse(
             stream_execution(),
@@ -1349,6 +1375,12 @@ def _get_node_function_signature(node_type: str) -> NodeFunctionSignature:
                     name="data",
                     type=DataType.OBJECT,
                     description="输入数据对象（可选，用于透传上下文）",
+                    required=False
+                ),
+                NodeInputSchema(
+                    name="documents",
+                    type=DataType.ARRAY,
+                    description="检索到的文档列表（可选，RAG 场景使用）",
                     required=False
                 ),
                 NodeInputSchema(

@@ -29,21 +29,6 @@ export default function EdgeInspector({
     return `${left} → ${right}`;
   }, [edge, sourceName, targetName]);
 
-  if (!edge) {
-    return (
-      <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
-          属性面板
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          选中一个边后在这里编辑映射/条件/转换。
-        </Typography>
-      </Paper>
-    );
-  }
-
-  const data = edge.data || {};
-
   const sourceOptions = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -79,6 +64,21 @@ export default function EdgeInspector({
     }
     return out;
   }, [targetInputs]);
+
+  const data = edge?.data || {};
+
+  if (!edge) {
+    return (
+      <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
+          属性面板
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          选中一个边后在这里编辑映射/条件/转换。
+        </Typography>
+      </Paper>
+    );
+  }
 
   return (
     <Paper variant="outlined" sx={{ p: 2, height: '100%', overflow: 'auto' }}>

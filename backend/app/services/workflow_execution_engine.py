@@ -10,6 +10,7 @@ import uuid
 import ast
 import re
 import math
+import inspect
 import multiprocessing as mp
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Callable, Tuple
@@ -339,7 +340,8 @@ class WorkflowExecutionEngine:
         input_data: Dict[str, Any],
         execution_id: Optional[str] = None,
         debug: bool = False,
-        enable_parallel: Optional[bool] = None
+        enable_parallel: Optional[bool] = None,
+        on_step: Optional[Callable[[ExecutionStep, int, int], Any]] = None,
     ) -> WorkflowExecutionContext:
         """执行工作流"""
         
@@ -383,7 +385,8 @@ class WorkflowExecutionEngine:
                     execution_graph,
                     workflow_definition,
                     context,
-                    debug
+                    debug,
+                    on_step=on_step,
                 )
             
             context.status = "completed"
@@ -682,7 +685,8 @@ class WorkflowExecutionEngine:
         graph: nx.DiGraph,
         workflow_definition: WorkflowDefinition,
         context: WorkflowExecutionContext,
-        debug: bool = False
+        debug: bool = False,
+        on_step: Optional[Callable[[ExecutionStep, int, int], Any]] = None,
     ):
         """执行工作流图"""
         
@@ -701,6 +705,7 @@ class WorkflowExecutionEngine:
         
         # 使用拓扑排序确定执行顺序
         execution_order = list(nx.topological_sort(graph))
+        total_steps = max(len(execution_order), 1)
         
         # 节点数据存储
         node_data: Dict[str, Dict[str, Any]] = {}
@@ -748,6 +753,15 @@ class WorkflowExecutionEngine:
                     duration=step.duration,
                     output_keys=list(output_data.keys())
                 )
+
+            if on_step:
+                try:
+                    maybe = on_step(step, len(context.steps), total_steps)
+                    if inspect.isawaitable(maybe):
+                        await maybe
+                except Exception:
+                    # Progress callback should never break workflow execution.
+                    pass
         
         # 设置最终输出
         output_nodes = [
@@ -1840,6 +1854,18 @@ class WorkflowExecutionEngine:
         # 兼容 'data' 包装
         actual_data = self._normalize_input_payload(input_data)
         payload = actual_data.get('data', actual_data)
+        # When upstream maps a scalar into `data`, expose useful aliases for templates/select_path.
+        template_payload: Dict[str, Any]
+        if isinstance(payload, dict):
+            template_payload = payload
+        else:
+            template_payload = {
+                "data": payload,
+                "content": payload,
+                "text": payload,
+                "result": payload,
+                "value": payload,
+            }
 
         # 允许配置 select_path 选择输出字段（template 为空时生效）
         select_path = config.get('select_path') or config.get('select')
@@ -1853,6 +1879,8 @@ class WorkflowExecutionEngine:
             }
             if isinstance(payload, dict):
                 roots.update(payload)
+            else:
+                roots.update(template_payload)
 
             selected = self._get_value_by_path(roots, path)
             if selected is None:
@@ -1866,16 +1894,21 @@ class WorkflowExecutionEngine:
                 if isinstance(template, str) and "{{" in template:
                     rendered = self._render_mustache_template(
                         template,
-                        data=payload,
+                        data=template_payload,
                         input_data=context.input_data,
                         context_data=context.global_context,
                     )
+                    # If template renders empty/whitespace, fall back to raw payload to avoid “no output”.
+                    if isinstance(rendered, str) and rendered.strip() == "":
+                        return {"result": payload}
                     return {"result": rendered}
                 else:
                     class _SafeDict(dict):
                         def __missing__(self, key):
                             return ''
-                    formatted_output = template.format_map(_SafeDict(payload if isinstance(payload, dict) else {}))
+                    formatted_output = template.format_map(_SafeDict(template_payload))
+                    if isinstance(formatted_output, str) and formatted_output.strip() == "":
+                        return {"result": payload}
                     return {'result': formatted_output}
             except Exception as e:
                 logger.warning(f"模板格式化失败: {e}")

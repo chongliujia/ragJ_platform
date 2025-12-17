@@ -5,9 +5,10 @@ import type { NodeTemplate } from './nodeTemplates';
 type Props = {
   templates: NodeTemplate[];
   onAddClick: (kind: NodeTemplate['kind']) => void;
+  embedded?: boolean;
 };
 
-export default function NodePalette({ templates, onAddClick }: Props) {
+export default function NodePalette({ templates, onAddClick, embedded }: Props) {
   const [q, setQ] = useState('');
 
   const grouped = useMemo(() => {
@@ -24,11 +25,13 @@ export default function NodePalette({ templates, onAddClick }: Props) {
     return Array.from(map.entries());
   }, [q, templates]);
 
-  return (
-    <Paper variant="outlined" sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
-      <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-        节点库
-      </Typography>
+  const content = (
+    <>
+      {!embedded && (
+        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+          节点库
+        </Typography>
+      )}
       <TextField
         size="small"
         placeholder="搜索节点…"
@@ -53,16 +56,21 @@ export default function NodePalette({ templates, onAddClick }: Props) {
                   onClick={() => onAddClick(t.kind)}
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData(
-                      'application/ragj-workflow-node',
-                      JSON.stringify({ kind: t.kind })
-                    );
+                    e.dataTransfer.setData('application/ragj-workflow-node', JSON.stringify({ kind: t.kind }));
                     e.dataTransfer.effectAllowed = 'move';
                   }}
                 >
                   <ListItemText
-                    primary={<Typography variant="body2" sx={{ fontWeight: 700 }}>{t.name}</Typography>}
-                    secondary={<Typography variant="caption" color="text.secondary">{t.description}</Typography>}
+                    primary={
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {t.name}
+                      </Typography>
+                    }
+                    secondary={
+                      <Typography variant="caption" color="text.secondary">
+                        {t.description}
+                      </Typography>
+                    }
                   />
                 </ListItemButton>
               ))}
@@ -75,9 +83,25 @@ export default function NodePalette({ templates, onAddClick }: Props) {
           </Typography>
         )}
       </Box>
-      <Typography variant="caption" color="text.secondary">
-        提示：可拖拽到画布，也可点击添加
-      </Typography>
+      {!embedded && (
+        <Typography variant="caption" color="text.secondary">
+          提示：可拖拽到画布，也可点击添加
+        </Typography>
+      )}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <Box sx={{ p: 1.25, height: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {content}
+      </Box>
+    );
+  }
+
+  return (
+    <Paper variant="outlined" sx={{ p: 1.5, height: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
+      {content}
     </Paper>
   );
 }

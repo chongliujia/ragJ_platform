@@ -1348,6 +1348,28 @@ class LLMService:
             return None
         return model_config_service.get_provider(provider, tenant_id=tenant_id)
 
+    def _default_provider_credentials(self, provider: str) -> tuple[str | None, str | None, bool]:
+        """Fallback credentials from environment/settings.
+
+        This is important when callers pass an explicit `model` (e.g. "deepseek-chat"):
+        provider-level config may not exist in DB, but env-based keys should still work.
+        """
+        p = (provider or "").strip().lower()
+        if p == "deepseek":
+            return settings.DEEPSEEK_API_KEY, settings.DEEPSEEK_BASE_URL, True
+        if p == "openai":
+            return settings.OPENAI_API_KEY, settings.OPENAI_BASE_URL, True
+        if p == "qwen":
+            # DashScope base is fixed in QwenAPIService, but allow override via provider config.
+            return settings.DASHSCOPE_API_KEY, getattr(self.qwen, "base_url", None), True
+        if p == "siliconflow":
+            return settings.SILICONFLOW_API_KEY, settings.SILICONFLOW_BASE_URL, True
+        if p == "cohere":
+            return getattr(settings, "COHERE_API_KEY", None), getattr(self.cohere, "base_url", None), True
+        if p == "local":
+            return getattr(settings, "LOCAL_MODEL_API_KEY", None), getattr(settings, "LOCAL_MODEL_ENDPOINT", None), False
+        return None, None, True
+
     def _resolve_allow_tenant_fallback(
         self,
         user_id: int | None,
@@ -1620,46 +1642,49 @@ class LLMService:
                     user_id=user_id,
                     allow_tenant_fallback=allow_fallback,
                 )
-                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
-                if requires_key and not (p_cfg and p_cfg.api_key):
+                default_key, default_base, default_requires = self._default_provider_credentials(provider)
+                requires_key = bool(getattr(p_cfg, "requires_api_key", default_requires)) if p_cfg else default_requires
+                api_key = (p_cfg.api_key if p_cfg else None) or default_key
+                api_base = (p_cfg.api_base if p_cfg else None) or default_base
+                if requires_key and not api_key:
                     return {
                         "success": False,
                         "error": f"Provider '{provider}' is not configured",
-                        "message": "Please configure your personal provider API key/base URL in Model Settings.",
+                        "message": "Please configure provider API key/base URL in Model Settings (or set env API key).",
                     }
 
                 if provider == "deepseek":
-                    if p_cfg and p_cfg.api_key:
-                        self.deepseek.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.deepseek.base_url = p_cfg.api_base
+                    if api_key:
+                        self.deepseek.api_key = api_key
+                    if api_base:
+                        self.deepseek.base_url = api_base
                     self.deepseek.model = model
                 elif provider == "qwen":
-                    if p_cfg and p_cfg.api_key:
-                        self.qwen.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.qwen.base_url = p_cfg.api_base
+                    if api_key:
+                        self.qwen.api_key = api_key
+                    if api_base:
+                        self.qwen.base_url = api_base
                     self.qwen.model = model
                 elif provider == "openai":
-                    if p_cfg and p_cfg.api_key:
-                        self.openai.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.openai.base_url = p_cfg.api_base
+                    if api_key:
+                        self.openai.api_key = api_key
+                    if api_base:
+                        self.openai.base_url = api_base
                 elif provider == "siliconflow":
-                    if p_cfg and p_cfg.api_key:
-                        self.siliconflow.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.siliconflow.base_url = p_cfg.api_base
+                    if api_key:
+                        self.siliconflow.api_key = api_key
+                    if api_base:
+                        self.siliconflow.base_url = api_base
                 elif provider == "cohere":
-                    if p_cfg and p_cfg.api_key:
-                        self.cohere.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.cohere.base_url = p_cfg.api_base
+                    if api_key:
+                        self.cohere.api_key = api_key
+                    if api_base:
+                        self.cohere.base_url = api_base
                 elif provider == "local":
-                    if p_cfg and p_cfg.api_key:
-                        self.local.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.local.base_url = p_cfg.api_base
+                    if api_key:
+                        self.local.api_key = api_key
+                    if api_base:
+                        self.local.base_url = api_base
 
                 logger.info(
                     f"Loaded provider config for '{provider}' with specified model '{model}'"
@@ -1836,43 +1861,46 @@ class LLMService:
                     user_id=user_id,
                     allow_tenant_fallback=allow_fallback,
                 )
-                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
-                if requires_key and not (p_cfg and p_cfg.api_key):
+                default_key, default_base, default_requires = self._default_provider_credentials(provider)
+                requires_key = bool(getattr(p_cfg, "requires_api_key", default_requires)) if p_cfg else default_requires
+                api_key = (p_cfg.api_key if p_cfg else None) or default_key
+                api_base = (p_cfg.api_base if p_cfg else None) or default_base
+                if requires_key and not api_key:
                     yield {"success": False, "error": f"Provider '{provider}' is not configured"}
                     return
 
                 if provider == "deepseek":
-                    if p_cfg and p_cfg.api_key:
-                        self.deepseek.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.deepseek.base_url = p_cfg.api_base
+                    if api_key:
+                        self.deepseek.api_key = api_key
+                    if api_base:
+                        self.deepseek.base_url = api_base
                     self.deepseek.model = model
                 elif provider == "qwen":
-                    if p_cfg and p_cfg.api_key:
-                        self.qwen.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.qwen.base_url = p_cfg.api_base
+                    if api_key:
+                        self.qwen.api_key = api_key
+                    if api_base:
+                        self.qwen.base_url = api_base
                     self.qwen.model = model
                 elif provider == "openai":
-                    if p_cfg and p_cfg.api_key:
-                        self.openai.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.openai.base_url = p_cfg.api_base
+                    if api_key:
+                        self.openai.api_key = api_key
+                    if api_base:
+                        self.openai.base_url = api_base
                 elif provider == "siliconflow":
-                    if p_cfg and p_cfg.api_key:
-                        self.siliconflow.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.siliconflow.base_url = p_cfg.api_base
+                    if api_key:
+                        self.siliconflow.api_key = api_key
+                    if api_base:
+                        self.siliconflow.base_url = api_base
                 elif provider == "cohere":
-                    if p_cfg and p_cfg.api_key:
-                        self.cohere.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.cohere.base_url = p_cfg.api_base
+                    if api_key:
+                        self.cohere.api_key = api_key
+                    if api_base:
+                        self.cohere.base_url = api_base
                 elif provider == "local":
-                    if p_cfg and p_cfg.api_key:
-                        self.local.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.local.base_url = p_cfg.api_base
+                    if api_key:
+                        self.local.api_key = api_key
+                    if api_base:
+                        self.local.base_url = api_base
             except Exception:
                 pass
 
@@ -2062,44 +2090,47 @@ class LLMService:
                     user_id=user_id,
                     allow_tenant_fallback=allow_fallback,
                 )
-                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
-                if requires_key and not (p_cfg and p_cfg.api_key):
+                default_key, default_base, default_requires = self._default_provider_credentials(provider)
+                requires_key = bool(getattr(p_cfg, "requires_api_key", default_requires)) if p_cfg else default_requires
+                api_key = (p_cfg.api_key if p_cfg else None) or default_key
+                api_base = (p_cfg.api_base if p_cfg else None) or default_base
+                if requires_key and not api_key:
                     return {
                         "success": False,
                         "error": f"Provider '{provider}' is not configured",
-                        "message": "Please configure your personal provider API key/base URL in Model Settings.",
+                        "message": "Please configure provider API key/base URL in Model Settings (or set env API key).",
                     }
 
                 if provider == "siliconflow":
-                    if p_cfg and p_cfg.api_key:
-                        self.siliconflow.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.siliconflow.base_url = p_cfg.api_base
+                    if api_key:
+                        self.siliconflow.api_key = api_key
+                    if api_base:
+                        self.siliconflow.base_url = api_base
                 elif provider == "openai":
-                    if p_cfg and p_cfg.api_key:
-                        self.openai.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.openai.base_url = p_cfg.api_base
+                    if api_key:
+                        self.openai.api_key = api_key
+                    if api_base:
+                        self.openai.base_url = api_base
                 elif provider == "qwen":
-                    if p_cfg and p_cfg.api_key:
-                        self.qwen.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.qwen.base_url = p_cfg.api_base
+                    if api_key:
+                        self.qwen.api_key = api_key
+                    if api_base:
+                        self.qwen.base_url = api_base
                 elif provider == "deepseek":
-                    if p_cfg and p_cfg.api_key:
-                        self.deepseek.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.deepseek.base_url = p_cfg.api_base
+                    if api_key:
+                        self.deepseek.api_key = api_key
+                    if api_base:
+                        self.deepseek.base_url = api_base
                 elif provider == "cohere":
-                    if p_cfg and p_cfg.api_key:
-                        self.cohere.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.cohere.base_url = p_cfg.api_base
+                    if api_key:
+                        self.cohere.api_key = api_key
+                    if api_base:
+                        self.cohere.base_url = api_base
                 elif provider == "local":
-                    if p_cfg and p_cfg.api_key:
-                        self.local.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.local.base_url = p_cfg.api_base
+                    if api_key:
+                        self.local.api_key = api_key
+                    if api_base:
+                        self.local.base_url = api_base
             except Exception:
                 pass
 
@@ -2376,18 +2407,21 @@ class LLMService:
                     user_id=user_id,
                     allow_tenant_fallback=allow_fallback,
                 )
-                requires_key = bool(getattr(p_cfg, "requires_api_key", True)) if p_cfg else True
-                if requires_key and not (p_cfg and p_cfg.api_key):
+                default_key, default_base, default_requires = self._default_provider_credentials(provider)
+                requires_key = bool(getattr(p_cfg, "requires_api_key", default_requires)) if p_cfg else default_requires
+                api_key = (p_cfg.api_key if p_cfg else None) or default_key
+                api_base = (p_cfg.api_base if p_cfg else None) or default_base
+                if requires_key and not api_key:
                     return {
                         "success": False,
                         "error": f"Provider '{provider}' is not configured",
-                        "message": "Please configure your personal provider API key/base URL in Model Settings.",
+                        "message": "Please configure provider API key/base URL in Model Settings (or set env API key).",
                     }
                 if provider == "qwen":
-                    if p_cfg and p_cfg.api_key:
-                        self.qwen.api_key = p_cfg.api_key
-                    if p_cfg and p_cfg.api_base:
-                        self.qwen.base_url = p_cfg.api_base
+                    if api_key:
+                        self.qwen.api_key = api_key
+                    if api_base:
+                        self.qwen.base_url = api_base
             except Exception:
                 pass
 

@@ -85,7 +85,8 @@ export const knowledgeBaseApi = {
 export const chatApi = {
   // 发送消息 - 使用更长的超时时间以适应RAG处理
   sendMessage: (data: { message: string; knowledge_base_id?: string; model?: string }) =>
-    api.post('/api/v1/chat', data, { timeout: 90000 }), // 90秒超时
+    // 带结尾斜杠，避免在 Docker/Vite 代理场景触发 307 -> Location: http://backend:8000/... 导致浏览器 Network Error
+    api.post('/api/v1/chat/', data, { timeout: 90000 }), // 90秒超时
   
   // 流式聊天
   streamMessage: async (

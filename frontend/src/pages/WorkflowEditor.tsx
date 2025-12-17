@@ -4,21 +4,29 @@ import {
   Alert,
   Box,
   Button,
+  Collapse,
   Divider,
   Dialog,
   DialogActions,
   DialogContent,
   DialogTitle,
   FormControlLabel,
+  IconButton,
   Paper,
   Snackbar,
   Stack,
   Switch,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import {
   CheckCircle as ValidateIcon,
+  Close as CloseIcon,
+  ExpandMore as ExpandMoreIcon,
+  ViewModule as ViewModuleIcon,
+  ZoomIn as ZoomInIcon,
+  ZoomOut as ZoomOutIcon,
   Save as SaveIcon,
   Science as TestIcon,
   Refresh as ResetIcon,
@@ -41,7 +49,7 @@ import { knowledgeBaseApi, workflowApi } from '../services/api';
 import { modelConfigApi } from '../services/modelConfigApi';
 import WorkflowNode from '../components/workflow2/WorkflowNode';
 import NodePalette from '../components/workflow2/NodePalette';
-import NodeInspector from '../components/workflow2/NodeInspector';
+import DifyNodeInspector from '../components/workflow2/DifyNodeInspector';
 import EdgeInspector from '../components/workflow2/EdgeInspector';
 import { NODE_TEMPLATES } from '../components/workflow2/nodeTemplates';
 import type { WorkflowEdgeData, WorkflowNodeData, WorkflowNodeKind } from '../components/workflow2/types';
@@ -61,6 +69,10 @@ const nodeTypes = {
 };
 
 const DEFAULT_WORKFLOW_NAME = '新工作流';
+const HEADER_EXPANDED_KEY = 'ragj_workflow_editor_header_expanded';
+const PALETTE_OPEN_KEY = 'ragj_workflow_editor_palette_open';
+const PALETTE_WIDTH_KEY = 'ragj_workflow_editor_palette_width';
+const PALETTE_SCALE_KEY = 'ragj_workflow_editor_palette_scale';
 
 function defaultGraph(): { nodes: Node<WorkflowNodeData>[]; edges: Edge<WorkflowEdgeData>[] } {
   const inputId = genId('n');
@@ -149,7 +161,7 @@ const WorkflowEditor: React.FC = () => {
   const inputsForKind = useCallback((kind?: WorkflowNodeKind): string[] => {
     switch (kind) {
       case 'llm':
-        return ['data', 'prompt', 'input'];
+        return ['data', 'prompt', 'input', 'documents'];
       case 'rag_retriever':
         return ['data', 'query', 'input'];
       case 'http_request':
@@ -205,6 +217,11 @@ const WorkflowEditor: React.FC = () => {
     warnings: string[];
     suggestions: string[];
   }>(null);
+  const [headerExpanded, setHeaderExpanded] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(true);
+  const [paletteWidth, setPaletteWidth] = useState(280);
+  const [paletteScale, setPaletteScale] = useState(1);
+  const paletteResizeRef = useRef<null | { startX: number; startWidth: number }>(null);
 
   const resetToDefault = useCallback(() => {
     const g = defaultGraph();
@@ -213,6 +230,90 @@ const WorkflowEditor: React.FC = () => {
     setSelectedNodeId(null);
     setValidation(null);
   }, [setEdges, setNodes]);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(HEADER_EXPANDED_KEY);
+      if (v === '1') setHeaderExpanded(true);
+      if (v === '0') setHeaderExpanded(false);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const open = localStorage.getItem(PALETTE_OPEN_KEY);
+      if (open === '0') setPaletteOpen(false);
+      if (open === '1') setPaletteOpen(true);
+      const w = Number(localStorage.getItem(PALETTE_WIDTH_KEY));
+      if (Number.isFinite(w) && w >= 220 && w <= 520) setPaletteWidth(w);
+      const s = Number(localStorage.getItem(PALETTE_SCALE_KEY));
+      if (Number.isFinite(s) && s >= 0.8 && s <= 1.2) setPaletteScale(s);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const toggleHeader = useCallback(() => {
+    setHeaderExpanded((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(HEADER_EXPANDED_KEY, next ? '1' : '0');
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const togglePalette = useCallback(() => {
+    setPaletteOpen((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(PALETTE_OPEN_KEY, next ? '1' : '0');
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const bumpPaletteScale = useCallback((delta: number) => {
+    setPaletteScale((prev) => {
+      const next = Math.max(0.8, Math.min(1.2, Math.round((prev + delta) * 100) / 100));
+      try {
+        localStorage.setItem(PALETTE_SCALE_KEY, String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      if (!paletteResizeRef.current) return;
+      const dx = e.clientX - paletteResizeRef.current.startX;
+      const next = Math.max(220, Math.min(520, paletteResizeRef.current.startWidth + dx));
+      setPaletteWidth(next);
+    };
+    const onUp = () => {
+      if (!paletteResizeRef.current) return;
+      paletteResizeRef.current = null;
+      try {
+        localStorage.setItem(PALETTE_WIDTH_KEY, String(paletteWidth));
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [paletteWidth]);
 
   useEffect(() => {
     // 初始化节点库/模型列表
@@ -328,17 +429,62 @@ const WorkflowEditor: React.FC = () => {
   const onConnect = useCallback(
     (connection: Connection) => {
       const sourceNode = nodes.find((n) => n.id === connection.source);
+      const targetNode = nodes.find((n) => n.id === connection.target);
       const isCondition = sourceNode?.data?.kind === 'condition';
-      const sh = connection.sourceHandle || 'output';
+      const defaultSourceHandle = () => {
+        const kind = sourceNode?.data?.kind;
+        switch (kind) {
+          case 'input':
+            return 'input';
+          case 'llm':
+            return 'content';
+          case 'rag_retriever':
+            return 'documents';
+          case 'http_request':
+            return 'response_data';
+          case 'code_executor':
+            return 'result';
+          case 'condition':
+            return 'data';
+          case 'output':
+          default:
+            return 'output';
+        }
+      };
+      const defaultTargetHandle = () => {
+        const kind = targetNode?.data?.kind;
+        switch (kind) {
+          case 'llm':
+            return 'input';
+          case 'rag_retriever':
+            return 'query';
+          case 'http_request':
+            return 'url';
+          case 'condition':
+            return 'value';
+          case 'code_executor':
+            return 'input';
+          case 'output':
+            return 'data';
+          case 'input':
+          default:
+            return 'input';
+        }
+      };
+
+      const sh = connection.sourceHandle || defaultSourceHandle();
+      const th = connection.targetHandle || defaultTargetHandle();
 
       let edgeData: WorkflowEdgeData = {
         source_output: sh,
-        target_input: connection.targetHandle || 'input',
+        target_input: th,
       };
       const edge: any = {
         ...connection,
         id: genId('e'),
         type: 'default',
+        sourceHandle: sh,
+        targetHandle: th,
       };
 
       // Branching: connect from condition node's virtual handles true/false
@@ -436,6 +582,33 @@ const WorkflowEditor: React.FC = () => {
     },
     [selectedNodeId, setNodes]
   );
+
+  const updateEdgeById = useCallback(
+    (edgeId: string, patch: Partial<WorkflowEdgeData>) => {
+      setEdges((es) =>
+        es.map((e) =>
+          e.id === edgeId
+            ? {
+                ...e,
+                sourceHandle: (patch as any)?.source_output ?? e.sourceHandle,
+                targetHandle: (patch as any)?.target_input ?? e.targetHandle,
+                data: { ...(e.data || {}), ...patch },
+              }
+            : e
+        )
+      );
+      setValidation(null);
+    },
+    [setEdges]
+  );
+
+  const closeInspector = useCallback(() => {
+    setSelectedNodeId(null);
+    setSelectedEdgeId(null);
+    // Unselect in ReactFlow state (prevents panel immediately re-opening).
+    setNodes((ns) => ns.map((n) => ({ ...n, selected: false })));
+    setEdges((es) => es.map((e) => ({ ...e, selected: false })));
+  }, [setEdges, setNodes]);
 
   const createBranchesForSelectedCondition = useCallback(() => {
     if (!selectedNodeId) return;
@@ -549,57 +722,65 @@ const WorkflowEditor: React.FC = () => {
   }, [id, navigate, serialize]);
 
   const goTest = useCallback(async () => {
-    if (!id) {
-      await save();
-      return;
+    // Ensure tester runs the latest graph (avoid “改了没保存，测试没反应/还是旧流程”)
+    setBusy(true);
+    try {
+      const payload = serialize();
+      let workflowId = id || null;
+      if (workflowId) {
+        await workflowApi.update(workflowId, payload as any);
+      } else {
+        const res = await workflowApi.create(payload as any);
+        workflowId = res.data?.id || null;
+      }
+      if (!workflowId) {
+        setSnack({ type: 'error', message: '保存失败：未获取到工作流 ID' });
+        return;
+      }
+      setSnack({ type: 'success', message: '已保存，进入测试' });
+      navigate(`/workflows/${workflowId}/test`);
+    } catch (e: any) {
+      setSnack({ type: 'error', message: e?.response?.data?.detail || '保存失败，无法进入测试' });
+    } finally {
+      setBusy(false);
     }
-    navigate(`/workflows/${id}/test`);
-  }, [id, navigate, save]);
+  }, [id, navigate, serialize]);
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <Paper variant="outlined" sx={{ p: 2, flexShrink: 0 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }}>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography variant="h5" sx={{ fontWeight: 900, mb: 0.5 }}>
-              工作流编辑器
+      <Paper variant="outlined" sx={{ p: 1.25, flexShrink: 0 }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ md: 'center' }}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
+            <Tooltip title={headerExpanded ? '收起工作流设置' : '展开工作流设置'}>
+              <IconButton size="small" onClick={toggleHeader} aria-label="切换工作流设置展开">
+                <ExpandMoreIcon
+                  fontSize="small"
+                  sx={{
+                    transform: headerExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                    transition: 'transform 120ms ease',
+                  }}
+                />
+              </IconButton>
+            </Tooltip>
+            <Typography variant="subtitle1" sx={{ fontWeight: 900, whiteSpace: 'nowrap' }}>
+              工作流
             </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-              <TextField
-                size="small"
-                label="名称"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                fullWidth
-              />
-              <TextField
-                size="small"
-                label="描述"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                fullWidth
-              />
-            </Stack>
-            <Box sx={{ mt: 1 }}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={isPublic}
-                    onChange={(_e, checked) => setIsPublic(checked)}
-                    disabled={busy}
-                    size="small"
-                  />
-                }
-                label={isPublic ? '公开给团队' : '仅自己可见'}
-              />
-            </Box>
-          </Box>
-          <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
+            <TextField
+              size="small"
+              label="名称"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              fullWidth
+            />
+          </Stack>
+
+          <Stack direction="row" spacing={1} sx={{ flexShrink: 0, flexWrap: 'wrap', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
             <Button
               variant="outlined"
               startIcon={<ResetIcon />}
               onClick={resetToDefault}
               disabled={busy}
+              size="small"
             >
               重置画布
             </Button>
@@ -608,6 +789,7 @@ const WorkflowEditor: React.FC = () => {
               startIcon={<ValidateIcon />}
               onClick={validate}
               disabled={busy}
+              size="small"
             >
               校验
             </Button>
@@ -616,6 +798,7 @@ const WorkflowEditor: React.FC = () => {
               startIcon={<SaveIcon />}
               onClick={save}
               disabled={busy}
+              size="small"
             >
               保存
             </Button>
@@ -624,6 +807,7 @@ const WorkflowEditor: React.FC = () => {
               startIcon={<TestIcon />}
               onClick={goTest}
               disabled={busy}
+              size="small"
             >
               测试
             </Button>
@@ -632,25 +816,54 @@ const WorkflowEditor: React.FC = () => {
               startIcon={<TemplateIcon />}
               onClick={openSaveAsTemplate}
               disabled={busy}
+              size="small"
             >
               保存为模板
             </Button>
           </Stack>
         </Stack>
-        {validation && (
-          <Box sx={{ mt: 1.5 }}>
-            <Alert severity={validation.is_valid ? 'success' : 'error'}>
-              {validation.is_valid ? '校验通过' : '校验失败'}
-              {!!validation.errors?.length && (
-                <Box component="ul" sx={{ m: 0.5, pl: 2 }}>
-                  {validation.errors.slice(0, 5).map((x, i) => (
-                    <li key={i}>{x}</li>
-                  ))}
-                </Box>
-              )}
-            </Alert>
+
+        <Collapse in={headerExpanded} timeout={150} unmountOnExit>
+          <Box sx={{ mt: 1.25 }}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+              <TextField
+                size="small"
+                label="描述"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                fullWidth
+              />
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={isPublic}
+                      onChange={(_e, checked) => setIsPublic(checked)}
+                      disabled={busy}
+                      size="small"
+                    />
+                  }
+                  label={isPublic ? '公开给团队' : '仅自己可见'}
+                />
+              </Box>
+            </Stack>
+
+            {validation && (
+              <Box sx={{ mt: 1.25 }}>
+                <Alert severity={validation.is_valid ? 'success' : 'error'}>
+                  {validation.is_valid ? '校验通过' : '校验失败'}
+                  {!!validation.errors?.length && (
+                    <Box component="ul" sx={{ m: 0.5, pl: 2 }}>
+                      {validation.errors.slice(0, 5).map((x, i) => (
+                        <li key={i}>{x}</li>
+                      ))}
+                    </Box>
+                  )}
+                </Alert>
+              </Box>
+            )}
           </Box>
-        )}
+        </Collapse>
       </Paper>
 
       <Divider sx={{ my: 1.5 }} />
@@ -660,14 +873,10 @@ const WorkflowEditor: React.FC = () => {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', md: '280px 1fr 360px' },
+          gridTemplateColumns: { xs: '1fr', md: '1fr' },
           gap: 2,
         }}
       >
-        <Box sx={{ display: { xs: 'none', md: 'block' }, minHeight: 0 }}>
-          <NodePalette templates={NODE_TEMPLATES} onAddClick={(k) => addAtCenter(k)} />
-        </Box>
-
         <Paper
           ref={wrapperRef}
           variant="outlined"
@@ -693,6 +902,105 @@ const WorkflowEditor: React.FC = () => {
             <Background />
             <Controls />
           </ReactFlow>
+
+          {/* Floating node palette (Dify-like): does not shrink canvas */}
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 12,
+              left: 12,
+              bottom: 12,
+              zIndex: 18,
+              pointerEvents: 'none',
+            }}
+          >
+            {paletteOpen ? (
+              <Paper
+                variant="outlined"
+                sx={{
+                  width: paletteWidth,
+                  height: '100%',
+                  overflow: 'hidden',
+                  position: 'relative',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  pointerEvents: 'auto',
+                }}
+              >
+                <Stack direction="row" spacing={0.5} alignItems="center" sx={{ px: 1, py: 0.75 }}>
+                  <Typography variant="subtitle2" sx={{ fontWeight: 900, flex: 1 }}>
+                    节点库
+                  </Typography>
+                  <Tooltip title="缩小">
+                    <IconButton size="small" onClick={() => bumpPaletteScale(-0.05)}>
+                      <ZoomOutIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="放大">
+                    <IconButton size="small" onClick={() => bumpPaletteScale(0.05)}>
+                      <ZoomInIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                  <Tooltip title="折叠">
+                    <IconButton size="small" onClick={togglePalette} aria-label="折叠节点库">
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                </Stack>
+                <Divider />
+                <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+                  <Box
+                    sx={{
+                      transform: `scale(${paletteScale})`,
+                      transformOrigin: 'top left',
+                      width: `${100 / paletteScale}%`,
+                    }}
+                  >
+                    <NodePalette templates={NODE_TEMPLATES} onAddClick={(k) => addAtCenter(k)} embedded />
+                  </Box>
+                </Box>
+                {/* Resize handle */}
+                <Box
+                  onPointerDown={(e) => {
+                    paletteResizeRef.current = { startX: e.clientX, startWidth: paletteWidth };
+                    try {
+                      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+                    } catch {
+                      // ignore
+                    }
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    right: 0,
+                    width: 8,
+                    height: '100%',
+                    cursor: 'col-resize',
+                    bgcolor: 'transparent',
+                  }}
+                />
+              </Paper>
+            ) : (
+              <Tooltip title="打开节点库">
+                <IconButton
+                  size="small"
+                  onClick={togglePalette}
+                  sx={{
+                    pointerEvents: 'auto',
+                    bgcolor: 'background.paper',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    '&:hover': { bgcolor: 'background.paper' },
+                  }}
+                  aria-label="打开节点库"
+                >
+                  <ViewModuleIcon fontSize="small" />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Box>
           <Box
             sx={{
               position: 'absolute',
@@ -710,66 +1018,99 @@ const WorkflowEditor: React.FC = () => {
               </Button>
             ))}
           </Box>
-        </Paper>
 
-        <Box sx={{ minHeight: 0 }}>
-          {selectedNode ? (
-            <NodeInspector
-              node={selectedNode}
-              onChange={updateSelectedNode}
-              onDelete={deleteSelectedNode}
-              onCreateBranches={selectedNode.data.kind === 'condition' ? createBranchesForSelectedCondition : undefined}
-              knowledgeBases={knowledgeBases}
-              availableChatModels={availableChatModels}
-              allNodes={nodes}
-              allEdges={edges}
-            />
-          ) : (
-            <EdgeInspector
-              edge={selectedEdge}
-              sourceName={
-                selectedEdge
-                  ? nodes.find((n) => n.id === selectedEdge.source)?.data?.name
-                  : undefined
-              }
-              targetName={
-                selectedEdge
-                  ? nodes.find((n) => n.id === selectedEdge.target)?.data?.name
-                  : undefined
-              }
-              sourceOutputs={(() => {
-                const src = selectedEdge ? nodes.find((n) => n.id === selectedEdge.source) : null;
-                return outputsForKind(src?.data?.kind);
-              })()}
-              targetInputs={(() => {
-                const tgt = selectedEdge ? nodes.find((n) => n.id === selectedEdge.target) : null;
-                return inputsForKind(tgt?.data?.kind);
-              })()}
-              onChange={(patch) => {
-                if (!selectedEdgeId) return;
-                setEdges((es) =>
-                  es.map((e) =>
-                    e.id === selectedEdgeId
-                      ? {
-                          ...e,
-                          sourceHandle: (patch as any)?.source_output ?? e.sourceHandle,
-                          targetHandle: (patch as any)?.target_input ?? e.targetHandle,
-                          data: { ...(e.data || {}), ...patch },
-                        }
-                      : e
-                  )
-                );
-                setValidation(null);
+          {(selectedNode || selectedEdge) && (
+            <Box
+              sx={{
+                position: 'absolute',
+                top: 12,
+                right: 12,
+                bottom: 12,
+                width: { xs: 'calc(100% - 24px)', sm: 420, md: 380 },
+                maxWidth: '92vw',
+                zIndex: 20,
               }}
-              onDelete={() => {
-                if (!selectedEdgeId) return;
-                setEdges((es) => es.filter((e) => e.id !== selectedEdgeId));
-                setSelectedEdgeId(null);
-                setValidation(null);
-              }}
-            />
+            >
+              <Box sx={{ position: 'relative', height: '100%' }}>
+                <IconButton
+                  size="small"
+                  onClick={closeInspector}
+                  sx={{
+                    position: 'absolute',
+                    top: 10,
+                    right: 10,
+                    zIndex: 30,
+                    bgcolor: 'background.paper',
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    '&:hover': { bgcolor: 'background.paper' },
+                  }}
+                  aria-label="关闭属性面板"
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+
+                {selectedNode ? (
+                  <DifyNodeInspector
+                    node={selectedNode}
+                    onChange={updateSelectedNode}
+                    onDelete={deleteSelectedNode}
+                    onCreateBranches={selectedNode.data.kind === 'condition' ? createBranchesForSelectedCondition : undefined}
+                    onUpdateEdge={updateEdgeById}
+                    knowledgeBases={knowledgeBases}
+                    availableChatModels={availableChatModels}
+                    allNodes={nodes}
+                    allEdges={edges}
+                  />
+                ) : (
+                  <EdgeInspector
+                    edge={selectedEdge}
+                    sourceName={
+                      selectedEdge
+                        ? nodes.find((n) => n.id === selectedEdge.source)?.data?.name
+                        : undefined
+                    }
+                    targetName={
+                      selectedEdge
+                        ? nodes.find((n) => n.id === selectedEdge.target)?.data?.name
+                        : undefined
+                    }
+                    sourceOutputs={(() => {
+                      const src = selectedEdge ? nodes.find((n) => n.id === selectedEdge.source) : null;
+                      return outputsForKind(src?.data?.kind);
+                    })()}
+                    targetInputs={(() => {
+                      const tgt = selectedEdge ? nodes.find((n) => n.id === selectedEdge.target) : null;
+                      return inputsForKind(tgt?.data?.kind);
+                    })()}
+                    onChange={(patch) => {
+                      if (!selectedEdgeId) return;
+                      setEdges((es) =>
+                        es.map((e) =>
+                          e.id === selectedEdgeId
+                            ? {
+                                ...e,
+                                sourceHandle: (patch as any)?.source_output ?? e.sourceHandle,
+                                targetHandle: (patch as any)?.target_input ?? e.targetHandle,
+                                data: { ...(e.data || {}), ...patch },
+                              }
+                            : e
+                        )
+                      );
+                      setValidation(null);
+                    }}
+                    onDelete={() => {
+                      if (!selectedEdgeId) return;
+                      setEdges((es) => es.filter((e) => e.id !== selectedEdgeId));
+                      setSelectedEdgeId(null);
+                      setValidation(null);
+                    }}
+                  />
+                )}
+              </Box>
+            </Box>
           )}
-        </Box>
+        </Paper>
       </Box>
 
       <Snackbar

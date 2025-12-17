@@ -93,6 +93,7 @@ class ModelConfigService:
                 provider=ProviderType.OPENAI,
                 display_name="OpenAI",
                 api_base="https://api.openai.com/v1",
+                api_key=getattr(settings, "OPENAI_API_KEY", None),
                 description="OpenAI GPT模型和嵌入模型",
                 models={
                     ModelType.CHAT: ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
@@ -112,6 +113,7 @@ class ModelConfigService:
                 provider=ProviderType.DEEPSEEK,
                 display_name="DeepSeek",
                 api_base="https://api.deepseek.com/v1",
+                api_key=getattr(settings, "DEEPSEEK_API_KEY", None),
                 description="DeepSeek高性能代码和聊天模型",
                 models={
                     ModelType.CHAT: ["deepseek-chat", "deepseek-coder"],
@@ -127,6 +129,7 @@ class ModelConfigService:
                 display_name="通义千问",
                 # Use DashScope native API base (matches QwenAPIService endpoints)
                 api_base="https://dashscope.aliyuncs.com/api/v1",
+                api_key=getattr(settings, "DASHSCOPE_API_KEY", None),
                 description="阿里云通义千问全系列模型",
                 models={
                     ModelType.CHAT: [
@@ -152,6 +155,7 @@ class ModelConfigService:
                 provider=ProviderType.SILICONFLOW,
                 display_name="硅基流动",
                 api_base="https://api.siliconflow.cn/v1",
+                api_key=getattr(settings, "SILICONFLOW_API_KEY", None),
                 description="硅基流动开源模型API服务",
                 models={
                     ModelType.CHAT: [
@@ -183,6 +187,7 @@ class ModelConfigService:
                 provider=ProviderType.COHERE,
                 display_name="Cohere",
                 api_base="https://api.cohere.ai/v1",
+                api_key=getattr(settings, "COHERE_API_KEY", None),
                 description="Cohere多语言模型服务",
                 models={
                     ModelType.CHAT: ["command-r", "command-r-plus"],
@@ -201,6 +206,7 @@ class ModelConfigService:
                 provider=ProviderType.LOCAL,
                 display_name="本地(OpenAI兼容)",
                 api_base=_default_local_api_base(),
+                api_key=getattr(settings, "LOCAL_MODEL_API_KEY", None),
                 description="本地/自建 OpenAI-Compatible 接口（/v1/chat/completions, /v1/embeddings, /v1/models）",
                 requires_api_key=False,
                 models={

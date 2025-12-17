@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Box, Chip, Paper, Typography, alpha, useTheme } from '@mui/material';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import type { WorkflowNodeData } from './types';
@@ -27,11 +27,26 @@ function kindLabel(kind: WorkflowNodeData['kind']): string {
 export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
   const { data, selected } = props;
   const theme = useTheme();
+  const [hovered, setHovered] = useState(false);
+  const showPortLabels = selected || hovered;
+
+  const PORT_TOP_BASE = 44;
+  const PORT_STEP = 18;
+
+  const portLabel = useMemo(() => {
+    return (id: string) => {
+      if (data.kind === 'condition') {
+        if (id === 'true') return 'TRUE';
+        if (id === 'false') return 'FALSE';
+      }
+      return id;
+    };
+  }, [data.kind]);
 
   const inputs = useMemo(() => {
     switch (data.kind) {
       case 'llm':
-        return ['data', 'prompt', 'input'];
+        return ['data', 'prompt', 'input', 'documents'];
       case 'rag_retriever':
         return ['data', 'query'];
       case 'http_request':
@@ -64,7 +79,7 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
       case 'code_executor':
         return ['result'];
       case 'output':
-        return ['output'];
+        return [] as string[];
       default:
         return ['output'];
     }
@@ -101,7 +116,10 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
         background: alpha(theme.palette.background.paper, 0.85),
         boxShadow: selected ? `0 0 0 2px ${alpha(accent, 0.25)}` : 'none',
         overflow: 'hidden',
+        position: 'relative',
       }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
     >
       <Box sx={{ px: 1.25, py: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
         <Chip
@@ -127,6 +145,47 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
         </Box>
       )}
 
+      {/* Port labels to make IO explicit while building workflows (only on hover/selected) */}
+      {showPortLabels &&
+        inputs.map((id, idx) => (
+          <Typography
+            key={`in_label_${id}`}
+            variant="caption"
+            sx={{
+              position: 'absolute',
+              left: 14,
+              top: PORT_TOP_BASE + idx * PORT_STEP - 9,
+              fontSize: 11,
+              color: alpha(theme.palette.text.secondary, 0.9),
+              pointerEvents: 'none',
+              userSelect: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {portLabel(id)}
+          </Typography>
+        ))}
+      {showPortLabels &&
+        outputs.map((id, idx) => (
+          <Typography
+            key={`out_label_${id}`}
+            variant="caption"
+            sx={{
+              position: 'absolute',
+              right: 14,
+              top: PORT_TOP_BASE + idx * PORT_STEP - 9,
+              fontSize: 11,
+              color: alpha(theme.palette.text.secondary, 0.9),
+              pointerEvents: 'none',
+              userSelect: 'none',
+              whiteSpace: 'nowrap',
+              textAlign: 'right',
+            }}
+          >
+            {portLabel(id)}
+          </Typography>
+        ))}
+
       {inputs.map((id, idx) => (
         <Handle
           key={`in_${id}`}
@@ -134,7 +193,7 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
           position={Position.Left}
           id={id}
           style={{
-            top: 44 + idx * 18,
+            top: PORT_TOP_BASE + idx * PORT_STEP,
             width: 10,
             height: 10,
             border: `2px solid ${alpha(accent, 0.8)}`,
@@ -150,7 +209,7 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
           position={Position.Right}
           id={id}
           style={{
-            top: 44 + idx * 18,
+            top: PORT_TOP_BASE + idx * PORT_STEP,
             width: 10,
             height: 10,
             border: `2px solid ${alpha(accent, 0.8)}`,
