@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Box, Divider, Paper, TextField, Typography, List, ListItemButton, ListItemText, Chip } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import type { NodeTemplate } from './nodeTemplates';
 
 type Props = {
@@ -9,13 +10,15 @@ type Props = {
 };
 
 export default function NodePalette({ templates, onAddClick, embedded }: Props) {
+  const { t, i18n } = useTranslation();
   const [q, setQ] = useState('');
 
   const grouped = useMemo(() => {
     const query = q.trim().toLowerCase();
+    const displayText = (tpl: NodeTemplate) => `${t(tpl.nameKey)} ${t(tpl.descriptionKey)}`;
     const filtered = !query
       ? templates
-      : templates.filter((t) => (t.name + ' ' + t.description).toLowerCase().includes(query));
+      : templates.filter((tpl) => displayText(tpl).toLowerCase().includes(query));
     const map = new Map<string, NodeTemplate[]>();
     for (const t of filtered) {
       const key = t.category;
@@ -23,18 +26,29 @@ export default function NodePalette({ templates, onAddClick, embedded }: Props) 
       map.get(key)!.push(t);
     }
     return Array.from(map.entries());
-  }, [q, templates]);
+  }, [i18n.language, q, t, templates]);
+
+  const categoryLabel = useMemo(() => {
+    const map: Record<NodeTemplate['category'], string> = {
+      basic: t('workflow2.categories.basic'),
+      ai: t('workflow2.categories.ai'),
+      rag: t('workflow2.categories.rag'),
+      logic: t('workflow2.categories.logic'),
+      tool: t('workflow2.categories.tool'),
+    };
+    return (cat: NodeTemplate['category']) => map[cat] || String(cat);
+  }, [t]);
 
   const content = (
     <>
       {!embedded && (
         <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-          节点库
+          {t('workflow2.palette.title')}
         </Typography>
       )}
       <TextField
         size="small"
-        placeholder="搜索节点…"
+        placeholder={t('workflow2.palette.searchPlaceholder')}
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
@@ -44,31 +58,31 @@ export default function NodePalette({ templates, onAddClick, embedded }: Props) 
           <Box key={cat} sx={{ mb: 1.5 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 0.5 }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                {cat}
+                {categoryLabel(cat as NodeTemplate['category'])}
               </Typography>
               <Chip size="small" label={list.length} />
             </Box>
             <List dense disablePadding>
-              {list.map((t) => (
+              {list.map((tpl) => (
                 <ListItemButton
-                  key={t.kind}
+                  key={tpl.kind}
                   sx={{ borderRadius: 1, mb: 0.5 }}
-                  onClick={() => onAddClick(t.kind)}
+                  onClick={() => onAddClick(tpl.kind)}
                   draggable
                   onDragStart={(e) => {
-                    e.dataTransfer.setData('application/ragj-workflow-node', JSON.stringify({ kind: t.kind }));
+                    e.dataTransfer.setData('application/ragj-workflow-node', JSON.stringify({ kind: tpl.kind }));
                     e.dataTransfer.effectAllowed = 'move';
                   }}
                 >
                   <ListItemText
                     primary={
                       <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                        {t.name}
+                        {t(tpl.nameKey)}
                       </Typography>
                     }
                     secondary={
                       <Typography variant="caption" color="text.secondary">
-                        {t.description}
+                        {t(tpl.descriptionKey)}
                       </Typography>
                     }
                   />
@@ -79,13 +93,13 @@ export default function NodePalette({ templates, onAddClick, embedded }: Props) 
         ))}
         {grouped.length === 0 && (
           <Typography variant="caption" color="text.secondary">
-            没有匹配的节点
+            {t('workflow2.palette.empty')}
           </Typography>
         )}
       </Box>
       {!embedded && (
         <Typography variant="caption" color="text.secondary">
-          提示：可拖拽到画布，也可点击添加
+          {t('workflow2.palette.hint')}
         </Typography>
       )}
     </>

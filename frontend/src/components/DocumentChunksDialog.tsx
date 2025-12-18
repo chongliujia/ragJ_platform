@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Dialog,
   DialogTitle,
@@ -44,6 +45,7 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
   filename,
   totalChunks,
 }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [chunks, setChunks] = useState<ChunkItem[]>([]);
   const [hasMore, setHasMore] = useState(true);
@@ -62,7 +64,7 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
       setHasMore(items.length === nextRowsPerPage);
       setPage(nextPage);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || '加载分片失败');
+      setError(e?.response?.data?.detail || e?.message || t('documentChunksDialog.messages.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -93,14 +95,16 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Typography variant="h6">查看分片{filename ? `: ${filename}` : ''}</Typography>
+          <Typography variant="h6">
+            {t('documentChunksDialog.title', { filename: filename ? `: ${filename}` : '' })}
+          </Typography>
           <Box>
-            <Tooltip title="复制全部">
+            <Tooltip title={t('documentChunksDialog.actions.copyAll')}>
               <IconButton size="small" onClick={copyAll}>
                 <CopyIcon fontSize="small" />
               </IconButton>
             </Tooltip>
-            <Tooltip title="刷新">
+            <Tooltip title={t('documentChunksDialog.actions.refresh')}>
               <span>
                 <IconButton size="small" onClick={() => loadPage(page, rowsPerPage)} disabled={loading}>
                   <RefreshIcon fontSize="small" />
@@ -135,7 +139,7 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
               loadPage(0, safe);
             }}
             rowsPerPageOptions={[25, 50, 100, 200]}
-            labelRowsPerPage="每页"
+            labelRowsPerPage={t('documentChunksDialog.pagination.rowsPerPage')}
             labelDisplayedRows={({ from, to, count }) =>
               count === -1 ? `${from}-${to}` : `${from}-${to} / ${count}`
             }
@@ -173,7 +177,7 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
         )}
       </DialogContent>
       <DialogActions>
-        <Button onClick={onClose}>关闭</Button>
+        <Button onClick={onClose}>{t('common.close')}</Button>
       </DialogActions>
     </Dialog>
   );

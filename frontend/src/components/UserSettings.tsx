@@ -58,7 +58,7 @@ interface AvailableChatModel {
 }
 
 const UserSettings: React.FC = () => {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<UserConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -72,14 +72,14 @@ const UserSettings: React.FC = () => {
   const [modelsLoading, setModelsLoading] = useState(false);
 
   const themes = [
-    { value: 'light', label: '浅色主题' },
-    { value: 'dark', label: '深色主题' },
-    { value: 'auto', label: '跟随系统' },
+    { value: 'light', labelKey: 'userSettings.theme.light' },
+    { value: 'dark', labelKey: 'userSettings.theme.dark' },
+    { value: 'auto', labelKey: 'userSettings.theme.auto' },
   ];
 
   const languages = [
-    { value: 'zh', label: '中文' },
-    { value: 'en', label: 'English' },
+    { value: 'zh', labelKey: 'userSettings.language.zh' },
+    { value: 'en', labelKey: 'userSettings.language.en' },
   ];
 
   useEffect(() => {
@@ -183,7 +183,7 @@ const UserSettings: React.FC = () => {
 
       const updatedConfig = await response.json();
       setConfig(updatedConfig);
-      setSuccess('配置保存成功！');
+      setSuccess(t('userSettings.messages.saved'));
       
       // 如果语言设置改变，更新i18n
       if (i18n.language !== config.language) {
@@ -228,7 +228,7 @@ const UserSettings: React.FC = () => {
   if (!config) {
     return (
       <Alert severity="error">
-        无法加载用户配置
+        {t('userSettings.errors.loadFailed')}
       </Alert>
     );
   }
@@ -265,18 +265,18 @@ const UserSettings: React.FC = () => {
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <InfoIcon fontSize="small" color="action" />
-            <Typography sx={{ fontWeight: 600 }}>参数说明</Typography>
+            <Typography sx={{ fontWeight: 600 }}>{t('userSettings.help.title')}</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-            这些参数只影响当前账号（不会影响同租户其他用户）。若模型列表为空，请先在「系统设置 → 模型配置」里配置提供商 API。
+            {t('userSettings.help.description')}
           </Typography>
           <Box component="ul" sx={{ m: 0, pl: 2, color: 'text.secondary', fontSize: 14, lineHeight: 1.8 }}>
-            <li><b>Chat 模型</b>：对话回答使用的默认模型。</li>
-            <li><b>Embedding</b>：用于文档入库与检索向量化，建议选择稳定的向量模型。</li>
-            <li><b>Rerank</b>：用于对检索结果二次排序（可提升命中，但会增加耗时/费用）。</li>
-            <li><b>Chunk</b>：分片越大上下文越完整，但入库成本更高。</li>
+            <li><b>{t('userSettings.help.labels.chat')}</b>{t('userSettings.help.items.chat')}</li>
+            <li><b>{t('userSettings.help.labels.embedding')}</b>{t('userSettings.help.items.embedding')}</li>
+            <li><b>{t('userSettings.help.labels.rerank')}</b>{t('userSettings.help.items.rerank')}</li>
+            <li><b>{t('userSettings.help.labels.chunk')}</b>{t('userSettings.help.items.chunk')}</li>
           </Box>
         </AccordionDetails>
       </Accordion>
@@ -286,18 +286,18 @@ const UserSettings: React.FC = () => {
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <TuneIcon />
-            <Typography variant="h6">AI 模型设置</Typography>
+            <Typography variant="h6">{t('userSettings.sections.aiModels')}</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
           <Grid container spacing={3}>
             <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
-                <InputLabel>聊天模型</InputLabel>
+                <InputLabel>{t('userSettings.fields.chatModel')}</InputLabel>
                 <Select
                   value={config.preferred_chat_model}
                   onChange={(e) => updateConfig('preferred_chat_model', e.target.value)}
-                  label="聊天模型"
+                  label={t('userSettings.fields.chatModel')}
                   disabled={modelsLoading}
                 >
                   {chatModelNames.map((modelName) => {
@@ -314,11 +314,11 @@ const UserSettings: React.FC = () => {
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
-                <InputLabel>嵌入模型</InputLabel>
+                <InputLabel>{t('userSettings.fields.embeddingModel')}</InputLabel>
                 <Select
                   value={config.preferred_embedding_model}
                   onChange={(e) => updateConfig('preferred_embedding_model', e.target.value)}
-                  label="嵌入模型"
+                  label={t('userSettings.fields.embeddingModel')}
                   disabled={modelsLoading}
                 >
                   {embeddingModelNames.map((modelName) => (
@@ -331,11 +331,11 @@ const UserSettings: React.FC = () => {
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <FormControl fullWidth>
-                <InputLabel>重排序模型</InputLabel>
+                <InputLabel>{t('userSettings.fields.rerankModel')}</InputLabel>
                 <Select
                   value={config.preferred_rerank_model}
                   onChange={(e) => updateConfig('preferred_rerank_model', e.target.value)}
-                  label="重排序模型"
+                  label={t('userSettings.fields.rerankModel')}
                   disabled={modelsLoading}
                 >
                   {rerankModelNames.map((modelName) => (
@@ -355,7 +355,7 @@ const UserSettings: React.FC = () => {
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <TuneIcon />
-            <Typography variant="h6">模型参数</Typography>
+            <Typography variant="h6">{t('userSettings.sections.modelParams')}</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
@@ -363,7 +363,7 @@ const UserSettings: React.FC = () => {
             <Grid size={{ xs: 12, md: 4 }}>
               <Box sx={{ px: 1 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  最大令牌数 ({maxTokensValue})
+                  {t('userSettings.params.maxTokens', { value: maxTokensValue })}
                 </Typography>
                 <Slider
                   min={256}
@@ -377,14 +377,14 @@ const UserSettings: React.FC = () => {
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  控制单次回复最大长度
+                  {t('userSettings.params.maxTokensHelp')}
                 </Typography>
               </Box>
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <Box sx={{ px: 1 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  温度 ({temperatureValue.toFixed(2)})
+                  {t('userSettings.params.temperature', { value: temperatureValue.toFixed(2) })}
                 </Typography>
                 <Slider
                   min={0}
@@ -398,15 +398,15 @@ const UserSettings: React.FC = () => {
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  控制生成随机性 (0.0-2.0)
+                  {t('userSettings.params.temperatureHelp')}
                 </Typography>
               </Box>
             </Grid>
-            <Grid size={{ xs: 12, md: 4 }}>
-              <Box sx={{ px: 1 }}>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  Top-p ({topPValue.toFixed(2)})
-                </Typography>
+	            <Grid size={{ xs: 12, md: 4 }}>
+	              <Box sx={{ px: 1 }}>
+	                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+	                  {t('userSettings.params.topP', { value: topPValue.toFixed(2) })}
+	                </Typography>
                 <Slider
                   min={0}
                   max={1}
@@ -419,14 +419,14 @@ const UserSettings: React.FC = () => {
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  核采样参数 (0.0-1.0)
+                  {t('userSettings.params.topPHelp')}
                 </Typography>
               </Box>
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <Box sx={{ px: 1 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  检索数量 ({retrievalTopKValue})
+                  {t('userSettings.params.retrievalTopK', { value: retrievalTopKValue })}
                 </Typography>
                 <Slider
                   min={1}
@@ -440,14 +440,14 @@ const UserSettings: React.FC = () => {
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  每次检索返回的片段数
+                  {t('userSettings.params.retrievalTopKHelp')}
                 </Typography>
               </Box>
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <Box sx={{ px: 1 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  分块大小 ({chunkSizeValue})
+                  {t('userSettings.params.chunkSize', { value: chunkSizeValue })}
                 </Typography>
                 <Slider
                   min={100}
@@ -461,14 +461,14 @@ const UserSettings: React.FC = () => {
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  文档切分时每块字符数
+                  {t('userSettings.params.chunkSizeHelp')}
                 </Typography>
               </Box>
             </Grid>
             <Grid size={{ xs: 12, md: 4 }}>
               <Box sx={{ px: 1 }}>
                 <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  分块重叠 ({chunkOverlapValue})
+                  {t('userSettings.params.chunkOverlap', { value: chunkOverlapValue })}
                 </Typography>
                 <Slider
                   min={0}
@@ -482,7 +482,7 @@ const UserSettings: React.FC = () => {
                   }}
                 />
                 <Typography variant="caption" color="text.secondary">
-                  相邻分块之间的重叠字符数
+                  {t('userSettings.params.chunkOverlapHelp')}
                 </Typography>
               </Box>
             </Grid>
@@ -495,22 +495,22 @@ const UserSettings: React.FC = () => {
         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <ThemeIcon />
-            <Typography variant="h6">界面设置</Typography>
+            <Typography variant="h6">{t('userSettings.sections.ui')}</Typography>
           </Box>
         </AccordionSummary>
         <AccordionDetails>
           <Grid container spacing={3}>
             <Grid size={{ xs: 12, md: 6 }}>
               <FormControl fullWidth>
-                <InputLabel>主题</InputLabel>
+                <InputLabel>{t('userSettings.fields.theme')}</InputLabel>
                 <Select
                   value={config.theme}
                   onChange={(e) => updateConfig('theme', e.target.value)}
-                  label="主题"
+                  label={t('userSettings.fields.theme')}
                 >
                   {themes.map((theme) => (
                     <MenuItem key={theme.value} value={theme.value}>
-                      {theme.label}
+                      {t(theme.labelKey)}
                     </MenuItem>
                   ))}
                 </Select>
@@ -518,15 +518,15 @@ const UserSettings: React.FC = () => {
             </Grid>
             <Grid size={{ xs: 12, md: 6 }}>
               <FormControl fullWidth>
-                <InputLabel>语言</InputLabel>
+                <InputLabel>{t('userSettings.fields.language')}</InputLabel>
                 <Select
                   value={config.language}
                   onChange={(e) => updateConfig('language', e.target.value)}
-                  label="语言"
+                  label={t('userSettings.fields.language')}
                 >
                   {languages.map((lang) => (
                     <MenuItem key={lang.value} value={lang.value}>
-                      {lang.label}
+                      {t(lang.labelKey)}
                     </MenuItem>
                   ))}
                 </Select>
@@ -545,17 +545,17 @@ const UserSettings: React.FC = () => {
           disabled={saving}
           size="large"
         >
-          {saving ? '保存中...' : '保存设置'}
+          {saving ? t('userSettings.actions.saving') : t('userSettings.actions.save')}
         </Button>
       </Box>
 
       {/* 配置信息 */}
       <Paper sx={{ mt: 3, p: 2, bgcolor: 'grey.50' }}>
         <Typography variant="body2" color="text.secondary">
-          配置创建时间: {new Date(config.created_at).toLocaleString()}
+          {t('userSettings.meta.createdAt')}: {new Date(config.created_at).toLocaleString()}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          最后更新时间: {new Date(config.updated_at).toLocaleString()}
+          {t('userSettings.meta.updatedAt')}: {new Date(config.updated_at).toLocaleString()}
         </Typography>
       </Paper>
     </Box>

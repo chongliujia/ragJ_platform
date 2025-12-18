@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Accordion,
@@ -109,6 +110,7 @@ const WorkflowExecutions: React.FC = () => {
   const { id } = useParams();
   const [sp, setSp] = useSearchParams();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const theme = useTheme();
   const isMdUp = useMediaQuery(theme.breakpoints.up('md'));
 
@@ -141,11 +143,11 @@ const WorkflowExecutions: React.FC = () => {
         });
       }
     } catch (e: any) {
-      setSnack({ type: 'error', message: e?.response?.data?.detail || '获取执行历史失败' });
+      setSnack({ type: 'error', message: e?.response?.data?.detail || t('workflowExecutions.messages.loadListFailed') });
     } finally {
       setLoadingList(false);
     }
-  }, [id, limit, offset, selectedExecutionId, setSp]);
+  }, [id, limit, offset, selectedExecutionId, setSp, t]);
 
   const fetchDetail = useCallback(async () => {
     if (!id || !selectedExecutionId) return;
@@ -155,11 +157,11 @@ const WorkflowExecutions: React.FC = () => {
       setDetail(res.data || null);
     } catch (e: any) {
       setDetail(null);
-      setSnack({ type: 'error', message: e?.response?.data?.detail || '获取执行详情失败' });
+      setSnack({ type: 'error', message: e?.response?.data?.detail || t('workflowExecutions.messages.loadDetailFailed') });
     } finally {
       setLoadingDetail(false);
     }
-  }, [id, selectedExecutionId]);
+  }, [id, selectedExecutionId, t]);
 
   useEffect(() => {
     fetchList();
@@ -211,7 +213,7 @@ const WorkflowExecutions: React.FC = () => {
     async (nodeId: string) => {
       if (!id || !detail?.execution_id || !nodeId) return;
       try {
-        setSnack({ type: 'info', message: '正在重试…' });
+        setSnack({ type: 'info', message: t('workflowExecutions.messages.retrying') });
         const res = await workflowApi.retryStep(id, detail.execution_id, nodeId);
         const newId = res.data?.execution_id;
         if (newId) {
@@ -220,13 +222,13 @@ const WorkflowExecutions: React.FC = () => {
             next.set('execution', newId);
             return next;
           });
-          setSnack({ type: 'success', message: `已创建重试执行：${newId}` });
+          setSnack({ type: 'success', message: t('workflowExecutions.messages.retryCreated', { id: newId }) });
         } else {
-          setSnack({ type: 'success', message: '重试已触发' });
+          setSnack({ type: 'success', message: t('workflowExecutions.messages.retryTriggered') });
         }
         await fetchList();
       } catch (e: any) {
-        setSnack({ type: 'error', message: e?.response?.data?.detail || '重试失败' });
+        setSnack({ type: 'error', message: e?.response?.data?.detail || t('workflowExecutions.messages.retryFailed') });
       }
     },
     [detail?.execution_id, fetchList, id, setSp]
@@ -239,9 +241,9 @@ const WorkflowExecutions: React.FC = () => {
           <BackIcon />
         </IconButton>
         <Typography variant="h6" sx={{ flex: 1 }}>
-          执行历史
+          {t('workflowExecutions.title')}
         </Typography>
-        {id && <Chip label={`Workflow: ${id}`} size="small" />}
+        {id && <Chip label={`${t('workflowExecutions.workflowLabel')}: ${id}`} size="small" />}
         <Stack direction="row" spacing={1}>
           <Button
             size="small"
@@ -252,10 +254,10 @@ const WorkflowExecutions: React.FC = () => {
               fetchDetail();
             }}
           >
-            刷新
+            {t('workflowExecutions.actions.refresh')}
           </Button>
           <Button size="small" variant="contained" onClick={() => navigate(`/workflows/${id}/test`)}>
-            去执行
+            {t('workflowExecutions.actions.goRun')}
           </Button>
         </Stack>
       </Paper>
@@ -274,24 +276,24 @@ const WorkflowExecutions: React.FC = () => {
         <Paper variant="outlined" sx={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Box sx={{ p: 1.5, borderBottom: `1px solid ${theme.palette.divider}` }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
-              执行列表
+              {t('workflowExecutions.list.title')}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              只显示你有权限查看的执行记录。
+              {t('workflowExecutions.list.hint')}
             </Typography>
           </Box>
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
             {loadingList && (
               <Box sx={{ p: 2 }}>
                 <Typography variant="caption" color="text.secondary">
-                  加载中…
+                  {t('workflowExecutions.list.loading')}
                 </Typography>
               </Box>
             )}
             {!loadingList && rows.length === 0 && (
               <Box sx={{ p: 2 }}>
                 <Typography variant="caption" color="text.secondary">
-                  暂无执行记录
+                  {t('workflowExecutions.list.empty')}
                 </Typography>
               </Box>
             )}
@@ -332,14 +334,14 @@ const WorkflowExecutions: React.FC = () => {
                       secondary={
                         <Box sx={{ mt: 0.25, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                           <Typography variant="caption" color="text.secondary">
-                            用时: {r.duration ?? '-'}s
+                            {t('workflowExecutions.list.labels.duration')} {r.duration ?? '-'}s
                           </Typography>
                           <Typography variant="caption" color="text.secondary">
-                            步骤: {r.completed_steps ?? 0}/{r.total_steps ?? 0}
+                            {t('workflowExecutions.list.labels.steps')} {r.completed_steps ?? 0}/{r.total_steps ?? 0}
                           </Typography>
                           {!!r.failed_steps && (
                             <Typography variant="caption" color="error">
-                              失败: {r.failed_steps}
+                              {t('workflowExecutions.list.labels.failed')} {r.failed_steps}
                             </Typography>
                           )}
                           {!!r.error_message && (
@@ -373,33 +375,33 @@ const WorkflowExecutions: React.FC = () => {
         <Paper variant="outlined" sx={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <Box sx={{ p: 1.5, borderBottom: `1px solid ${theme.palette.divider}` }}>
             <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
-              执行详情
+              {t('workflowExecutions.detail.title')}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              {selectedExecutionId ? `Execution: ${selectedExecutionId}` : '请选择一条执行记录'}
+              {selectedExecutionId ? `Execution: ${selectedExecutionId}` : t('workflowExecutions.detail.selectHint')}
             </Typography>
           </Box>
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 1.5 }}>
             {loadingDetail && (
               <Typography variant="caption" color="text.secondary">
-                加载中…
+                {t('workflowExecutions.list.loading')}
               </Typography>
             )}
             {!loadingDetail && !detail && (
-              <Alert severity="info">请选择一条执行记录查看步骤详情。</Alert>
+              <Alert severity="info">{t('workflowExecutions.detail.selectHint')}</Alert>
             )}
             {!loadingDetail && detail && (
               <Box>
                 <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: 'center', flexWrap: 'wrap' }}>
                   <Chip label={detail.status || '-'} color={statusColor(detail.status)} size="small" />
-                  {detail.duration != null && <Chip label={`用时 ${detail.duration}s`} size="small" />}
-                  {!!failedSteps.length && <Chip label={`失败步骤 ${failedSteps.length}`} color="error" size="small" />}
+                  {detail.duration != null && <Chip label={`${t('workflowExecutions.detail.duration')} ${detail.duration}s`} size="small" />}
+                  {!!failedSteps.length && <Chip label={`${t('workflowExecutions.detail.failedSteps')} ${failedSteps.length}`} color="error" size="small" />}
                   <Button
                     size="small"
                     startIcon={<EditIcon />}
                     onClick={() => navigate(`/workflows/${id}/edit`)}
                   >
-                    打开编辑器
+                    {t('workflowExecutions.actions.openEditor')}
                   </Button>
                 </Stack>
 
@@ -407,14 +409,14 @@ const WorkflowExecutions: React.FC = () => {
                   <Paper variant="outlined" sx={{ p: 1, mb: 1 }}>
                     <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', flexWrap: 'wrap' }}>
                       <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                        耗时分布（瀑布图）
+                        {t('workflowExecutions.detail.waterfall')}
                       </Typography>
                       <Typography variant="caption" color="text.secondary">
-                        总跨度 {timeline.span.toFixed(2)}s
+                        {t('workflowExecutions.detail.totalSpan')} {timeline.span.toFixed(2)}s
                       </Typography>
                       <Box sx={{ flex: 1 }} />
                       <Button size="small" variant="text" onClick={() => setTimelineExpanded((v) => !v)}>
-                        {timelineExpanded ? '收起' : '展开'}
+                        {timelineExpanded ? t('workflowExecutions.detail.collapse') : t('workflowExecutions.detail.expand')}
                       </Button>
                     </Stack>
 
@@ -534,7 +536,7 @@ const WorkflowExecutions: React.FC = () => {
                 {!!failedSteps.length && (
                   <Paper variant="outlined" sx={{ p: 1, mb: 1 }}>
                     <Typography variant="caption" color="text.secondary">
-                      失败节点定位：
+                      {t('workflowExecutions.detail.failedLocate')}
                     </Typography>
                     <Box sx={{ mt: 0.5, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                       {failedSteps.slice(0, 10).map((s) => (
@@ -555,7 +557,7 @@ const WorkflowExecutions: React.FC = () => {
 
                 <Accordion>
                   <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                    <Typography sx={{ fontWeight: 700 }}>本次输入 / 输出</Typography>
+                    <Typography sx={{ fontWeight: 700 }}>{t('workflowExecutions.detail.io')}</Typography>
                   </AccordionSummary>
                   <AccordionDetails>
                     <Stack spacing={1}>
@@ -568,7 +570,7 @@ const WorkflowExecutions: React.FC = () => {
                             size="small"
                             onClick={() => void copyToClipboard(toPrettyJson(detail.input_data))}
                             sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
-                            aria-label="复制 input_data"
+                            aria-label={t('workflowExecutions.actions.copyInputData')}
                           >
                             <CopyIcon fontSize="small" />
                           </IconButton>
@@ -586,7 +588,7 @@ const WorkflowExecutions: React.FC = () => {
                             size="small"
                             onClick={() => void copyToClipboard(toPrettyJson(detail.output_data))}
                             sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
-                            aria-label="复制 output_data"
+                            aria-label={t('workflowExecutions.actions.copyOutputData')}
                           >
                             <CopyIcon fontSize="small" />
                           </IconButton>
@@ -628,7 +630,7 @@ const WorkflowExecutions: React.FC = () => {
                               navigate(`/workflows/${id}/edit?node=${encodeURIComponent(s.node_id)}`);
                             }}
                           >
-                            定位
+                            {t('workflowExecutions.actions.locate')}
                           </Button>
                           <Button
                             size="small"
@@ -639,7 +641,7 @@ const WorkflowExecutions: React.FC = () => {
                               retryFromNode(s.node_id);
                             }}
                           >
-                            从此步重试
+                            {t('workflowExecutions.actions.retryFromStep')}
                           </Button>
                         </Box>
                       </AccordionSummary>
@@ -655,7 +657,7 @@ const WorkflowExecutions: React.FC = () => {
                                 size="small"
                                 onClick={() => void copyToClipboard(toPrettyJson(s.input))}
                                 sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
-                                aria-label="复制 input"
+                                aria-label={t('workflowExecutions.actions.copyInput')}
                               >
                                 <CopyIcon fontSize="small" />
                               </IconButton>
@@ -673,7 +675,7 @@ const WorkflowExecutions: React.FC = () => {
                                 size="small"
                                 onClick={() => void copyToClipboard(toPrettyJson(s.output))}
                                 sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
-                                aria-label="复制 output"
+                                aria-label={t('workflowExecutions.actions.copyOutput')}
                               >
                                 <CopyIcon fontSize="small" />
                               </IconButton>

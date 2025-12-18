@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { Box, Button, Divider, Paper, TextField, Typography, FormControl, InputLabel, MenuItem, Select } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import type { Edge } from 'reactflow';
 import type { WorkflowEdgeData } from './types';
 
@@ -22,12 +23,13 @@ export default function EdgeInspector({
   sourceOutputs,
   targetInputs,
 }: Props) {
+  const { t } = useTranslation();
   const title = useMemo(() => {
-    if (!edge) return '边属性';
+    if (!edge) return t('workflow2.edgeInspector.title');
     const left = sourceName || edge.source;
     const right = targetName || edge.target;
     return `${left} → ${right}`;
-  }, [edge, sourceName, targetName]);
+  }, [edge, sourceName, t, targetName]);
 
   const sourceOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -71,10 +73,10 @@ export default function EdgeInspector({
     return (
       <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
-          属性面板
+          {t('workflow2.edgeInspector.panelTitle')}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          选中一个边后在这里编辑映射/条件/转换。
+          {t('workflow2.edgeInspector.emptyHint')}
         </Typography>
       </Paper>
     );
@@ -87,7 +89,7 @@ export default function EdgeInspector({
           {title}
         </Typography>
         <Button color="error" variant="outlined" size="small" onClick={onDelete}>
-          删除
+          {t('common.delete')}
         </Button>
       </Box>
       <Divider sx={{ my: 1.5 }} />
@@ -106,7 +108,7 @@ export default function EdgeInspector({
           ))}
         </Select>
         <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-          源节点输出字段/句柄（优先用下拉，必要时可在下方自定义）。
+          {t('workflow2.edgeInspector.sourceOutputHint')}
         </Typography>
       </FormControl>
 
@@ -124,35 +126,35 @@ export default function EdgeInspector({
           ))}
         </Select>
         <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
-          目标节点输入字段/句柄（例如 LLM 推荐接到 input 或 prompt；Output 推荐接到 data）。
+          {t('workflow2.edgeInspector.targetInputHint')}
         </Typography>
       </FormControl>
 
       <TextField
         fullWidth
         size="small"
-        label="高级：自定义 source_output（可选）"
+        label={t('workflow2.edgeInspector.fields.customSourceOutput')}
         value={data.source_output || ''}
         onChange={(e) => onChange({ source_output: e.target.value })}
-        placeholder="例如 content"
+        placeholder={t('workflow2.edgeInspector.placeholders.sourceOutput')}
         sx={{ mb: 1.5 }}
       />
       <TextField
         fullWidth
         size="small"
-        label="高级：自定义 target_input（可选）"
+        label={t('workflow2.edgeInspector.fields.customTargetInput')}
         value={data.target_input || ''}
         onChange={(e) => onChange({ target_input: e.target.value })}
-        placeholder="例如 input"
+        placeholder={t('workflow2.edgeInspector.placeholders.targetInput')}
         sx={{ mb: 1.5 }}
       />
       <TextField
         fullWidth
         size="small"
-        label="condition（可选）"
+        label={t('workflow2.edgeInspector.fields.conditionOptional')}
         value={data.condition || ''}
         onChange={(e) => onChange({ condition: e.target.value })}
-        helperText={'条件表达式（安全 eval，无函数调用）。变量：value/input/context。例：value["condition_result"] == True'}
+        helperText={t('workflow2.edgeInspector.helpers.condition')}
         multiline
         minRows={3}
         sx={{ mb: 1.5 }}
@@ -160,10 +162,10 @@ export default function EdgeInspector({
       <TextField
         fullWidth
         size="small"
-        label="transform（可选）"
+        label={t('workflow2.edgeInspector.fields.transformOptional')}
         value={data.transform || ''}
         onChange={(e) => onChange({ transform: e.target.value })}
-        helperText={'数据转换表达式（后端会执行）。例：{"query": value["content"]}'}
+        helperText={t('workflow2.edgeInspector.helpers.transform')}
         multiline
         minRows={3}
       />

@@ -143,7 +143,11 @@
     "selectKnowledgeBaseFirst": "请先选择一个知识库",
     "errorResponse": "抱歉，我暂时无法回答您的问题。请稍后再试。",
     "fetchKnowledgeBasesError": "获取知识库列表失败",
-    "normalChat": "普通对话（无知识库）"
+    "normalChat": "普通对话（无知识库）",
+    "regenerate": "重新生成",
+    "stop": "停止",
+    "timeout": "请求超时",
+    "timeoutWithKnowledgeBase": "请求超时，可重试或切换到普通对话。"
   },
   "documents": {
     "title": "文档管理",
@@ -156,6 +160,11 @@
     },
     "actions": {
       "goCreateKb": "去创建知识库"
+    },
+    "messages": {
+      "loadKnowledgeBasesFailed": "加载知识库失败",
+      "uploadAccepted": "上传已接收，后台处理中",
+      "documentsUpdated": "文档已更新"
     }
   },
   "document": {
@@ -172,13 +181,17 @@
         "selected": "已选择",
         "selectedFiles": "已选择的文件",
         "required": "请选择要上传的文件",
-        "supportedFormats": "支持 PDF、DOCX、TXT、MD、HTML、CSV、JSON、XML、RTF、EPUB、ODT、Excel、PowerPoint 等格式"
+        "supportedFormats": "支持 PDF、DOCX、TXT、MD、HTML、CSV、JSON、XML、RTF、EPUB、ODT、Excel、PowerPoint 等格式",
+        "invalidType": "不支持的文件类型 {{ext}}",
+        "sizeExceeded": "文件超过大小限制（≤ {{size}} MB）",
+        "supportedHint": "支持：{{types}} · 最大 {{size}} MB"
       },
       "status": {
         "pending": "待上传",
         "uploading": "上传中",
         "success": "上传成功",
-        "error": "上传失败"
+        "error": "上传失败",
+        "cancelled": "已取消"
       },
       "progress": {
         "overall": "总进度"
@@ -197,7 +210,24 @@
         "maxSize": "单文件大小上限：{{size}} MB",
         "chunkingTitle": "分片策略说明",
         "chunkingDesc": "上传后系统会按所选分片策略将文档切分为片段用于检索与问答。",
-        "tip": "如果不确定怎么选，可保持默认；后续可在知识库中重新处理文档。"
+        "tip": "如果不确定怎么选，可保持默认；后续可在知识库中重新处理文档。",
+        "embeddingHint": "提示：部分嵌入模型会限制单条输入（例如 ≤ 512 tokens）。系统会自动拆分超限分片，但建议适当减小“分片长度”以减少拆分与成本。"
+      },
+      "messages": {
+        "accepted": "上传已接收，后台处理中",
+        "failed": "上传失败"
+      },
+      "params": {
+        "range": "范围：{{min}} ~ {{max}}",
+        "chunk_size": "分片长度（字符）",
+        "chunk_overlap": "重叠长度（字符）",
+        "window_size": "窗口大小（字符）",
+        "step_size": "步长（字符）",
+        "target_chunk_size": "目标分片长度（字符）",
+        "sentences_per_chunk": "每段句子数",
+        "tokens_per_chunk": "每段 Token 数（近似）",
+        "overlap_tokens": "重叠 Token 数（近似）",
+        "breakpoint_threshold_type": "断点阈值类型"
       }
     },
     "manager": {
@@ -213,7 +243,9 @@
         "deselectAll": "取消全选",
         "refresh": "刷新",
         "actions": "操作",
-        "deleteSelected": "删除选中项"
+        "deleteSelected": "删除选中项",
+        "clearVectors": "清空向量",
+        "clearVectorsMilvus": "清空向量（Milvus）"
       },
       "table": {
         "filename": "文件名",
@@ -227,22 +259,143 @@
         "pending": "待处理",
         "processing": "处理中",
         "completed": "已完成",
-        "failed": "失败"
+        "failed": "失败",
+        "pendingStage": "等待处理…",
+        "processingStage": "处理中…",
+        "retryingStage": "重试中…"
       },
       "empty": {
         "noDocuments": "暂无文档",
         "noMatches": "没有匹配的文档"
+      },
+      "labels": {
+        "processedAt": "已处理"
+      },
+      "confirm": {
+        "clearVectors": "确定清空该知识库的所有向量？此操作不可撤销。"
+      },
+      "messages": {
+        "clearVectorsFailed": "清空向量失败",
+        "retryFailed": "重试失败"
+      },
+      "filters": {
+        "status": {
+          "all": "全部状态",
+          "pending": "等待",
+          "processing": "处理中",
+          "completed": "已完成",
+          "failed": "失败"
+        }
+      },
+      "tooltips": {
+        "errorDetails": "查看/复制错误详情",
+        "clickToViewChunks": "点击查看分片",
+        "viewChunks": "查看分片",
+        "noChunks": "暂无分片",
+        "noChunksToView": "无分片可查看",
+        "retry": "重试处理",
+        "retryOnlyFailed": "仅失败文档可重试"
+      },
+      "errorDialog": {
+        "title": "处理失败原因",
+        "copy": "复制错误信息",
+        "chunks": "分片：{{count}}",
+        "completedAt": "完成：{{time}}",
+        "noErrorMessage": "无错误信息"
+      },
+      "errorHints": {
+        "embeddingTokenLimit": "嵌入模型限制单条输入长度（例如 ≤512 tokens）。建议在上传时调小“分片长度/Chunk Size”（例如 400~700），或更换支持更长输入的 embedding 模型。",
+        "providerCode": "提供商返回错误码：{{code}}。可以先检查模型是否可用、Key/配额是否足够，或在“模型配置”里测试连接。",
+        "forbidden": "403 通常是 API Key/配额/模型权限问题：检查提供商 Key 是否正确、是否开通对应模型、是否触发限流。"
       }
+    }
+  },
+  "documentChunksDialog": {
+    "title": "查看分片{{filename}}",
+    "actions": {
+      "copyAll": "复制全部",
+      "refresh": "刷新"
+    },
+    "pagination": {
+      "rowsPerPage": "每页"
+    },
+    "messages": {
+      "loadFailed": "加载分片失败"
     }
   },
   "settings": {
     "title": "设置",
     "tabs": {
       "personal": "个人设置",
+      "modelConfig": "模型配置",
+      "apiKeys": "API Keys",
       "system": "系统设置"
     },
     "modelConfig": {
       "title": "模型配置",
+      "scopes": {
+        "meTitle": "个人模型配置",
+        "tenantTitle": "租户共享模型配置",
+        "meShort": "个人",
+        "tenantShort": "租户"
+      },
+      "guide": {
+        "title": "使用说明",
+        "scopeMe": "这里配置的是个人模型：先配置提供商，再选择每类模型的默认值（Chat/Embedding/Rerank）。",
+        "scopeTenant": "这里配置的是租户共享模型：先配置提供商，再选择每类模型的默认值（Chat/Embedding/Rerank）。",
+        "steps": {
+          "configureProvider": "先点「配置 API」：填写 API Base / API Key，并启用提供商。",
+          "setActiveModels": "再编辑「活跃模型」：选择{{scope}}默认的聊天/向量/重排模型。",
+          "modelKeyFallback": "模型级 API Key 为空时，会自动复用提供商级 API Key（更安全，避免多处存储）。",
+          "localOpenAICompat": "「本地(OpenAI兼容)」要求提供 OpenAI-Compatible /v1 接口；可不填 Key，把 Base 指向你的服务地址即可（会自动补齐 /v1）。"
+        }
+      },
+      "ui": {
+        "activeModelsTitle": "当前活跃模型",
+        "providersTitle": "提供商状态",
+        "apiBase": "API端点",
+        "configureApi": "配置 API",
+        "configured": "已配置",
+        "notConfigured": "未配置",
+        "editModelDialogTitle": "编辑 {{type}} 配置",
+        "customModelTag": "自定义",
+        "customModelOption": "自定义模型名称...",
+        "customModelName": "自定义模型名称",
+        "customModelPlaceholder": "请输入模型名称，例如: gpt-4-turbo, claude-3-5-sonnet",
+        "customModelHelper": "输入您想要使用的模型名称",
+        "customModelHelperNotInList": "自定义模型名称（不在预定义列表中）",
+        "apiKeyHints": {
+          "modelKeyMasked": "已保存模型级 API 密钥；留空保持不变或输入新的 API 密钥",
+          "useProviderKeyOrOverride": "可留空使用该提供商已配置的 API 密钥，或输入模型级 API 密钥覆盖",
+          "maskedKeepOrReplace": "已保存API密钥，留空保持不变或输入新的API密钥",
+          "enterValid": "请输入有效的API密钥"
+        },
+        "apiKeyPlaceholders": {
+          "keepMasked": "留空保持原有API密钥",
+          "useProviderKey": "留空使用提供商密钥",
+          "enter": "请输入API密钥"
+        },
+        "apiBaseOptional": "API端点（可选）",
+        "apiBaseHint": "留空使用默认端点",
+        "temperatureOptional": "温度（可选）",
+        "temperatureHint": "控制输出的随机性（0-2）",
+        "maxTokensOptional": "最大令牌数（可选）",
+        "maxTokensHint": "限制输出的最大令牌数",
+        "enableModel": "启用此模型",
+        "editProviderDialogTitle": "配置 {{provider}}",
+        "editProviderDialogTitleGeneric": "配置提供商",
+        "providerApiKeyHints": {
+          "localOptional": "本地/自建 OpenAI-compatible 端点可不填密钥",
+          "keepUnchanged": "留空保持不变",
+          "enterValid": "请输入有效的API密钥"
+        },
+        "providerApiKeyPlaceholders": {
+          "optional": "可留空",
+          "keep": "留空保持原有API密钥",
+          "enter": "请输入API密钥"
+        },
+        "enableProvider": "启用该提供商"
+      },
     "reload": "重新加载",
     "save": "保存配置",
     "saving": "保存中...",
@@ -300,9 +453,29 @@
     },
     "messages": {
       "loadError": "加载配置失败，使用默认配置",
+      "loadModelConfigFailed": "获取模型配置失败",
       "saveSuccess": "配置保存成功！",
       "saveError": "保存配置失败",
-      "presetApplied": "预设配置已应用，请填入相应的 API Key"
+      "presetApplied": "预设配置已应用，请填入相应的 API Key",
+      "providerHasKeyHint": "{{provider}} 已配置 API 密钥；模型配置可留空使用该密钥",
+      "providerUpdated": "{{provider}} 提供商配置已更新",
+      "saveProviderError": "保存提供商配置失败",
+      "testProviderSuccess": "{{provider}} 连接测试成功",
+      "testProviderFailed": "{{provider}} 连接测试失败",
+      "presetSelected": "已选择 {{name}} 预设，请为每个模型配置 API 密钥",
+      "presetApplyFailed": "应用预设失败"
+      }
+    },
+    "sharedModels": {
+      "title": "共享模型",
+      "description": "开启后，团队管理员可将成员加入白名单，使其在未配置个人模型时可回退使用团队共享模型配置。",
+      "enabled": "已开启",
+      "disabled": "未开启",
+      "whitelistCount": "白名单用户数：{{count}}",
+      "goUserManagement": "去用户管理",
+      "errors": {
+        "loadFailed": "获取团队设置失败",
+        "updateFailed": "更新团队设置失败"
       }
     }
   },
@@ -358,7 +531,8 @@
         "secure": "安全可靠"
       },
       "copyright": "保留所有权利."
-    }
+    },
+    "logout": "退出登录"
   },
   "userManagement": {
     "title": "用户管理",
@@ -395,6 +569,7 @@
       "tenant": "租户",
       "kbCount": "知识库",
       "docCount": "文档",
+      "sharedModels": "共享模型",
       "created": "创建时间",
       "actions": "操作"
     },
@@ -411,6 +586,17 @@
       "email": "邮箱",
       "role": "角色",
       "accountStatus": "账户状态"
+    },
+    "sharedModels": {
+      "errors": {
+        "enableFirst": "请先开启“允许共享模型”",
+        "updateFailed": "更新共享模型设置失败"
+      },
+      "tooltips": {
+        "teamDisabled": "不可用：未开启租户共享模型",
+        "crossTenantDisabled": "不可用：不允许跨租户共享模型",
+        "allowed": "允许"
+      }
     }
   },
   "workflowTester": {
@@ -420,16 +606,1070 @@
     "inputPlaceholder": "输入问题...",
     "actions": {
       "send": "发送",
-      "stop": "停止"
+      "stop": "停止",
+      "history": "历史",
+      "details": "查看详情",
+      "close": "关闭"
     },
     "progress": {
       "title": "执行进度",
       "empty": "暂无进度",
       "step": "步骤 {{index}}"
     },
+    "schema": {
+      "loading": "加载 schema...",
+      "loadFailed": "加载 schema 失败",
+      "noStructured": "未推导出结构化参数：可直接在底部输入文本执行。",
+      "params": "参数",
+      "required": "（必填）",
+      "select": "请选择",
+      "json": "输入 JSON",
+      "expectedOutput": "预期输出字段：{{fields}}"
+    },
+    "inputErrors": {
+      "missingRequired": "缺少必填参数：{{key}}",
+      "missingAny": "请输入 input 或填写参数后再执行",
+      "numberRequired": "参数 {{key}} 需要是数字",
+      "invalidJson": "参数 {{key}} 不是合法 JSON",
+      "validationFailed": "参数校验失败"
+    },
+    "messages": {
+      "doneNoResult": "执行完成，但没有返回结果（可能被中断或后端未返回 complete payload）",
+      "loadDetailFailed": "加载执行详情失败",
+      "retryFailed": "重试失败",
+      "retried": "已从节点重试：{{nodeId}}\n执行ID：{{execId}}\n\n{{output}}"
+    },
+    "debug": {
+      "label": "Debug（包含每步 input/output）",
+      "executionId": "执行ID: {{id}}",
+      "copyExecutionId": "复制执行ID",
+      "viewDetail": "查看详情",
+      "detailTitle": "执行详情",
+      "finalOutput": "最终输出",
+      "stepsClickable": "步骤（点击查看 input/output）",
+      "retryFromNode": "从此节点重试",
+      "retryTooltip": "从该节点及下游重试"
+    },
     "errors": {
       "executeFailed": "执行失败",
       "executeError": "执行异常"
     }
+  },
+  "workflowEditor": {
+    "title": "工作流",
+    "defaultName": "新工作流",
+    "header": {
+      "expand": "展开工作流设置",
+      "collapse": "收起工作流设置"
+    },
+    "visibility": {
+      "team": "公开给团队",
+      "private": "仅自己可见"
+    },
+    "palette": {
+      "open": "打开节点库",
+      "collapse": "折叠节点库",
+      "zoomIn": "放大",
+      "zoomOut": "缩小"
+    },
+    "inspector": {
+      "close": "关闭属性面板"
+    },
+    "selection": {
+      "selectedCount": "已选 {{count}}",
+      "align": {
+        "left": "左对齐",
+        "hcenter": "水平居中",
+        "right": "右对齐",
+        "top": "顶对齐",
+        "vcenter": "垂直居中",
+        "bottom": "底对齐"
+      },
+      "distribute": {
+        "x": "水平分布",
+        "y": "垂直分布"
+      }
+    },
+    "fields": {
+      "name": "名称",
+      "description": "描述"
+    },
+    "actions": {
+      "resetCanvas": "重置画布",
+      "autoLayout": "自动布局",
+      "validate": "校验",
+      "save": "保存",
+      "test": "测试",
+      "saveAsTemplate": "保存为模板",
+      "api": "API"
+    },
+    "validation": {
+      "valid": "校验通过",
+      "invalid": "校验失败",
+      "failed": "校验失败"
+    },
+    "messages": {
+      "loadFailed": "加载工作流失败",
+      "saved": "已保存",
+      "createdAndSaved": "已创建并保存",
+      "created": "已创建",
+      "saveFailed": "保存失败",
+      "saveMissingId": "保存失败：未获取到工作流 ID",
+      "savedEnterTest": "已保存，进入测试",
+      "saveEnterTestFailed": "保存失败，无法进入测试"
+    },
+    "branches": {
+      "trueName": "TRUE 分支",
+      "falseName": "FALSE 分支",
+      "placeholderDescription": "分支占位节点（可替换为任意节点）",
+      "alreadyExists": "已存在 True/False 分支，无需重复生成"
+    },
+    "templates": {
+      "dialogTitle": "保存为模板",
+      "nameRequired": "模板名称不能为空",
+      "saved": "模板已保存",
+      "saveFailed": "保存模板失败",
+      "fields": {
+        "name": "模板名称",
+        "description": "模板描述",
+        "categoryOptional": "分类（可选）",
+        "categoryHint": "例如 customer_service / document_processing / ai_assistant / data_analysis / custom",
+        "tagsOptional": "标签（逗号分隔，可选）",
+        "tagsPlaceholder": "RAG, 客服, 数据分析"
+      }
+    },
+    "confirmTest": {
+      "title": "进入测试",
+      "body": "检测到未保存更改。直接进入测试会使用上次保存的版本；也可以先保存再进入。",
+      "enterDirectly": "直接进入",
+      "saveAndEnter": "保存并进入",
+      "later": "稍后提醒"
+    },
+    "apiDialog": {
+      "title": "Workflow API",
+      "desc": "对外调用使用 Public API（需要请求头 x-api-key）。API Key 在“设置 → API Keys”里创建。",
+      "copyRunCurl": "复制 curl（run）",
+      "copyStreamCurl": "复制 curl（stream）",
+      "copySchemaCurl": "复制 curl（io-schema）",
+      "copiedRun": "已复制 curl（run）",
+      "copiedStream": "已复制 curl（stream）",
+      "copiedSchema": "已复制 curl（io-schema）",
+      "copyFailed": "复制失败",
+      "crossTenantHint": "跨租户运行：Workflow 需设为公开，并且 API Key 需要绑定 allowed_workflow_id。",
+      "baseHint": "完整 URL 来自 VITE_PUBLIC_API_BASE_URL / VITE_BACKEND_URL 或浏览器地址栏。",
+      "close": "关闭"
+    }
+  },
+  "workflow2": {
+    "palette": {
+      "title": "节点库",
+      "searchPlaceholder": "搜索节点…",
+      "empty": "没有匹配的节点",
+      "hint": "提示：可拖拽到画布，也可点击添加"
+    },
+    "categories": {
+      "basic": "基础",
+      "ai": "AI",
+      "rag": "RAG",
+      "logic": "逻辑",
+      "tool": "工具"
+    },
+    "node": {
+      "unnamed": "未命名节点"
+    },
+    "kindLabels": {
+      "input": "输入",
+      "llm": "LLM",
+      "rag_retriever": "检索",
+      "http_request": "HTTP",
+      "condition": "条件",
+      "code_executor": "代码",
+      "output": "输出"
+    },
+    "nodes": {
+      "input": { "name": "输入", "description": "接收执行输入数据" },
+      "llm": { "name": "LLM", "description": "调用大语言模型生成文本" },
+      "rag_retriever": { "name": "RAG 检索", "description": "在知识库中检索相关内容" },
+      "condition": { "name": "条件判断", "description": "对输入字段做条件判断（输出 condition_result）" },
+      "code_executor": { "name": "代码执行", "description": "执行 Python 代码（输出 result）" },
+      "http_request": { "name": "HTTP 请求", "description": "发起 HTTP 请求并返回 response_data/status_code" },
+      "output": { "name": "输出", "description": "格式化输出数据" }
+    },
+    "inspector": {
+      "title": "属性面板",
+      "emptyHint": "选择一个节点开始配置。",
+      "tabs": { "settings": "设置", "lastRun": "最近运行" },
+      "sections": {
+        "inputBindings": "输入绑定",
+        "settings": "设置",
+        "outputs": "输出字段"
+      },
+      "fields": {
+        "nodeName": "节点名称",
+        "description": "描述",
+        "bindVariable": "绑定变量"
+      },
+      "unbound": "未绑定",
+      "clearBinding": "清除绑定（回退到 data）",
+      "noUpstreamWarning": "未连接上游节点：这里无法选择变量。请先连线，再回到这里进行输入绑定。",
+      "lastRunHint": "运行结果目前在“测试”页查看（后续可把最近一次执行的 input/output 回填到这里）。",
+      "noConfig": "当前节点没有可配置参数。",
+      "outputsHint": "下游连线时可选择这些输出字段。",
+      "actions": {
+        "recommendedBindings": "一键：推荐绑定",
+        "ragToLlm": "一键：RAG→LLM（documents + 系统提示）",
+        "createBranches": "一键生成 True/False 分支"
+      },
+      "createBranchesHint": "从节点右侧 true/false 句柄连线会自动写入边条件并透传 data。",
+      "ragToLlmSystemPromptTemplate": "你是一个严谨的助手。请基于已检索到的资料回答问题；若资料不足请明确说明。\n\n资料1：{{documents[0].text}}\n资料2：{{documents[1].text}}\n资料3：{{documents[2].text}}\n\n问题：{{prompt}}"
+    },
+    "schema": {
+      "groups": {
+        "config": "设置",
+        "basic": "基础配置",
+        "prompt": "提示词",
+        "retrieval": "检索参数",
+        "request": "请求内容",
+        "sandbox": "Sandbox",
+        "code": "代码",
+        "template": "模板"
+      },
+      "fields": {
+        "prompt_key": "prompt_key（可选）",
+        "knowledge_base": "知识库",
+        "timeoutSec": "timeout（秒）",
+        "headersJsonOptional": "headers（JSON 对象，可选）",
+        "paramsJsonOptional": "params（JSON 对象，可选）",
+        "dataJsonOptional": "data（JSON 对象，可选，用作请求体）",
+        "templateOptional": "template（可选）"
+      },
+      "options": {
+        "llmModelDefault": "（使用默认/按租户配置）",
+        "promptKeyAuto": "自动（优先 prompt，其次 input/text/query）",
+        "promptKeyInputDify": "input（推荐，Dify 风格）",
+        "selectPlaceholder": "请选择"
+      },
+      "helpers": {
+        "temperature": "控制输出随机性（0~2）。",
+        "max_tokens": "限制输出最大 token 数。",
+        "templateSupport": "支持模板：{{变量}}（运行时按 data/input/context 解析）。",
+        "top_k": "返回最相关的 K 条结果（1~50）。",
+        "urlTemplate": "支持模板：{{变量}}（例如 {{query}}）。",
+        "timeoutSec": "请求超时（秒）。",
+        "headersExample": "例如：{\"Authorization\":\"Bearer xxx\"}",
+        "paramsExample": "GET 查询参数，例如：{\"q\":\"{{query}}\"}",
+        "dataExample": "POST/PUT/PATCH 请求体，例如：{\"text\":\"{{prompt}}\"}",
+        "fieldPath": "支持嵌套路径，例如 data.class",
+        "conditionValue": "支持模板：{{变量}}（truthy 可留空）。",
+        "sandboxTimeout": "超时会直接终止子进程（默认 3s）。",
+        "maxMemoryMb": "子进程内存限制（MB）。",
+        "maxStdoutChars": "限制 stdout 输出长度，超限会截断。",
+        "maxInputBytes": "限制 input/context 的 JSON 体积，超限会报错。",
+        "maxResultBytes": "限制 result 的 JSON 体积，超限会报错。",
+        "outputTemplate": "留空则直接输出 input_data（兼容 data 包装）。"
+      }
+    },
+    "legacyInspector": {
+      "titleWithKind": "{{name}}（{{kind}}）",
+      "outputSelect": {
+        "auto": "自动（默认输出 data/input）",
+        "dataWhole": "data（整体）",
+        "inputWhole": "input（整体）",
+        "whenObject": "{{path}}（当 {{base}} 为对象时）"
+      },
+      "validation": {
+        "maybeMissingRef": "引用变量可能不存在：{{expr}}",
+        "nodeNameRequired": "节点名称不能为空",
+        "temperatureRange": "temperature 需在 0~2 之间",
+        "maxTokensPositive": "max_tokens 需为正整数",
+        "llmNoUpstream": "当前 LLM 节点没有上游输入，可能会收到空 prompt",
+        "selectKnowledgeBase": "请选择知识库",
+        "topKRange": "top_k 需在 1~50 之间",
+        "fieldPathRequired": "field_path 不能为空",
+        "conditionTypeRequired": "condition_type 不能为空",
+        "conditionValueEmpty": "condition_value 为空：仅对 truthy 类型可省略",
+        "codeRequired": "代码不能为空",
+        "codeResultHint": "建议在代码中设置变量 result 作为输出",
+        "sandboxNoImport": "Sandbox 禁止 import（请使用内置 json/re/math 或纯逻辑处理）",
+        "sandboxNoDunder": "Sandbox 禁止访问 __dunder__ 属性（例如 __class__）",
+        "timeoutSecRange": "timeout_sec 建议在 0.1~30 秒之间",
+        "maxMemoryRange": "max_memory_mb 建议在 16~4096 之间",
+        "maxStdoutRange": "max_stdout_chars 建议在 1000~200000 之间",
+        "maxInputBytesRange": "max_input_bytes 建议在 10000~50000000 之间",
+        "maxResultBytesRange": "max_result_bytes 建议在 10000~50000000 之间",
+        "outputFormatUnsupported": "format 不支持",
+        "outputSelectOverridden": "已设置 select_path，但 template 非空时会覆盖 select_path",
+        "outputTemplateBlank": "template 仅包含空白字符，会导致输出为空",
+        "outputTemplateNotConfigured": "未配置模板：将直接输出 input_data",
+        "urlRequired": "url 不能为空",
+        "methodUnsupported": "method 不支持（GET/POST/PUT/PATCH/DELETE）",
+        "timeoutPositive": "timeout 必须为正数（秒）",
+        "headersMustBeObject": "headers 必须是 JSON 对象",
+        "paramsMustBeObject": "params 必须是 JSON 对象",
+        "overridesMustBeObject": "overrides 必须是对象（key->value）"
+      },
+      "jsonErrors": {
+        "mustBeObject": "需为 JSON 对象",
+        "parseFailed": "JSON 解析失败"
+      },
+      "templatePicker": {
+        "groups": { "runtime": "运行时输入/上下文（不依赖连线）" },
+        "insert": "插入变量",
+        "autocompleteHint": "输入 {{ 自动联想（上下键选择，回车确认）",
+        "pickerHint": "变量选择器（点击插入）",
+        "empty": "暂无可用变量",
+        "none": "暂无"
+      },
+      "promptKey": {
+        "sections": {
+          "runtime": "运行时输入（不依赖连线）",
+          "fromEdges": "来自连线（连接上游后出现）",
+          "other": "其他"
+        },
+        "hintConnected": "推荐：若已通过连线映射字段，可在“来自连线”选择；否则用“运行时输入”。",
+        "hintDisconnected": "提示：未连接上游时，可使用“运行时输入”；连接上游后会出现“来自连线”。"
+      },
+      "tabs": { "config": "配置", "io": "连线 / IO", "advanced": "高级" },
+      "io": {
+        "inputsTitle": "输入字段（{{count}}）",
+        "inputsHint": "这些是本节点可接入的输入字段；连接上游时在连线里选择 target_input。",
+        "noInputs": "无（起始节点）",
+        "outputsTitle": "输出字段（{{count}}）",
+        "outputsHint": "这些是本节点可能产生的输出字段；连接下游时在连线里选择 source_output 使用它们。",
+        "outgoingTitle": "输出去向（{{count}}）",
+        "outgoingHint": "这里展示本节点的输出都连到了哪里（对应每条边的 source_output / target_input）。",
+        "noOutgoing": "暂无（未连接下游节点）"
+      },
+      "bindings": {
+        "queryTitle": "查询绑定（来自连线）",
+        "inputTitle": "输入绑定（来自连线）",
+        "countSuffix": "（{{count}}）",
+        "llmHint": "连接上游节点后，可在这里选择“取哪个输出、映射到 LLM 的哪个字段”。这会同步修改连线映射（等价于编辑边属性）。",
+        "ragHint": "RAG 会优先读取 query，其次 prompt/text/input。建议将上游输出映射到 query。",
+        "outputHint": "输出节点会将输入数据格式化为 result 返回。常见用法：将 LLM 的 content 映射到输出节点的 data。",
+        "connectUpstreamFirst": "请先连接上游节点（连线后可在这里选择输入来源/映射字段）。",
+        "applyRecommended": "应用推荐",
+        "fields": {
+          "sourceOutput": "取上游输出",
+          "mapToLlm": "映射到 LLM 字段",
+          "mapToRag": "映射到 RAG 字段",
+          "mapToOutput": "映射到输出字段"
+        },
+        "recommendedPrefix": "推荐："
+      },
+      "quickFill": {
+        "ragToLlmSystemPrompt": "请基于以下资料回答用户问题；如果资料不足，请说明无法确定。\n\n资料：{{documents}}\n\n",
+        "docsToPrompt": "资料：{{documents}}\n\n问题：{{prompt}}",
+        "actions": {
+          "ragToLlmSystemPrompt": "一键：RAG→LLM 系统提示",
+          "composePromptOverrides": "一键：合成 prompt（overrides）"
+        }
+      },
+      "variableHints": {
+        "title": "变量提示（运行时 {{runtime}} / 连线 {{edges}}）",
+        "hintAutocomplete": "在模板字段里输入 {{ 会自动联想；也可以在下方点击复制/插入。",
+        "sections": {
+          "runtimeInput": "运行时输入（来自测试/执行入参，不依赖连线）：",
+          "runtimeContext": "运行时上下文（tenant/user，不依赖连线）：",
+          "fromEdges": "来自连线（连接上游节点后可用，会进入本节点的 input_data）："
+        },
+        "emptyFromEdges": "暂无（请先连接上游节点）"
+      },
+      "sandbox": {
+        "title": "Sandbox 限制",
+        "resetDefaults": "恢复默认"
+      },
+      "codeExecutor": {
+        "convention": "约定：在代码中设置变量 result 作为输出（例如 result = {\"content\": \"...\"}）。"
+      },
+      "branches": {
+        "hint": "分支提示：从节点右侧的 true/false 句柄连线，会自动写入边条件并透传 data。"
+      },
+      "output": {
+        "selectPathOptional": "select_path（可选）",
+        "priorityHint": "优先级：若填写了 template，则以 template 为准；否则按 select_path 从输入里取值（例如 data.content）。",
+        "templateHint": "输出模板支持 {{变量}}（推荐）或 Python format {content}（兼容旧用法，模板不包含 {{ 时启用）。"
+      },
+      "ioPreview": {
+        "title": "IO 快览",
+        "hint": "这里展示本节点的输入/输出字段；实际把上游输出接入到哪个字段，请到“连线 / IO”里配置。",
+        "inputsLabel": "输入字段（{{count}}）：",
+        "outputsLabel": "输出字段（{{count}}）：",
+        "goConfigure": "去配置连线 / 绑定"
+      },
+      "advanced": {
+        "overridesTitle": "高级：输入 overrides（缺失字段自动填充）",
+        "overridesHint": "用于在没有上游连线时，为当前节点补齐输入字段（例如给 LLM 填 prompt）。支持 {{变量}}。",
+        "addItem": "添加一项",
+        "editJsonTitle": "高级：直接编辑 config JSON",
+        "applyJson": "应用 JSON"
+      },
+      "common": { "none": "无" }
+    },
+    "edgeInspector": {
+      "title": "边属性",
+      "panelTitle": "属性面板",
+      "emptyHint": "选中一个边后在这里编辑映射/条件/转换。",
+      "sourceOutputHint": "源节点输出字段/句柄（优先用下拉，必要时可在下方自定义）。",
+      "targetInputHint": "目标节点输入字段/句柄（例如 LLM 推荐接到 input 或 prompt；Output 推荐接到 data）。",
+      "fields": {
+        "customSourceOutput": "高级：自定义 source_output（可选）",
+        "customTargetInput": "高级：自定义 target_input（可选）",
+        "conditionOptional": "condition（可选）",
+        "transformOptional": "transform（可选）"
+      },
+      "placeholders": {
+        "sourceOutput": "例如 content",
+        "targetInput": "例如 input"
+      },
+      "helpers": {
+        "condition": "条件表达式（安全 eval，无函数调用）。变量：value/input/context。例：value[\"condition_result\"] == True",
+        "transform": "数据转换表达式（后端会执行）。例：{\"query\": value[\"content\"]}"
+      }
+    }
+  },
+  "workflowExecutions": {
+    "title": "执行历史",
+    "workflowLabel": "工作流",
+    "actions": {
+      "refresh": "刷新",
+      "goRun": "去执行",
+      "openEditor": "打开编辑器",
+      "locate": "定位",
+      "retryFromStep": "从此步重试",
+      "copyInputData": "复制 input_data",
+      "copyOutputData": "复制 output_data",
+      "copyInput": "复制 input",
+      "copyOutput": "复制 output"
+    },
+    "list": {
+      "title": "执行列表",
+      "hint": "只显示你有权限查看的执行记录。",
+      "empty": "暂无执行记录",
+      "loading": "加载中…",
+      "labels": {
+        "duration": "用时:",
+        "steps": "步骤:",
+        "failed": "失败:"
+      }
+    },
+    "detail": {
+      "title": "执行详情",
+      "selectHint": "请选择一条执行记录查看步骤详情。",
+      "duration": "用时",
+      "steps": "步骤",
+      "failedSteps": "失败步骤",
+      "io": "本次输入 / 输出",
+      "inputData": "input_data",
+      "outputData": "output_data",
+      "waterfall": "耗时分布（瀑布图）",
+      "totalSpan": "总跨度",
+      "expand": "展开",
+      "collapse": "收起",
+      "failedLocate": "失败节点定位："
+    },
+    "messages": {
+      "loadListFailed": "获取执行历史失败",
+      "loadDetailFailed": "获取执行详情失败",
+      "retrying": "正在重试…",
+      "retryFailed": "重试失败",
+      "retryTriggered": "重试已触发",
+      "retryCreated": "已创建重试执行：{{id}}"
+    }
+  },
+  "apiKeys": {
+    "title": "API Keys",
+    "new": "新建",
+    "refresh": "刷新",
+    "empty": "暂无 API Key",
+    "publicApiHint": "Public API（对外调用）需要请求头 x-api-key。",
+    "crossTenantHint": "跨租户运行公开工作流时，请将 API Key 绑定 allowed_workflow_id。",
+    "table": {
+      "name": "名称",
+      "key": "Key",
+      "scopes": "Scopes",
+      "allowedWorkflowId": "allowed_workflow_id",
+      "allowedKb": "allowed_kb",
+      "rateLimit": "限流",
+      "status": "状态",
+      "actions": "操作"
+    },
+    "status": {
+      "active": "active",
+      "revoked": "revoked"
+    },
+    "actions": {
+      "toggleReveal": "显示/隐藏",
+      "copyKeyAria": "复制 Key",
+      "revokeAria": "吊销"
+    },
+    "createDialog": {
+      "title": "新建 API Key",
+      "name": "名称",
+      "scopes": "Scopes（逗号分隔）",
+      "scopesHelp": "例如：chat,workflow",
+      "allowedWorkflowId": "allowed_workflow_id（建议填写）",
+      "allowedWorkflowHelp": "绑定到某个 workflow_id，可用于跨租户运行公开工作流。",
+      "allowedKb": "allowed_kb（可选）",
+      "rateLimitPerMin": "rate_limit_per_min",
+      "expireInDays": "expire_in_days（可选）",
+      "cancel": "取消",
+      "create": "创建"
+    },
+    "messages": {
+      "loadFailed": "获取 API Keys 失败",
+      "createFailed": "创建失败",
+      "created": "API Key 已创建（已尝试复制）",
+      "revoked": "已吊销",
+      "revokeFailed": "吊销失败",
+      "nameRequired": "请填写名称"
+    }
+  },
+  "topBar": {
+    "roles": {
+      "superAdmin": "超级管理员",
+      "tenantAdmin": "租户管理员",
+      "member": "成员"
+    }
+  },
+  "team": {
+    "errors": {
+      "fetchTeamFailed": "获取团队信息失败",
+      "fetchMembersFailed": "获取团队成员失败",
+      "createTeamFailed": "创建团队失败",
+      "inviteUserFailed": "邀请用户失败",
+      "joinTeamFailed": "加入团队失败"
+    }
+  },
+  "teamManagement": {
+    "title": "团队管理",
+    "confirm": {
+      "leaveOwner": "作为团队创建者，离开将删除整个团队。确认继续吗？",
+      "leaveMember": "确认离开当前团队吗？"
+    },
+    "summary": {
+      "members": "成员数量",
+      "myRole": "我的角色",
+      "privacy": "隐私"
+    },
+    "privacy": {
+      "private": "私有",
+      "public": "公开"
+    },
+    "actions": {
+      "create": "创建团队",
+      "join": "加入团队",
+      "invite": "邀请成员",
+      "leave": "离开团队"
+    },
+    "sections": {
+      "members": "团队成员"
+    },
+    "empty": {
+      "title": "您还没有加入任何团队",
+      "subtitle": "您可以创建一个新团队或通过邀请码加入现有团队。"
+    },
+    "dialogs": {
+      "create": {
+        "title": "创建新团队",
+        "fields": {
+          "name": "团队名称",
+          "description": "团队描述",
+          "type": "团队类型",
+          "maxMembers": "最大成员数"
+        }
+      },
+      "invite": {
+        "title": "邀请用户加入团队",
+        "fields": {
+          "email": "邮箱地址",
+          "role": "成员角色",
+          "message": "邀请消息",
+          "messagePlaceholder": "可选：向被邀请人说明邀请原因..."
+        },
+        "actions": {
+          "send": "发送邀请"
+        }
+      },
+      "join": {
+        "title": "加入团队",
+        "fields": {
+          "inviteCode": "邀请码",
+          "inviteCodePlaceholder": "请输入邀请码"
+        },
+        "hint": "加入新团队将自动离开当前团队（如果有）。"
+      }
+    },
+    "teamTypes": {
+      "collaborative": "协作团队",
+      "project": "项目团队"
+    },
+    "memberTypes": {
+      "owner": "拥有者",
+      "admin": "管理员",
+      "member": "普通成员"
+    }
+  },
+  "permissionDisplay": {
+    "notLoggedIn": "未登录用户",
+    "roles": {
+      "superAdmin": "超级管理员",
+      "admin": "管理员",
+      "user": "用户",
+      "guest": "访客"
+    },
+    "sections": {
+      "userInfo": "用户信息",
+      "capabilities": "角色能力",
+      "permissions": "具体权限"
+    },
+    "capabilities": {
+      "isAdmin": "管理员权限",
+      "isSuperAdmin": "超级管理员权限",
+      "canManageUsers": "用户管理权限",
+      "canManageTenants": "租户管理权限",
+      "canManagePermissions": "权限管理权限",
+      "canViewAnalytics": "查看分析权限",
+      "canManageSystem": "系统管理权限"
+    },
+    "permissions": {
+      "view_public_content": "查看公共内容",
+      "manage_own_data": "管理个人数据",
+      "chat_access": "聊天访问",
+      "upload_documents": "上传文档",
+      "create_knowledge_bases": "创建知识库",
+      "manage_users": "管理用户",
+      "view_analytics": "查看分析",
+      "manage_tenant_data": "管理租户数据"
+    },
+    "superAdminHint": "超级管理员拥有系统所有权限，包括上述列表中未显示的权限。"
+  },
+  "permissionManagement": {
+    "title": "权限与租户管理",
+    "tabs": {
+      "manage": "权限管理",
+      "mine": "我的权限"
+    },
+    "overview": {
+      "rolesCount": "角色数",
+      "permissionsTotal": "权限总数",
+      "permissionCategories": "权限类别"
+    },
+    "sections": {
+      "rolePermissions": "角色权限管理"
+    },
+    "roleSelector": {
+      "label": "选择角色"
+    },
+    "actions": {
+      "savePermissions": "保存权限"
+    },
+    "status": {
+      "configuringRole": "正在配置角色",
+      "selectedPermissions": "已选择 {{count}} 个权限",
+      "loadingPermissions": "正在加载权限..."
+    },
+    "messages": {
+      "permissionsUpdated": "权限更新成功！"
+    },
+    "categories": {
+      "system": "系统权限",
+      "knowledge_base": "知识库权限",
+      "document": "文档权限",
+      "chat": "聊天权限",
+      "config": "配置权限"
+    },
+    "tenants": {
+      "title": "租户管理",
+      "actions": {
+        "add": "添加租户"
+      },
+      "status": {
+        "active": "活跃",
+        "disabled": "禁用"
+      },
+      "metrics": {
+        "users": "用户",
+        "knowledgeBases": "知识库"
+      },
+      "createDialog": {
+        "title": "创建新租户",
+        "fields": {
+          "name": "租户名称",
+          "slug": "租户标识符",
+          "slugHelp": "用于URL，只能包含字母、数字和连字符",
+          "description": "描述",
+          "maxUsers": "最大用户数",
+          "maxKnowledgeBases": "最大知识库数",
+          "maxDocuments": "最大文档数",
+          "storageQuotaMb": "存储配额(MB)"
+        }
+      }
+    },
+    "systemOverview": {
+      "title": "系统概览",
+      "tenantsTotal": "租户总数",
+      "activeTenants": "活跃租户",
+      "usersTotal": "总用户数",
+      "knowledgeBasesTotal": "知识库数"
+    }
+  },
+  "tenantManagement": {
+    "title": "租户管理",
+    "stats": {
+      "totalTenants": "租户总数",
+      "activeTenants": "活跃租户",
+      "totalUsers": "总用户数",
+      "totalDocuments": "总文档数"
+    },
+    "filters": {
+      "searchLabel": "搜索",
+      "searchPlaceholder": "搜索租户...",
+      "statusLabel": "状态",
+      "statusAll": "全部"
+    },
+    "status": {
+      "active": "活跃",
+      "disabled": "禁用"
+    },
+    "actions": {
+      "addTenant": "添加租户",
+      "update": "更新"
+    },
+    "table": {
+      "name": "名称",
+      "slug": "标识符",
+      "status": "状态",
+      "userUsage": "用户数",
+      "kbUsage": "知识库",
+      "storageUsage": "存储",
+      "createdAt": "创建时间",
+      "actions": "操作"
+    },
+    "dialog": {
+      "createTitle": "创建新租户",
+      "editTitle": "编辑租户"
+    },
+    "fields": {
+      "name": "租户名称",
+      "slug": "租户标识符",
+      "description": "描述",
+      "maxUsers": "最大用户数",
+      "maxKnowledgeBases": "最大知识库数",
+      "storageQuotaMb": "存储配额(MB)",
+      "activeStatus": "启用状态"
+    },
+    "delete": {
+      "title": "确认删除",
+      "body": "确定要删除租户“{{name}}”吗？此操作无法撤销。"
+    }
+  },
+  "testPage": {
+    "title": "诊断测试",
+    "sections": {
+      "quick": "快捷测试",
+      "create": "创建测试知识库",
+      "results": "结果"
+    },
+    "tests": {
+      "health": "健康检查",
+      "info": "系统信息",
+      "knowledgeBases": "知识库列表",
+      "createKnowledgeBase": "创建知识库",
+      "chat": "聊天测试"
+    },
+    "actions": {
+      "runAll": "全部运行",
+      "createTestKnowledgeBase": "创建",
+      "testChat": "测试聊天"
+    },
+    "fields": {
+      "testKnowledgeBaseName": "测试知识库名称",
+      "testKnowledgeBaseNameHint": "只能包含字母、数字、下划线和连字符。"
+    },
+    "errors": {
+      "noKnowledgeBases": "暂无知识库可用。"
+    },
+    "status": {
+      "notRun": "未运行",
+      "testing": "测试中…",
+      "success": "成功",
+      "error": "失败"
+    },
+    "sampleMessage": "你好",
+    "sampleKnowledgeBaseDescription": "用于快速验证的测试知识库。"
+  },
+  "userSettings": {
+    "messages": {
+      "saved": "配置保存成功！"
+    },
+    "errors": {
+      "loadFailed": "无法加载用户配置"
+    },
+    "help": {
+      "title": "参数说明",
+      "description": "这些参数只影响当前账号（不会影响同租户其他用户）。若模型列表为空，请先在「系统设置 → 模型配置」里配置提供商 API。",
+      "labels": {
+        "chat": "Chat 模型：",
+        "embedding": "Embedding：",
+        "rerank": "Rerank：",
+        "chunk": "Chunk："
+      },
+      "items": {
+        "chat": "对话回答使用的默认模型。",
+        "embedding": "用于文档入库与检索向量化，建议选择稳定的向量模型。",
+        "rerank": "用于对检索结果二次排序（可提升命中，但会增加耗时/费用）。",
+        "chunk": "分片越大上下文越完整，但入库成本更高。"
+      }
+    },
+    "sections": {
+      "aiModels": "AI 模型设置",
+      "modelParams": "模型参数",
+      "ui": "界面设置"
+    },
+    "fields": {
+      "chatModel": "聊天模型",
+      "embeddingModel": "嵌入模型",
+      "rerankModel": "重排序模型",
+      "theme": "主题",
+      "language": "语言"
+    },
+    "params": {
+      "maxTokens": "最大令牌数（{{value}}）",
+      "maxTokensHelp": "控制单次回复最大长度",
+      "temperature": "温度（{{value}}）",
+      "temperatureHelp": "控制生成随机性 (0.0-2.0)",
+      "topP": "Top-p（{{value}}）",
+      "topPHelp": "核采样参数 (0.0-1.0)",
+      "retrievalTopK": "检索数量（{{value}}）",
+      "retrievalTopKHelp": "每次检索返回的片段数",
+      "chunkSize": "分块大小（{{value}}）",
+      "chunkSizeHelp": "文档切分时每块字符数",
+      "chunkOverlap": "分块重叠（{{value}}）",
+      "chunkOverlapHelp": "相邻分块之间的重叠字符数"
+    },
+    "theme": {
+      "light": "浅色主题",
+      "dark": "深色主题",
+      "auto": "跟随系统"
+    },
+    "language": {
+      "zh": "中文",
+      "en": "English"
+    },
+    "actions": {
+      "save": "保存设置",
+      "saving": "保存中..."
+    },
+    "meta": {
+      "createdAt": "配置创建时间",
+      "updatedAt": "最后更新时间"
+    }
+  },
+  "workflowTemplates": {
+    "header": {
+      "title": "工作流模板库",
+      "subtitle": "发现并使用精选的工作流模板，快速构建您的AI应用"
+    },
+    "actions": {
+      "preview": "预览",
+      "useTemplate": "使用模板",
+      "seedTemplates": "导入示例模板",
+      "newWorkflow": "新建工作流"
+    },
+    "badges": {
+      "featured": "推荐",
+      "premium": "高级"
+    },
+    "search": {
+      "placeholder": "搜索模板..."
+    },
+    "sort": {
+      "label": "排序方式",
+      "popular": "最受欢迎",
+      "newest": "最新发布",
+      "rating": "评分最高",
+      "name": "名称排序"
+    },
+    "difficultyFilter": {
+      "label": "难度"
+    },
+    "difficulty": {
+      "beginner": "初级",
+      "intermediate": "中级",
+      "advanced": "高级",
+      "unknown": "未知"
+    },
+    "filters": {
+      "all": "全部",
+      "categoryTitle": "分类筛选",
+      "showFilters": "显示筛选",
+      "hideFilters": "隐藏筛选",
+      "mineOnly": "只看我的模板",
+      "viewAll": "查看全部模板",
+      "categoryChip": "{{name}}（{{count}}）",
+      "subcategoryChip": "{{name}}（{{count}}）"
+    },
+    "tabs": {
+      "all": "全部模板（{{count}}）",
+      "favorites": "我的收藏（{{count}}）",
+      "recent": "最近使用"
+    },
+    "stats": {
+      "uses": "{{count}} 次使用",
+      "authorId": "作者#{{id}}"
+    },
+    "empty": {
+      "noMatch": "未找到符合条件的模板，请尝试调整搜索条件"
+    },
+    "preview": {
+      "reviews": "（{{count}} 评价）",
+      "sections": {
+        "useCases": "适用场景",
+        "requirements": "所需资源",
+        "nodes": "工作流节点"
+      },
+      "confirmDelete": "确定要删除这个模板吗？",
+      "delete": "删除模板",
+      "deleteFailed": "删除失败（需要作者或管理员权限）",
+      "visibilityFailed": "修改可见性失败（需要作者或管理员权限）",
+      "setPrivate": "设为私有",
+      "setPublic": "设为公开",
+      "useThis": "使用此模板"
+    },
+    "messages": {
+      "loadFailed": "加载模板失败",
+      "useFailed": "使用模板失败",
+      "seedFailed": "导入示例模板失败（需要管理员权限）"
+    },
+    "categories": {
+      "customer_service": "客户服务",
+      "document_processing": "文档处理",
+      "ai_assistant": "AI助手",
+      "data_analysis": "数据分析",
+      "custom": "自定义"
+    }
+  },
+  "workflowManagement": {
+    "header": {
+      "title": "工作流管理",
+      "subtitle": "管理已创建的工作流与智能体"
+    },
+    "tabs": {
+      "workflows": "工作流（{{count}}）",
+      "agents": "智能体（{{count}}）"
+    },
+    "demo": {
+      "banner": "演示模式：当后端接口不可用时展示示例数据。",
+      "workflows": {
+        "customerService": {
+          "name": "客户服务",
+          "description": "意图分类 + RAG 检索 + LLM 回复"
+        },
+        "documentAnalysis": {
+          "name": "文档分析",
+          "description": "分析文档并生成摘要"
+        }
+      },
+      "agents": {
+        "customerService": {
+          "name": "客户服务智能体",
+          "description": "处理用户问题并检索知识"
+        },
+        "documentAssistant": {
+          "name": "文档助手",
+          "description": "帮助分析与总结文档"
+        }
+      }
+    },
+    "empty": {
+      "workflows": "暂无工作流",
+      "agents": "暂无智能体"
+    },
+    "noDescription": "暂无描述",
+    "current": "当前",
+    "visibility": {
+      "public": "公开",
+      "private": "私有"
+    },
+    "status": {
+      "active": "启用",
+      "draft": "草稿",
+      "archived": "归档",
+      "inactive": "停用"
+    },
+    "metrics": {
+      "nodes": "节点",
+      "edges": "连线",
+      "executions": "执行"
+    },
+    "agentMetrics": {
+      "conversations": "对话数",
+      "linkedWorkflow": "关联工作流"
+    },
+    "createdAt": "创建于",
+    "updatedAt": "更新于",
+    "actions": {
+      "run": "运行",
+      "history": "历史",
+      "setCurrent": "设为当前",
+      "configure": "配置",
+      "chat": "对话",
+      "createWorkflow": "创建工作流",
+      "createAgent": "创建智能体"
+    },
+    "menu": {
+      "setCurrent": "设为当前",
+      "setPublic": "设为公开",
+      "setPrivate": "设为私有",
+      "copy": "复制",
+      "export": "导出",
+      "delete": "删除"
+    },
+    "dialogs": {
+      "create": {
+        "title": "创建工作流",
+        "fields": {
+          "name": "工作流名称",
+          "description": "描述"
+        },
+        "visibility": {
+          "publicToTeam": "公开给团队",
+          "privateOnly": "仅自己可见"
+        },
+        "actions": {
+          "fromTemplate": "从模板创建",
+          "createAndEdit": "创建并编辑"
+        }
+      },
+      "templates": {
+        "title": "选择模板",
+        "loading": "加载模板中…",
+        "use": "使用",
+        "templateTitle": "{{name}}（节点: {{nodeCount}}）",
+        "empty": "暂无可用模板"
+      },
+      "delete": {
+        "title": "确认删除",
+        "confirm": "确定要删除“{{name}}”吗？此操作无法撤销。",
+        "delete": "删除"
+      }
+    },
+    "messages": {
+      "useTemplateFailed": "使用模板失败",
+      "updateVisibilityFailed": "更新可见性失败",
+      "setPublic": "已设为公开：{{name}}",
+      "setPrivate": "已设为私有：{{name}}",
+      "setCurrent": "已设为当前工作流：{{name}}"
+    }
+  },
+  "modelConfigReminder": {
+    "title": "需要先配置模型",
+    "body": "当前账号还没有可用的聊天模型配置，因此 LLM/RAG/工作流测试会失败。",
+    "missingKey": "已选择了 Chat 模型，但缺少 API Key/Base URL（或未启用）。请到“设置 → 模型配置”补全配置。",
+    "missingConfig": "请到“设置 → 模型配置”选择一个 Chat 模型并保存（需要 API Key 的 provider 记得填写）。",
+    "tenantHint": "提示：如果你是普通用户且希望使用租户共享模型，请联系管理员开启“允许共享模型”并将你加入白名单。",
+    "later": "稍后提醒",
+    "go": "去配置"
   }
 } 

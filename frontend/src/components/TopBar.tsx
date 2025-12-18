@@ -404,7 +404,13 @@ const TopBar: React.FC = () => {
 	            </Typography>
             {user?.role && (
               <Chip
-                label={user.role === 'super_admin' ? '超级管理员' : user.role === 'tenant_admin' ? '租户管理员' : '成员'}
+                label={
+                  user.role === 'super_admin'
+                    ? t('topBar.roles.superAdmin')
+                    : user.role === 'tenant_admin'
+                      ? t('topBar.roles.tenantAdmin')
+                      : t('topBar.roles.member')
+                }
                 size="small"
                 sx={{
                   mt: 1,

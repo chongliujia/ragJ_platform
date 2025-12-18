@@ -3,6 +3,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Box,
   Paper,
@@ -28,13 +29,14 @@ import {
 import { usePermissions } from '../hooks/usePermissions';
 
 const PermissionDisplay: React.FC = () => {
+  const { t } = useTranslation();
   const permissions = usePermissions();
 
   if (!permissions.user) {
     return (
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" color="error">
-          未登录用户
+          {t('permissionDisplay.notLoggedIn')}
         </Typography>
       </Paper>
     );
@@ -73,37 +75,37 @@ const PermissionDisplay: React.FC = () => {
   const getRoleLabel = (role: string) => {
     switch (role) {
       case 'super_admin':
-        return '超级管理员';
+        return t('permissionDisplay.roles.superAdmin');
       case 'admin':
-        return '管理员';
+        return t('permissionDisplay.roles.admin');
       case 'user':
-        return '用户';
+        return t('permissionDisplay.roles.user');
       case 'guest':
-        return '访客';
+        return t('permissionDisplay.roles.guest');
       default:
         return role;
     }
   };
 
   const permissionChecks = [
-    { label: '查看公共内容', key: 'view_public_content' },
-    { label: '管理个人数据', key: 'manage_own_data' },
-    { label: '聊天访问', key: 'chat_access' },
-    { label: '上传文档', key: 'upload_documents' },
-    { label: '创建知识库', key: 'create_knowledge_bases' },
-    { label: '管理用户', key: 'manage_users' },
-    { label: '查看分析', key: 'view_analytics' },
-    { label: '管理租户数据', key: 'manage_tenant_data' },
-  ];
+    'view_public_content',
+    'manage_own_data',
+    'chat_access',
+    'upload_documents',
+    'create_knowledge_bases',
+    'manage_users',
+    'view_analytics',
+    'manage_tenant_data',
+  ] as const;
 
   const roleCapabilities = [
-    { label: '管理员权限', value: permissions.isAdmin },
-    { label: '超级管理员权限', value: permissions.isSuperAdmin },
-    { label: '用户管理权限', value: permissions.canManageUsers },
-    { label: '租户管理权限', value: permissions.canManageTenants },
-    { label: '权限管理权限', value: permissions.canManagePermissions },
-    { label: '查看分析权限', value: permissions.canViewAnalytics },
-    { label: '系统管理权限', value: permissions.canManageSystem },
+    { label: t('permissionDisplay.capabilities.isAdmin'), value: permissions.isAdmin },
+    { label: t('permissionDisplay.capabilities.isSuperAdmin'), value: permissions.isSuperAdmin },
+    { label: t('permissionDisplay.capabilities.canManageUsers'), value: permissions.canManageUsers },
+    { label: t('permissionDisplay.capabilities.canManageTenants'), value: permissions.canManageTenants },
+    { label: t('permissionDisplay.capabilities.canManagePermissions'), value: permissions.canManagePermissions },
+    { label: t('permissionDisplay.capabilities.canViewAnalytics'), value: permissions.canViewAnalytics },
+    { label: t('permissionDisplay.capabilities.canManageSystem'), value: permissions.canManageSystem },
   ];
 
   return (
@@ -112,7 +114,7 @@ const PermissionDisplay: React.FC = () => {
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <PersonIcon />
-          用户信息
+          {t('permissionDisplay.sections.userInfo')}
         </Typography>
         <Grid container spacing={2} alignItems="center">
           <Grid>
@@ -140,7 +142,7 @@ const PermissionDisplay: React.FC = () => {
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <SecurityIcon />
-          角色能力
+          {t('permissionDisplay.sections.capabilities')}
         </Typography>
         <Grid container spacing={1}>
           {roleCapabilities.map((capability) => (
@@ -167,13 +169,13 @@ const PermissionDisplay: React.FC = () => {
       <Paper sx={{ p: 3 }}>
         <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <SecurityIcon />
-          具体权限
+          {t('permissionDisplay.sections.permissions')}
         </Typography>
         <List dense>
-          {permissionChecks.map((permission, index) => {
-            const hasPermission = permissions.hasPermission(permission.key);
+          {permissionChecks.map((key, index) => {
+            const hasPermission = permissions.hasPermission(key);
             return (
-              <React.Fragment key={permission.key}>
+              <React.Fragment key={key}>
                 <ListItem>
                   <ListItemIcon>
                     {hasPermission ? (
@@ -183,8 +185,8 @@ const PermissionDisplay: React.FC = () => {
                     )}
                   </ListItemIcon>
                   <ListItemText
-                    primary={permission.label}
-                    secondary={permission.key}
+                    primary={t(`permissionDisplay.permissions.${key}`)}
+                    secondary={key}
                     sx={{
                       '& .MuiListItemText-primary': {
                         color: hasPermission ? 'text.primary' : 'text.disabled',
@@ -208,7 +210,7 @@ const PermissionDisplay: React.FC = () => {
         <Paper sx={{ p: 2, mt: 3, bgcolor: 'error.50', border: '1px solid', borderColor: 'error.200' }}>
           <Typography variant="body2" color="error.main" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <SuperAdminIcon />
-            超级管理员拥有系统所有权限，包括上述列表中未显示的权限。
+            {t('permissionDisplay.superAdminHint')}
           </Typography>
         </Paper>
       )}

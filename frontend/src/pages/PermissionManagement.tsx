@@ -3,6 +3,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Box,
   Paper,
@@ -71,10 +72,10 @@ interface TenantOverview {
 }
 
 const roles = [
-  { value: 'super_admin', label: '超级管理员', color: 'error' },
-  { value: 'admin', label: '管理员', color: 'warning' },
-  { value: 'user', label: '用户', color: 'primary' },
-  { value: 'guest', label: '访客', color: 'default' },
+  { value: 'super_admin', labelKey: 'permissionManagement.roles.superAdmin', color: 'error' },
+  { value: 'admin', labelKey: 'permissionManagement.roles.admin', color: 'warning' },
+  { value: 'user', labelKey: 'permissionManagement.roles.user', color: 'primary' },
+  { value: 'guest', labelKey: 'permissionManagement.roles.guest', color: 'default' },
 ];
 
 const categoryIcons: { [key: string]: React.ReactNode } = {
@@ -108,6 +109,7 @@ function TabPanel(props: TabPanelProps) {
 }
 
 const PermissionManagement: React.FC = () => {
+  const { t } = useTranslation();
   const [tabValue, setTabValue] = useState(0);
   const [selectedRole, setSelectedRole] = useState('user');
   const [permissions, setPermissions] = useState<PermissionsByCategory>({});
@@ -240,7 +242,7 @@ const PermissionManagement: React.FC = () => {
         throw new Error('Failed to update permissions');
       }
 
-      setSuccess('权限更新成功！');
+      setSuccess(t('permissionManagement.messages.permissionsUpdated'));
     } catch (error: any) {
       setError(error.message);
     } finally {
@@ -294,7 +296,7 @@ const PermissionManagement: React.FC = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        权限与租户管理
+        {t('permissionManagement.title')}
       </Typography>
 
       {error && (
@@ -324,14 +326,14 @@ const PermissionManagement: React.FC = () => {
           <Tab 
             icon={<AdminIcon />} 
             iconPosition="start"
-            label="权限管理" 
+            label={t('permissionManagement.tabs.manage')} 
             id="permission-tab-0" 
             aria-controls="permission-tabpanel-0" 
           />
           <Tab 
             icon={<ViewIcon />} 
             iconPosition="start"
-            label="我的权限" 
+            label={t('permissionManagement.tabs.mine')} 
             id="permission-tab-1" 
             aria-controls="permission-tabpanel-1" 
           />
@@ -341,25 +343,25 @@ const PermissionManagement: React.FC = () => {
       <TabPanel value={tabValue} index={0}>
 
       {/* 概览统计卡片：角色数/权限数/权限类别数 */}
-      <Grid container spacing={3} sx={{ mb: 2 }}>
-        <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                角色数
-              </Typography>
-              <Typography variant="h5">
-                {roles.length}
-              </Typography>
+	      <Grid container spacing={3} sx={{ mb: 2 }}>
+	        <Grid size={{ xs: 12, sm: 4 }}>
+	          <Card>
+	            <CardContent>
+	              <Typography color="textSecondary" gutterBottom>
+	                {t('permissionManagement.overview.rolesCount')}
+	              </Typography>
+	              <Typography variant="h5">
+	                {roles.length}
+	              </Typography>
             </CardContent>
           </Card>
         </Grid>
         <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                权限总数
-              </Typography>
+	          <Card>
+	            <CardContent>
+	              <Typography color="textSecondary" gutterBottom>
+	                {t('permissionManagement.overview.permissionsTotal')}
+	              </Typography>
               <Typography variant="h5">
                 {Object.values(permissions).reduce((sum, arr) => sum + arr.length, 0)}
               </Typography>
@@ -367,11 +369,11 @@ const PermissionManagement: React.FC = () => {
           </Card>
         </Grid>
         <Grid size={{ xs: 12, sm: 4 }}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                权限类别
-              </Typography>
+	          <Card>
+	            <CardContent>
+	              <Typography color="textSecondary" gutterBottom>
+	                {t('permissionManagement.overview.permissionCategories')}
+	              </Typography>
               <Typography variant="h5">
                 {Object.keys(permissions).length}
               </Typography>
@@ -382,88 +384,85 @@ const PermissionManagement: React.FC = () => {
 
       <Grid container spacing={3}>
         {/* 权限管理 */}
-        <Grid size={{ xs: 12, lg: 8 }}>
-          <Paper sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h6">角色权限管理</Typography>
-              <Box sx={{ display: 'flex', gap: 2 }}>
-                <FormControl sx={{ minWidth: 200 }}>
-                  <InputLabel>选择角色</InputLabel>
-                  <Select
-                    value={selectedRole}
-                    onChange={(e) => setSelectedRole(e.target.value)}
-                    label="选择角色"
-                  >
-                    {roles.map((role) => (
-                      <MenuItem key={role.value} value={role.value}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Chip
-                            label={role.label}
-                            color={role.color as any}
-                            size="small"
-                            icon={role.value.includes('admin') ? <AdminIcon /> : <PersonIcon />}
-                          />
-                        </Box>
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <Button
-                  variant="outlined"
-                  startIcon={<RefreshIcon />}
-                  onClick={loadRolePermissions}
-                >
-                  刷新
-                </Button>
-                <Button
-                  variant="contained"
-                  startIcon={<SaveIcon />}
-                  onClick={handleSavePermissions}
-                  disabled={loading}
-                >
-                  保存权限
-                </Button>
-              </Box>
-            </Box>
+	        <Grid size={{ xs: 12, lg: 8 }}>
+	          <Paper sx={{ p: 3 }}>
+	            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+	              <Typography variant="h6">{t('permissionManagement.sections.rolePermissions')}</Typography>
+	              <Box sx={{ display: 'flex', gap: 2 }}>
+	                <FormControl sx={{ minWidth: 200 }}>
+	                  <InputLabel>{t('permissionManagement.roleSelector.label')}</InputLabel>
+	                  <Select
+	                    value={selectedRole}
+	                    onChange={(e) => setSelectedRole(e.target.value)}
+	                    label={t('permissionManagement.roleSelector.label')}
+	                  >
+	                    {roles.map((role) => (
+	                      <MenuItem key={role.value} value={role.value}>
+	                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+	                          <Chip
+	                            label={t(role.labelKey)}
+	                            color={role.color as any}
+	                            size="small"
+	                            icon={role.value.includes('admin') ? <AdminIcon /> : <PersonIcon />}
+	                          />
+	                        </Box>
+	                      </MenuItem>
+	                    ))}
+	                  </Select>
+	                </FormControl>
+	                <Button
+	                  variant="outlined"
+	                  startIcon={<RefreshIcon />}
+	                  onClick={loadRolePermissions}
+	                >
+	                  {t('common.refresh')}
+	                </Button>
+	                <Button
+	                  variant="contained"
+	                  startIcon={<SaveIcon />}
+	                  onClick={handleSavePermissions}
+	                  disabled={loading}
+	                >
+	                  {t('permissionManagement.actions.savePermissions')}
+	                </Button>
+	              </Box>
+	            </Box>
 
-            {selectedRole && (
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="body2" color="text.secondary">
-                  正在配置角色: <Chip 
-                    component="span"
-                    label={getSelectedRole()?.label} 
-                    color={getSelectedRole()?.color as any} 
-                    size="small" 
-                  />
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  已选择 {rolePermissions.length} 个权限
-                </Typography>
-              </Box>
-            )}
+	            {selectedRole && (
+	              <Box sx={{ mb: 2 }}>
+	                <Typography variant="body2" color="text.secondary">
+	                  {t('permissionManagement.status.configuringRole')}:{' '}
+	                  <Chip 
+	                    component="span"
+	                    label={getSelectedRole() ? t(getSelectedRole()!.labelKey) : ''} 
+	                    color={getSelectedRole()?.color as any} 
+	                    size="small" 
+	                  />
+	                </Typography>
+	                <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+	                  {t('permissionManagement.status.selectedPermissions', { count: rolePermissions.length })}
+	                </Typography>
+	              </Box>
+	            )}
 
             <Grid container spacing={2}>
-              {permLoading && (
-                <Grid size={12}>
-                  <Typography variant="body2" color="text.secondary">正在加载权限...</Typography>
-                </Grid>
-              )}
+	              {permLoading && (
+	                <Grid size={12}>
+	                  <Typography variant="body2" color="text.secondary">{t('permissionManagement.status.loadingPermissions')}</Typography>
+	                </Grid>
+	              )}
               {Object.entries(permissions).map(([category, categoryPermissions]) => (
                 <Grid size={{ xs: 12, md: 6 }} key={category}>
                   <Card variant="outlined">
                     <CardHeader
                       avatar={categoryIcons[category] || <SettingsIcon />}
-                      title={
-                        <Typography variant="h6">
-                          {category === 'system' && '系统权限'}
-                          {category === 'knowledge_base' && '知识库权限'}
-                          {category === 'document' && '文档权限'}
-                          {category === 'chat' && '聊天权限'}
-                          {category === 'config' && '配置权限'}
-                        </Typography>
-                      }
-                      sx={{ pb: 1 }}
-                    />
+	                      title={
+	                        <Typography variant="h6">
+	                          {t(`permissionManagement.categories.${category}`, { defaultValue: category })}
+	                        </Typography>
+	                      }
+	                      sx={{ pb: 1 }}
+	                    />
                     <CardContent sx={{ pt: 0 }}>
                       <FormGroup>
                         {categoryPermissions.map((permission) => (
@@ -498,18 +497,18 @@ const PermissionManagement: React.FC = () => {
         </Grid>
 
         {/* 租户管理 */}
-        <Grid size={{ xs: 12, lg: 4 }}>
-          <Paper sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h6">租户管理</Typography>
-              <Button
-                variant="contained"
-                size="small"
-                onClick={() => setTenantDialogOpen(true)}
-              >
-                添加租户
-              </Button>
-            </Box>
+	        <Grid size={{ xs: 12, lg: 4 }}>
+	          <Paper sx={{ p: 3 }}>
+	            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+	              <Typography variant="h6">{t('permissionManagement.tenants.title')}</Typography>
+	              <Button
+	                variant="contained"
+	                size="small"
+	                onClick={() => setTenantDialogOpen(true)}
+	              >
+	                {t('permissionManagement.tenants.actions.add')}
+	              </Button>
+	            </Box>
 
             <List>
               {tenants.map((tenant) => (
@@ -525,23 +524,23 @@ const PermissionManagement: React.FC = () => {
                     primary={
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                         <Typography variant="subtitle2">{tenant.name}</Typography>
-                        <Chip
-                          label={tenant.is_active ? '活跃' : '禁用'}
-                          color={tenant.is_active ? 'success' : 'default'}
-                          size="small"
-                        />
+	                        <Chip
+	                          label={tenant.is_active ? t('permissionManagement.tenants.status.active') : t('permissionManagement.tenants.status.disabled')}
+	                          color={tenant.is_active ? 'success' : 'default'}
+	                          size="small"
+	                        />
                       </Box>
                     }
                     secondary={
                       <Box>
-                        <Typography variant="caption" display="block">
-                          用户: {tenant.current_users}/{tenant.max_users}
-                        </Typography>
-                        <Typography variant="caption" display="block">
-                          知识库: {tenant.current_knowledge_bases}/{tenant.max_knowledge_bases}
-                        </Typography>
-                      </Box>
-                    }
+	                        <Typography variant="caption" display="block">
+	                          {t('permissionManagement.tenants.metrics.users')}: {tenant.current_users}/{tenant.max_users}
+	                        </Typography>
+	                        <Typography variant="caption" display="block">
+	                          {t('permissionManagement.tenants.metrics.knowledgeBases')}: {tenant.current_knowledge_bases}/{tenant.max_knowledge_bases}
+	                        </Typography>
+	                      </Box>
+	                    }
                   />
                 </ListItem>
               ))}
@@ -549,10 +548,10 @@ const PermissionManagement: React.FC = () => {
           </Paper>
 
           {/* 系统概览 */}
-          <Paper sx={{ p: 3, mt: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              系统概览
-            </Typography>
+	          <Paper sx={{ p: 3, mt: 2 }}>
+	            <Typography variant="h6" gutterBottom>
+	              {t('permissionManagement.systemOverview.title')}
+	            </Typography>
             <Grid container spacing={2}>
               <Grid size={6}>
                 <Card variant="outlined">
@@ -560,9 +559,9 @@ const PermissionManagement: React.FC = () => {
                     <Typography variant="h5" color="primary">
                       {tenants.length}
                     </Typography>
-                    <Typography variant="caption">
-                      租户总数
-                    </Typography>
+	                    <Typography variant="caption">
+	                      {t('permissionManagement.systemOverview.tenantsTotal')}
+	                    </Typography>
                   </CardContent>
                 </Card>
               </Grid>
@@ -572,9 +571,9 @@ const PermissionManagement: React.FC = () => {
                     <Typography variant="h5" color="success.main">
                       {tenants.filter(t => t.is_active).length}
                     </Typography>
-                    <Typography variant="caption">
-                      活跃租户
-                    </Typography>
+	                    <Typography variant="caption">
+	                      {t('permissionManagement.systemOverview.activeTenants')}
+	                    </Typography>
                   </CardContent>
                 </Card>
               </Grid>
@@ -584,9 +583,9 @@ const PermissionManagement: React.FC = () => {
                     <Typography variant="h5" color="info.main">
                       {tenants.reduce((sum, t) => sum + t.current_users, 0)}
                     </Typography>
-                    <Typography variant="caption">
-                      总用户数
-                    </Typography>
+	                    <Typography variant="caption">
+	                      {t('permissionManagement.systemOverview.usersTotal')}
+	                    </Typography>
                   </CardContent>
                 </Card>
               </Grid>
@@ -596,9 +595,9 @@ const PermissionManagement: React.FC = () => {
                     <Typography variant="h5" color="warning.main">
                       {tenants.reduce((sum, t) => sum + t.current_knowledge_bases, 0)}
                     </Typography>
-                    <Typography variant="caption">
-                      知识库数
-                    </Typography>
+	                    <Typography variant="caption">
+	                      {t('permissionManagement.systemOverview.knowledgeBasesTotal')}
+	                    </Typography>
                   </CardContent>
                 </Card>
               </Grid>
@@ -609,79 +608,79 @@ const PermissionManagement: React.FC = () => {
 
       {/* 创建租户对话框 */}
       <Dialog open={tenantDialogOpen} onClose={() => setTenantDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>创建新租户</DialogTitle>
+        <DialogTitle>{t('permissionManagement.tenants.createDialog.title')}</DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid size={12}>
-              <TextField
-                fullWidth
-                label="租户名称"
-                value={newTenant.name}
-                onChange={(e) => setNewTenant({ ...newTenant, name: e.target.value })}
-                required
-              />
+	              <TextField
+	                fullWidth
+	                label={t('permissionManagement.tenants.createDialog.fields.name')}
+	                value={newTenant.name}
+	                onChange={(e) => setNewTenant({ ...newTenant, name: e.target.value })}
+	                required
+	              />
             </Grid>
             <Grid size={12}>
-              <TextField
-                fullWidth
-                label="租户标识符"
-                value={newTenant.slug}
-                onChange={(e) => setNewTenant({ ...newTenant, slug: e.target.value })}
-                required
-                helperText="用于URL，只能包含字母、数字和连字符"
-              />
+	              <TextField
+	                fullWidth
+	                label={t('permissionManagement.tenants.createDialog.fields.slug')}
+	                value={newTenant.slug}
+	                onChange={(e) => setNewTenant({ ...newTenant, slug: e.target.value })}
+	                required
+	                helperText={t('permissionManagement.tenants.createDialog.fields.slugHelp')}
+	              />
             </Grid>
             <Grid size={12}>
-              <TextField
-                fullWidth
-                label="描述"
-                value={newTenant.description}
-                onChange={(e) => setNewTenant({ ...newTenant, description: e.target.value })}
-                multiline
-                rows={2}
-              />
+	              <TextField
+	                fullWidth
+	                label={t('permissionManagement.tenants.createDialog.fields.description')}
+	                value={newTenant.description}
+	                onChange={(e) => setNewTenant({ ...newTenant, description: e.target.value })}
+	                multiline
+	                rows={2}
+	              />
             </Grid>
             <Grid size={6}>
-              <TextField
-                fullWidth
-                label="最大用户数"
-                type="number"
-                value={newTenant.max_users}
-                onChange={(e) => setNewTenant({ ...newTenant, max_users: parseInt(e.target.value) })}
-              />
+	              <TextField
+	                fullWidth
+	                label={t('permissionManagement.tenants.createDialog.fields.maxUsers')}
+	                type="number"
+	                value={newTenant.max_users}
+	                onChange={(e) => setNewTenant({ ...newTenant, max_users: parseInt(e.target.value) })}
+	              />
             </Grid>
             <Grid size={6}>
-              <TextField
-                fullWidth
-                label="最大知识库数"
-                type="number"
-                value={newTenant.max_knowledge_bases}
-                onChange={(e) => setNewTenant({ ...newTenant, max_knowledge_bases: parseInt(e.target.value) })}
-              />
+	              <TextField
+	                fullWidth
+	                label={t('permissionManagement.tenants.createDialog.fields.maxKnowledgeBases')}
+	                type="number"
+	                value={newTenant.max_knowledge_bases}
+	                onChange={(e) => setNewTenant({ ...newTenant, max_knowledge_bases: parseInt(e.target.value) })}
+	              />
             </Grid>
             <Grid size={6}>
-              <TextField
-                fullWidth
-                label="最大文档数"
-                type="number"
-                value={newTenant.max_documents}
-                onChange={(e) => setNewTenant({ ...newTenant, max_documents: parseInt(e.target.value) })}
-              />
+	              <TextField
+	                fullWidth
+	                label={t('permissionManagement.tenants.createDialog.fields.maxDocuments')}
+	                type="number"
+	                value={newTenant.max_documents}
+	                onChange={(e) => setNewTenant({ ...newTenant, max_documents: parseInt(e.target.value) })}
+	              />
             </Grid>
             <Grid size={6}>
-              <TextField
-                fullWidth
-                label="存储配额(MB)"
-                type="number"
-                value={newTenant.storage_quota_mb}
-                onChange={(e) => setNewTenant({ ...newTenant, storage_quota_mb: parseInt(e.target.value) })}
-              />
+	              <TextField
+	                fullWidth
+	                label={t('permissionManagement.tenants.createDialog.fields.storageQuotaMb')}
+	                type="number"
+	                value={newTenant.storage_quota_mb}
+	                onChange={(e) => setNewTenant({ ...newTenant, storage_quota_mb: parseInt(e.target.value) })}
+	              />
             </Grid>
           </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setTenantDialogOpen(false)}>取消</Button>
-          <Button onClick={handleCreateTenant} variant="contained">创建</Button>
+          <Button onClick={() => setTenantDialogOpen(false)}>{t('common.cancel')}</Button>
+          <Button onClick={handleCreateTenant} variant="contained">{t('common.create')}</Button>
         </DialogActions>
       </Dialog>
       </TabPanel>

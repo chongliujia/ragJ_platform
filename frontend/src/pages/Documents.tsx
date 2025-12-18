@@ -30,7 +30,7 @@ const Documents: React.FC = () => {
         setSelectedKb(list[0].id);
       }
     } catch {
-      enqueueSnackbar('加载知识库失败', 'error');
+      enqueueSnackbar(t('documents.messages.loadKnowledgeBasesFailed'), 'error');
     }
   };
 
@@ -88,13 +88,13 @@ const Documents: React.FC = () => {
             open={uploadOpen}
             onClose={() => setUploadOpen(false)}
             knowledgeBaseId={selectedKb}
-            onUploadSuccess={() => enqueueSnackbar('上传已接收，后台处理中', 'success')}
+            onUploadSuccess={() => enqueueSnackbar(t('documents.messages.uploadAccepted'), 'success')}
           />
           <DocumentManager
             open={managerOpen}
             onClose={() => setManagerOpen(false)}
             knowledgeBaseId={selectedKb}
-            onDocumentsChanged={() => enqueueSnackbar('文档列表已更新', 'info')}
+            onDocumentsChanged={() => enqueueSnackbar(t('documents.messages.documentsUpdated'), 'info')}
           />
         </>
       )}

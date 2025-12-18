@@ -45,7 +45,7 @@ export const MODEL_PROVIDERS = {
     },
   },
   qwen: {
-    name: '通义千问',
+    name: 'Qwen',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     models: {
       chat: ['qwen-turbo', 'qwen-plus', 'qwen-max'],
@@ -54,7 +54,7 @@ export const MODEL_PROVIDERS = {
     },
   },
   siliconflow: {
-    name: '硅基流动',
+    name: 'SiliconFlow',
     baseUrl: 'https://api.siliconflow.cn/v1',
     models: {
       chat: ['deepseek-ai/DeepSeek-V2.5', 'Qwen/Qwen2.5-72B-Instruct'],

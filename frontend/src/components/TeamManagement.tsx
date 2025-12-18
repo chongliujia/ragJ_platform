@@ -3,6 +3,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Box,
   Card,
@@ -41,6 +42,7 @@ import type { CreateTeamData, InviteUserData } from '../types';
 import { TEAM_TYPES, MEMBER_TYPES } from '../types';
 
 export const TeamManagement: React.FC = () => {
+  const { t } = useTranslation();
   const { 
     currentTeam, 
     teamMembers, 
@@ -146,8 +148,8 @@ export const TeamManagement: React.FC = () => {
 
     const confirmed = window.confirm(
       isTeamOwner 
-        ? '作为团队创建者，离开将删除整个团队。确认继续吗？'
-        : '确认离开当前团队吗？'
+        ? t('teamManagement.confirm.leaveOwner')
+        : t('teamManagement.confirm.leaveMember')
     );
 
     if (!confirmed) return;
@@ -177,7 +179,7 @@ export const TeamManagement: React.FC = () => {
   return (
     <Box p={3}>
       <Typography variant="h4" gutterBottom>
-        团队管理
+        {t('teamManagement.title')}
       </Typography>
 
       {error && (
@@ -198,7 +200,7 @@ export const TeamManagement: React.FC = () => {
                     <GroupIcon sx={{ mr: 1, fontSize: 32 }} />
                     <Typography variant="h5">{currentTeam.name}</Typography>
                     <Chip 
-                      label={currentTeam.team_type} 
+                      label={t(`teamManagement.teamTypes.${currentTeam.team_type}`, { defaultValue: currentTeam.team_type })} 
                       size="small" 
                       sx={{ ml: 2 }} 
                     />
@@ -220,13 +222,18 @@ export const TeamManagement: React.FC = () => {
 
                 <Box display="flex" gap={2} mb={2}>
                   <Typography variant="body2">
-                    成员数量: {currentTeam.member_count}/{currentTeam.max_members}
+                    {t('teamManagement.summary.members')}: {currentTeam.member_count}/{currentTeam.max_members}
                   </Typography>
                   <Typography variant="body2">
-                    我的角色: <Chip component="span" label={currentTeam.my_member_type} size="small" />
+                    {t('teamManagement.summary.myRole')}:{' '}
+                    <Chip
+                      component="span"
+                      label={t(`teamManagement.memberTypes.${currentTeam.my_member_type}`, { defaultValue: currentTeam.my_member_type })}
+                      size="small"
+                    />
                   </Typography>
                   <Typography variant="body2">
-                    隐私: {currentTeam.is_private ? '私有' : '公开'}
+                    {t('teamManagement.summary.privacy')}: {currentTeam.is_private ? t('teamManagement.privacy.private') : t('teamManagement.privacy.public')}
                   </Typography>
                 </Box>
 
@@ -237,7 +244,7 @@ export const TeamManagement: React.FC = () => {
                     onClick={() => setInviteDialogOpen(true)}
                     sx={{ mr: 2 }}
                   >
-                    邀请成员
+                    {t('teamManagement.actions.invite')}
                   </Button>
                 )}
 
@@ -248,7 +255,7 @@ export const TeamManagement: React.FC = () => {
                     onClick={handleLeaveTeam}
                     color="error"
                   >
-                    离开团队
+                    {t('teamManagement.actions.leave')}
                   </Button>
                 )}
               </CardContent>
@@ -260,14 +267,14 @@ export const TeamManagement: React.FC = () => {
             <Card>
               <CardContent>
                 <Typography variant="h6" gutterBottom>
-                  团队成员
+                  {t('teamManagement.sections.members')}
                 </Typography>
                 <List>
                   {teamMembers.map((member) => (
                     <ListItem key={member.user_id}>
                       <ListItemText
                         primary={member.username}
-                        secondary={`${member.email} - ${member.member_type}`}
+                        secondary={`${member.email} - ${t(`teamManagement.memberTypes.${member.member_type}`, { defaultValue: member.member_type })}`}
                       />
                       {teamPermissions.can_remove_members && 
                        member.member_type !== MEMBER_TYPES.OWNER && (
@@ -294,10 +301,10 @@ export const TeamManagement: React.FC = () => {
         <Card>
           <CardContent>
             <Typography variant="h6" gutterBottom>
-              您还没有加入任何团队
+              {t('teamManagement.empty.title')}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              您可以创建一个新团队或通过邀请码加入现有团队。
+              {t('teamManagement.empty.subtitle')}
             </Typography>
             
             <Box display="flex" gap={2}>
@@ -306,13 +313,13 @@ export const TeamManagement: React.FC = () => {
                 startIcon={<AddIcon />}
                 onClick={() => setCreateDialogOpen(true)}
               >
-                创建团队
+                {t('teamManagement.actions.create')}
               </Button>
               <Button
                 variant="outlined"
                 onClick={() => setJoinDialogOpen(true)}
               >
-                加入团队
+                {t('teamManagement.actions.join')}
               </Button>
             </Box>
           </CardContent>
@@ -326,7 +333,7 @@ export const TeamManagement: React.FC = () => {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle>创建新团队</DialogTitle>
+        <DialogTitle>{t('teamManagement.dialogs.create.title')}</DialogTitle>
         <DialogContent>
           {createError && (
             <Alert severity="error" sx={{ mb: 2 }}>
@@ -336,7 +343,7 @@ export const TeamManagement: React.FC = () => {
           
           <TextField
             fullWidth
-            label="团队名称"
+            label={t('teamManagement.dialogs.create.fields.name')}
             value={createFormData.name}
             onChange={(e) => setCreateFormData({
               ...createFormData,
@@ -348,7 +355,7 @@ export const TeamManagement: React.FC = () => {
           
           <TextField
             fullWidth
-            label="团队描述"
+            label={t('teamManagement.dialogs.create.fields.description')}
             value={createFormData.description}
             onChange={(e) => setCreateFormData({
               ...createFormData,
@@ -360,7 +367,7 @@ export const TeamManagement: React.FC = () => {
           />
           
           <FormControl fullWidth margin="normal">
-            <InputLabel>团队类型</InputLabel>
+            <InputLabel>{t('teamManagement.dialogs.create.fields.type')}</InputLabel>
             <Select
               value={createFormData.team_type}
               onChange={(e) => setCreateFormData({
@@ -368,14 +375,14 @@ export const TeamManagement: React.FC = () => {
                 team_type: e.target.value as any
               })}
             >
-              <MenuItem value={TEAM_TYPES.COLLABORATIVE}>协作团队</MenuItem>
-              <MenuItem value={TEAM_TYPES.PROJECT}>项目团队</MenuItem>
+              <MenuItem value={TEAM_TYPES.COLLABORATIVE}>{t('teamManagement.teamTypes.collaborative')}</MenuItem>
+              <MenuItem value={TEAM_TYPES.PROJECT}>{t('teamManagement.teamTypes.project')}</MenuItem>
             </Select>
           </FormControl>
           
           <TextField
             fullWidth
-            label="最大成员数"
+            label={t('teamManagement.dialogs.create.fields.maxMembers')}
             type="number"
             value={createFormData.max_members}
             onChange={(e) => setCreateFormData({
@@ -386,15 +393,13 @@ export const TeamManagement: React.FC = () => {
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateDialogOpen(false)}>
-            取消
-          </Button>
+          <Button onClick={() => setCreateDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button 
             onClick={handleCreateTeam}
             variant="contained"
             disabled={createLoading || !createFormData.name}
           >
-            {createLoading ? <CircularProgress size={20} /> : '创建'}
+            {createLoading ? <CircularProgress size={20} /> : t('common.create')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -406,7 +411,7 @@ export const TeamManagement: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>邀请用户加入团队</DialogTitle>
+        <DialogTitle>{t('teamManagement.dialogs.invite.title')}</DialogTitle>
         <DialogContent>
           {inviteError && (
             <Alert severity="error" sx={{ mb: 2 }}>
@@ -416,7 +421,7 @@ export const TeamManagement: React.FC = () => {
           
           <TextField
             fullWidth
-            label="邮箱地址"
+            label={t('teamManagement.dialogs.invite.fields.email')}
             type="email"
             value={inviteFormData.email}
             onChange={(e) => setInviteFormData({
@@ -428,7 +433,7 @@ export const TeamManagement: React.FC = () => {
           />
           
           <FormControl fullWidth margin="normal">
-            <InputLabel>成员角色</InputLabel>
+            <InputLabel>{t('teamManagement.dialogs.invite.fields.role')}</InputLabel>
             <Select
               value={inviteFormData.target_member_type}
               onChange={(e) => setInviteFormData({
@@ -436,16 +441,16 @@ export const TeamManagement: React.FC = () => {
                 target_member_type: e.target.value as any
               })}
             >
-              <MenuItem value={MEMBER_TYPES.MEMBER}>普通成员</MenuItem>
+              <MenuItem value={MEMBER_TYPES.MEMBER}>{t('teamManagement.memberTypes.member')}</MenuItem>
               {isTeamOwner && (
-                <MenuItem value={MEMBER_TYPES.ADMIN}>管理员</MenuItem>
+                <MenuItem value={MEMBER_TYPES.ADMIN}>{t('teamManagement.memberTypes.admin')}</MenuItem>
               )}
             </Select>
           </FormControl>
           
           <TextField
             fullWidth
-            label="邀请消息"
+            label={t('teamManagement.dialogs.invite.fields.message')}
             value={inviteFormData.message}
             onChange={(e) => setInviteFormData({
               ...inviteFormData,
@@ -454,19 +459,17 @@ export const TeamManagement: React.FC = () => {
             margin="normal"
             multiline
             rows={3}
-            placeholder="可选：向被邀请人说明邀请原因..."
+            placeholder={t('teamManagement.dialogs.invite.fields.messagePlaceholder')}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setInviteDialogOpen(false)}>
-            取消
-          </Button>
+          <Button onClick={() => setInviteDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button 
             onClick={handleInviteUser}
             variant="contained"
             disabled={inviteLoading || !inviteFormData.email}
           >
-            {inviteLoading ? <CircularProgress size={20} /> : '发送邀请'}
+            {inviteLoading ? <CircularProgress size={20} /> : t('teamManagement.dialogs.invite.actions.send')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -478,7 +481,7 @@ export const TeamManagement: React.FC = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>加入团队</DialogTitle>
+        <DialogTitle>{t('teamManagement.dialogs.join.title')}</DialogTitle>
         <DialogContent>
           {joinError && (
             <Alert severity="error" sx={{ mb: 2 }}>
@@ -488,7 +491,7 @@ export const TeamManagement: React.FC = () => {
           
           <TextField
             fullWidth
-            label="邀请码"
+            label={t('teamManagement.dialogs.join.fields.inviteCode')}
             value={joinFormData.inviteCode}
             onChange={(e) => setJoinFormData({
               ...joinFormData,
@@ -496,23 +499,21 @@ export const TeamManagement: React.FC = () => {
             })}
             margin="normal"
             required
-            placeholder="请输入邀请码"
+            placeholder={t('teamManagement.dialogs.join.fields.inviteCodePlaceholder')}
           />
           
           <Alert severity="warning" sx={{ mt: 2 }}>
-            加入新团队将自动离开当前团队（如果有）。
+            {t('teamManagement.dialogs.join.hint')}
           </Alert>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setJoinDialogOpen(false)}>
-            取消
-          </Button>
+          <Button onClick={() => setJoinDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button 
             onClick={handleJoinTeam}
             variant="contained"
             disabled={joinLoading || !joinFormData.inviteCode}
           >
-            {joinLoading ? <CircularProgress size={20} /> : '加入团队'}
+            {joinLoading ? <CircularProgress size={20} /> : t('teamManagement.actions.join')}
           </Button>
         </DialogActions>
       </Dialog>

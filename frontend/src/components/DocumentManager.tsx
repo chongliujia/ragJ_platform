@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   Dialog,
   DialogTitle,
@@ -61,17 +62,17 @@ const parseErrorDetails = (message?: string): any | null => {
   }
 };
 
-const getErrorHint = (message?: string): string | null => {
+const getErrorHint = (t: TFunction, message?: string): string | null => {
   const details = parseErrorDetails(message);
   const code = details?.code;
   if (code === 20042 && /tokens/i.test(String(details?.message || message || ''))) {
-    return '嵌入模型限制单条输入长度（≤512 tokens）。建议在上传时调小“分片长度/Chunk Size”（例如 400~700），或更换支持更长输入的 embedding 模型。';
+    return t('document.manager.errorHints.embeddingTokenLimit');
   }
   if (typeof code === 'number') {
-    return `提供商返回错误码：${code}。可以先检查模型是否可用、Key/配额是否足够，或在“模型配置”里测试连接。`;
+    return t('document.manager.errorHints.providerCode', { code });
   }
   if (message && /403/.test(message)) {
-    return '403 通常是 API Key/配额/模型权限问题：检查提供商 Key 是否正确、是否开通对应模型、是否触发限流。';
+    return t('document.manager.errorHints.forbidden');
   }
   return null;
 };
@@ -224,13 +225,19 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
       setDocuments((prev) =>
         prev.map((d) =>
           d.id === doc.id
-            ? { ...d, status: 'pending', error_message: undefined, chunks_count: 0, progress: { stage: '重试中…' } }
+            ? {
+                ...d,
+                status: 'pending',
+                error_message: undefined,
+                chunks_count: 0,
+                progress: { stage: t('document.manager.status.retryingStage') },
+              }
             : d
         )
       );
     } catch (e: any) {
       console.error('Retry failed:', e);
-      setError(e?.response?.data?.detail || '重试失败');
+      setError(e?.response?.data?.detail || t('document.manager.messages.retryFailed'));
     } finally {
       setRetryingDocuments((prev) => prev.filter((id) => id !== doc.id));
       // trigger refresh soon
@@ -408,19 +415,9 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
 	            startIcon={<FilterIcon />}
 	            sx={{ ml: 1 }}
 	            onClick={(e) => setStatusMenuAnchor(e.currentTarget)}
-	          >
-	            {statusFilter === 'all'
-	              ? '全部状态'
-	              : statusFilter === 'pending'
-	                  ? '等待'
-	                  : statusFilter === 'processing'
-	                      ? '处理中'
-	                      : statusFilter === 'completed'
-	                          ? '已完成'
-	                          : statusFilter === 'failed'
-	                              ? '失败'
-	                              : statusFilter}
-	          </Button>
+		          >
+		            {t(`document.manager.filters.status.${statusFilter}`, { defaultValue: statusFilter })}
+		          </Button>
           
           <Box sx={{ flexGrow: 1 }} />
           
@@ -441,22 +438,22 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
 	          >
 	            {t('document.manager.actions.refresh')}
 	          </Button>
-          <Button
-            size="small"
-            onClick={async () => {
-              if (!window.confirm('确定清空该知识库的所有向量？此操作不可撤销。')) return;
-              try {
-                await knowledgeBaseApi.clearVectors(knowledgeBaseId);
-                setDocuments(prev => prev.map(d => ({ ...d, chunks_count: 0 })));
-              } catch (e: any) {
-                console.error('Failed to clear vectors:', e);
-                setError(e?.response?.data?.detail || '清空向量失败');
-              }
-            }}
-            startIcon={<ProcessIcon />}
-          >
-            清空向量
-          </Button>
+	          <Button
+	            size="small"
+	            onClick={async () => {
+	              if (!window.confirm(t('document.manager.confirm.clearVectors'))) return;
+	              try {
+	                await knowledgeBaseApi.clearVectors(knowledgeBaseId);
+	                setDocuments(prev => prev.map(d => ({ ...d, chunks_count: 0 })));
+	              } catch (e: any) {
+	                console.error('Failed to clear vectors:', e);
+	                setError(e?.response?.data?.detail || t('document.manager.messages.clearVectorsFailed'));
+	              }
+	            }}
+	            startIcon={<ProcessIcon />}
+	          >
+	            {t('document.manager.actions.clearVectors')}
+	          </Button>
           
           <Button
             size="small"
@@ -556,9 +553,9 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                               >
                                 {doc.error_message}
                               </Typography>
-                              <Tooltip title="查看/复制错误详情">
-                                <span>
-                                  <IconButton
+	                              <Tooltip title={t('document.manager.tooltips.errorDetails')}>
+	                                <span>
+	                                  <IconButton
                                     size="small"
                                     onClick={() => openErrorDialog(doc)}
                                     disabled={!doc.error_message}
@@ -585,24 +582,33 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                               ) : (
                                 <>
                                   <Typography variant="caption" color="text.secondary">
-                                    {doc.progress?.stage || (doc.status === 'pending' ? '等待处理…' : '处理中…')}
-                                  </Typography>
-                                  <LinearProgress sx={{ mt: 0.5, width: 120, height: 6, borderRadius: 3 }} />
-                                </>
-                              )}
+	                                    {doc.progress?.stage ||
+	                                      (doc.status === 'pending'
+	                                        ? t('document.manager.status.pendingStage')
+	                                        : t('document.manager.status.processingStage'))}
+	                                  </Typography>
+	                                  <LinearProgress sx={{ mt: 0.5, width: 120, height: 6, borderRadius: 3 }} />
+	                                </>
+	                              )}
                             </Box>
                           )}
-                          {doc.status === 'completed' && doc.processed_at && (
-                            <Typography variant="caption" color="text.secondary">
-                              已处理：{formatTime(doc.processed_at)}
-                            </Typography>
-                          )}
+	                          {doc.status === 'completed' && doc.processed_at && (
+	                            <Typography variant="caption" color="text.secondary">
+	                              {t('document.manager.labels.processedAt')}: {formatTime(doc.processed_at)}
+	                            </Typography>
+	                          )}
                         </Box>
                       </TableCell>
 	                      <TableCell>
-	                        <Tooltip title={chunksCount > 0 ? '点击查看分片' : '暂无分片'}>
-	                            <span>
-	                              <Chip
+		                        <Tooltip
+		                          title={
+		                            chunksCount > 0
+		                              ? t('document.manager.tooltips.clickToViewChunks')
+		                              : t('document.manager.tooltips.noChunks')
+		                          }
+		                        >
+		                            <span>
+		                              <Chip
 	                                size="small"
 	                                label={String(chunksCount)}
 	                                clickable={chunksCount > 0}
@@ -615,13 +621,19 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
 	                                variant={chunksCount > 0 ? 'outlined' : 'filled'}
 	                                color={chunksCount > 0 ? 'primary' : 'default'}
 	                              />
-	                            </span>
-	                          </Tooltip>
-	                      </TableCell>
-	                      <TableCell>
-	                        <Tooltip title={chunksCount > 0 ? '查看分片' : '无分片可查看'}>
-	                          <span>
-	                            <IconButton
+		                            </span>
+		                          </Tooltip>
+		                      </TableCell>
+		                      <TableCell>
+		                        <Tooltip
+		                          title={
+		                            chunksCount > 0
+		                              ? t('document.manager.tooltips.viewChunks')
+		                              : t('document.manager.tooltips.noChunksToView')
+		                          }
+		                        >
+		                          <span>
+		                            <IconButton
 	                              size="small"
 	                              onClick={() => { setActiveDocForChunks(doc); setChunksDialogOpen(true); }}
 	                              disabled={chunksCount === 0}
@@ -629,12 +641,18 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
 	                              sx={{ mr: 1 }}
 	                            >
 	                              <ViewIcon />
-                            </IconButton>
-                          </span>
-                        </Tooltip>
-                        <Tooltip title={doc.status === 'failed' ? '重试处理' : '仅失败文档可重试'}>
-                          <span>
-                            <IconButton
+	                            </IconButton>
+	                          </span>
+	                        </Tooltip>
+	                        <Tooltip
+	                          title={
+	                            doc.status === 'failed'
+	                              ? t('document.manager.tooltips.retry')
+	                              : t('document.manager.tooltips.retryOnlyFailed')
+	                          }
+	                        >
+	                          <span>
+	                            <IconButton
                               size="small"
                               onClick={() => retryDocument(doc)}
                               disabled={doc.status !== 'failed' || retryingDocuments.includes(doc.id)}
@@ -677,51 +695,51 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
 	          open={Boolean(statusMenuAnchor)}
 	          onClose={() => setStatusMenuAnchor(null)}
 	        >
-	          <MenuItem
-	            selected={statusFilter === 'all'}
-	            onClick={() => {
-	              setStatusFilter('all');
-	              setStatusMenuAnchor(null);
-	            }}
-	          >
-	            全部状态
-	          </MenuItem>
+		        <MenuItem
+		          selected={statusFilter === 'all'}
+		          onClick={() => {
+		            setStatusFilter('all');
+		            setStatusMenuAnchor(null);
+		          }}
+		        >
+		          {t('document.manager.filters.status.all')}
+		        </MenuItem>
 	          <MenuItem
 	            selected={statusFilter === 'pending'}
 	            onClick={() => {
 	              setStatusFilter('pending');
 	              setStatusMenuAnchor(null);
 	            }}
-	          >
-	            等待
-	          </MenuItem>
+		        >
+		          {t('document.manager.filters.status.pending')}
+		        </MenuItem>
 	          <MenuItem
 	            selected={statusFilter === 'processing'}
 	            onClick={() => {
 	              setStatusFilter('processing');
 	              setStatusMenuAnchor(null);
 	            }}
-	          >
-	            处理中
-	          </MenuItem>
+		        >
+		          {t('document.manager.filters.status.processing')}
+		        </MenuItem>
 	          <MenuItem
 	            selected={statusFilter === 'completed'}
 	            onClick={() => {
 	              setStatusFilter('completed');
 	              setStatusMenuAnchor(null);
 	            }}
-	          >
-	            已完成
-	          </MenuItem>
+		        >
+		          {t('document.manager.filters.status.completed')}
+		        </MenuItem>
 	          <MenuItem
 	            selected={statusFilter === 'failed'}
 	            onClick={() => {
 	              setStatusFilter('failed');
 	              setStatusMenuAnchor(null);
 	            }}
-	          >
-	            失败
-	          </MenuItem>
+		        >
+		          {t('document.manager.filters.status.failed')}
+		        </MenuItem>
 	        </Menu>
 
 	        {/* 操作菜单 */}
@@ -742,25 +760,25 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
             </ListItemIcon>
             <ListItemText>{t('document.manager.actions.deleteSelected')}</ListItemText>
           </MenuItem>
-          <MenuItem
-            onClick={async () => {
-              setActionMenuAnchor(null);
-              if (!window.confirm('确定清空该知识库的所有向量？此操作不可撤销。')) return;
-              try {
-                await knowledgeBaseApi.clearVectors(knowledgeBaseId);
-                // 清空本地文档的分片计数
-                setDocuments(prev => prev.map(d => ({ ...d, chunks_count: 0 })));
-              } catch (e: any) {
-                console.error('Failed to clear vectors:', e);
-                setError(e?.response?.data?.detail || '清空向量失败');
-              }
-            }}
-          >
+	          <MenuItem
+	            onClick={async () => {
+	              setActionMenuAnchor(null);
+	              if (!window.confirm(t('document.manager.confirm.clearVectors'))) return;
+	              try {
+	                await knowledgeBaseApi.clearVectors(knowledgeBaseId);
+	                // 清空本地文档的分片计数
+	                setDocuments(prev => prev.map(d => ({ ...d, chunks_count: 0 })));
+	              } catch (e: any) {
+	                console.error('Failed to clear vectors:', e);
+	                setError(e?.response?.data?.detail || t('document.manager.messages.clearVectorsFailed'));
+	              }
+	            }}
+	          >
             <ListItemIcon>
               <ProcessIcon />
             </ListItemIcon>
-            <ListItemText>清空向量（Milvus）</ListItemText>
-          </MenuItem>
+	            <ListItemText>{t('document.manager.actions.clearVectorsMilvus')}</ListItemText>
+	          </MenuItem>
         </Menu>
       </DialogContent>
 
@@ -778,17 +796,17 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
           maxWidth="md"
           fullWidth
         >
-          <DialogTitle>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="h6" noWrap>处理失败原因</Typography>
-                <Typography variant="caption" color="text.secondary" noWrap>
-                  {activeDocForError.filename}
-                </Typography>
-              </Box>
-              <Tooltip title="复制错误信息">
-                <span>
-                  <IconButton
+	          <DialogTitle>
+	            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
+	              <Box sx={{ minWidth: 0 }}>
+	                <Typography variant="h6" noWrap>{t('document.manager.errorDialog.title')}</Typography>
+	                <Typography variant="caption" color="text.secondary" noWrap>
+	                  {activeDocForError.filename}
+	                </Typography>
+	              </Box>
+	              <Tooltip title={t('document.manager.errorDialog.copy')}>
+	                <span>
+	                  <IconButton
                     size="small"
                     onClick={() => copyText(activeDocForError.error_message || '')}
                     disabled={!activeDocForError.error_message}
@@ -799,19 +817,27 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
               </Tooltip>
             </Box>
           </DialogTitle>
-          <DialogContent dividers>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
-              {getStatusChip(activeDocForError.status, activeDocForError.error_message)}
-              <Chip size="small" label={`分片：${activeDocForError.chunks_count ?? 0}`} variant="outlined" />
-              {activeDocForError.processed_at && (
-                <Chip size="small" label={`完成：${formatTime(activeDocForError.processed_at)}`} variant="outlined" />
-              )}
-            </Box>
-            {getErrorHint(activeDocForError.error_message) && (
-              <Alert severity="info" sx={{ mb: 2 }}>
-                {getErrorHint(activeDocForError.error_message)}
-              </Alert>
-            )}
+	          <DialogContent dividers>
+	            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 2 }}>
+	              {getStatusChip(activeDocForError.status, activeDocForError.error_message)}
+	              <Chip
+	                size="small"
+	                label={t('document.manager.errorDialog.chunks', { count: activeDocForError.chunks_count ?? 0 })}
+	                variant="outlined"
+	              />
+	              {activeDocForError.processed_at && (
+	                <Chip
+	                  size="small"
+	                  label={t('document.manager.errorDialog.completedAt', { time: formatTime(activeDocForError.processed_at) })}
+	                  variant="outlined"
+	                />
+	              )}
+	            </Box>
+	            {getErrorHint(t, activeDocForError.error_message) && (
+	              <Alert severity="info" sx={{ mb: 2 }}>
+	                {getErrorHint(t, activeDocForError.error_message)}
+	              </Alert>
+	            )}
             <Paper
               variant="outlined"
               sx={{
@@ -830,16 +856,16 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
                   fontSize: 13,
                   lineHeight: 1.5,
                 }}
-              >
-                {activeDocForError.error_message || '无错误信息'}
-              </Typography>
-            </Paper>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => { setErrorDialogOpen(false); setActiveDocForError(null); }}>关闭</Button>
-          </DialogActions>
-        </Dialog>
-      )}
+	              >
+	                {activeDocForError.error_message || t('document.manager.errorDialog.noErrorMessage')}
+	              </Typography>
+	            </Paper>
+	          </DialogContent>
+	          <DialogActions>
+	            <Button onClick={() => { setErrorDialogOpen(false); setActiveDocForError(null); }}>{t('common.close')}</Button>
+	          </DialogActions>
+	        </Dialog>
+	      )}
 
       {/* 分片查看对话框 */}
       {activeDocForChunks && (

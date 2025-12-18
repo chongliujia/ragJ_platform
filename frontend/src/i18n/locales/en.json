@@ -143,7 +143,11 @@
     "selectKnowledgeBaseFirst": "Please select a knowledge base first",
     "errorResponse": "Sorry, I cannot answer your question at the moment. Please try again later.",
     "fetchKnowledgeBasesError": "Failed to fetch knowledge bases",
-    "normalChat": "Normal Chat (No Knowledge Base)"
+    "normalChat": "Normal Chat (No Knowledge Base)",
+    "regenerate": "Regenerate",
+    "stop": "Stop",
+    "timeout": "Request timed out",
+    "timeoutWithKnowledgeBase": "Request timed out. Try again or switch to Normal Chat."
   },
   "documents": {
     "title": "Document Management",
@@ -156,6 +160,11 @@
     },
     "actions": {
       "goCreateKb": "Create Knowledge Base"
+    },
+    "messages": {
+      "loadKnowledgeBasesFailed": "Failed to load knowledge bases",
+      "uploadAccepted": "Upload accepted, processing in background",
+      "documentsUpdated": "Documents updated"
     }
   },
   "document": {
@@ -172,13 +181,17 @@
         "selected": "Selected",
         "selectedFiles": "Selected Files",
         "required": "Please select files to upload",
-        "supportedFormats": "Supports PDF, DOCX, TXT, MD, HTML, CSV, JSON, XML, RTF, EPUB, ODT, Excel, PowerPoint and more"
+        "supportedFormats": "Supports PDF, DOCX, TXT, MD, HTML, CSV, JSON, XML, RTF, EPUB, ODT, Excel, PowerPoint and more",
+        "invalidType": "Unsupported file type {{ext}}",
+        "sizeExceeded": "File exceeds size limit (≤ {{size}} MB)",
+        "supportedHint": "Supports: {{types}} · Max {{size}} MB"
       },
       "status": {
         "pending": "Pending",
         "uploading": "Uploading",
         "success": "Success",
-        "error": "Failed"
+        "error": "Failed",
+        "cancelled": "Cancelled"
       },
       "progress": {
         "overall": "Overall Progress"
@@ -197,7 +210,24 @@
         "maxSize": "Max size per file: {{size}} MB",
         "chunkingTitle": "Chunking Strategy",
         "chunkingDesc": "After upload, documents are split into chunks using the selected strategy for retrieval and Q&A.",
-        "tip": "If unsure, keep the default. You can reprocess documents later in the knowledge base."
+        "tip": "If unsure, keep the default. You can reprocess documents later in the knowledge base.",
+        "embeddingHint": "Tip: some embedding models limit single input length (e.g. ≤ 512 tokens). The system will split over-limit chunks, but consider reducing chunk size to lower cost."
+      },
+      "messages": {
+        "accepted": "Upload accepted, processing in background",
+        "failed": "Upload failed"
+      },
+      "params": {
+        "range": "Range: {{min}} ~ {{max}}",
+        "chunk_size": "Chunk size (chars)",
+        "chunk_overlap": "Overlap (chars)",
+        "window_size": "Window size (chars)",
+        "step_size": "Step size (chars)",
+        "target_chunk_size": "Target chunk size (chars)",
+        "sentences_per_chunk": "Sentences per chunk",
+        "tokens_per_chunk": "Tokens per chunk (approx.)",
+        "overlap_tokens": "Overlap tokens (approx.)",
+        "breakpoint_threshold_type": "Breakpoint threshold type"
       }
     },
     "manager": {
@@ -213,7 +243,9 @@
         "deselectAll": "Deselect All",
         "refresh": "Refresh",
         "actions": "Actions",
-        "deleteSelected": "Delete Selected"
+        "deleteSelected": "Delete Selected",
+        "clearVectors": "Clear vectors",
+        "clearVectorsMilvus": "Clear vectors (Milvus)"
       },
       "table": {
         "filename": "Filename",
@@ -227,22 +259,143 @@
         "pending": "Pending",
         "processing": "Processing",
         "completed": "Completed",
-        "failed": "Failed"
+        "failed": "Failed",
+        "pendingStage": "Waiting...",
+        "processingStage": "Processing...",
+        "retryingStage": "Retrying..."
       },
       "empty": {
         "noDocuments": "No documents",
         "noMatches": "No matching documents"
+      },
+      "labels": {
+        "processedAt": "Processed"
+      },
+      "confirm": {
+        "clearVectors": "Clear all vectors in this knowledge base? This cannot be undone."
+      },
+      "messages": {
+        "clearVectorsFailed": "Failed to clear vectors",
+        "retryFailed": "Retry failed"
+      },
+      "filters": {
+        "status": {
+          "all": "All",
+          "pending": "Pending",
+          "processing": "Processing",
+          "completed": "Completed",
+          "failed": "Failed"
+        }
+      },
+      "tooltips": {
+        "errorDetails": "View / copy error details",
+        "clickToViewChunks": "Click to view chunks",
+        "viewChunks": "View chunks",
+        "noChunks": "No chunks",
+        "noChunksToView": "No chunks to view",
+        "retry": "Retry processing",
+        "retryOnlyFailed": "Only failed documents can be retried"
+      },
+      "errorDialog": {
+        "title": "Failure reason",
+        "copy": "Copy error message",
+        "chunks": "Chunks: {{count}}",
+        "completedAt": "Completed: {{time}}",
+        "noErrorMessage": "No error message"
+      },
+      "errorHints": {
+        "embeddingTokenLimit": "The embedding model limits single input length (e.g. ≤512 tokens). Consider reducing chunk size (e.g. 400–700) or switching to an embedding model with a longer context.",
+        "providerCode": "Provider error code: {{code}}. Check model availability, API key/quota, or test connection in Model Configuration.",
+        "forbidden": "403 is usually an API key/quota/model-permission issue: verify provider key, model access, and rate limits."
       }
+    }
+  },
+  "documentChunksDialog": {
+    "title": "View chunks{{filename}}",
+    "actions": {
+      "copyAll": "Copy all",
+      "refresh": "Refresh"
+    },
+    "pagination": {
+      "rowsPerPage": "Rows per page"
+    },
+    "messages": {
+      "loadFailed": "Failed to load chunks"
     }
   },
   "settings": {
     "title": "Settings",
     "tabs": {
       "personal": "Personal Settings",
+      "modelConfig": "Model Configuration",
+      "apiKeys": "API Keys",
       "system": "System Settings"
     },
     "modelConfig": {
       "title": "Model Configuration",
+      "scopes": {
+        "meTitle": "Personal Model Configuration",
+        "tenantTitle": "Tenant Shared Model Configuration",
+        "meShort": "personal",
+        "tenantShort": "tenant"
+      },
+      "guide": {
+        "title": "Guide",
+        "scopeMe": "You are configuring personal models: configure providers first, then set defaults for Chat/Embedding/Rerank.",
+        "scopeTenant": "You are configuring tenant shared models: configure providers first, then set defaults for Chat/Embedding/Rerank.",
+        "steps": {
+          "configureProvider": "Click “Configure API”: set API Base / API Key and enable the provider.",
+          "setActiveModels": "Edit “Active models”: choose default chat/embedding/rerank models for {{scope}}.",
+          "modelKeyFallback": "When model-level API key is empty, it will reuse provider-level API key (safer, fewer copies).",
+          "localOpenAICompat": "“Local (OpenAI-compatible)” requires an OpenAI-compatible /v1 endpoint; API key can be empty and Base can point to your service (it will auto-append /v1)."
+        }
+      },
+      "ui": {
+        "activeModelsTitle": "Active Models",
+        "providersTitle": "Provider Status",
+        "apiBase": "API Base",
+        "configureApi": "Configure API",
+        "configured": "Configured",
+        "notConfigured": "Not configured",
+        "editModelDialogTitle": "Edit {{type}} Configuration",
+        "customModelTag": "custom",
+        "customModelOption": "Custom model name…",
+        "customModelName": "Custom model name",
+        "customModelPlaceholder": "Enter model name, e.g. gpt-4-turbo, claude-3-5-sonnet",
+        "customModelHelper": "Enter the model name you want to use",
+        "customModelHelperNotInList": "Custom model name (not in the predefined list)",
+        "apiKeyHints": {
+          "modelKeyMasked": "Saved model-level API key; leave empty to keep, or enter a new key",
+          "useProviderKeyOrOverride": "Leave empty to use provider API key, or enter a model-level key to override",
+          "maskedKeepOrReplace": "Saved API key; leave empty to keep, or enter a new key",
+          "enterValid": "Please enter a valid API key"
+        },
+        "apiKeyPlaceholders": {
+          "keepMasked": "Leave empty to keep existing API key",
+          "useProviderKey": "Leave empty to use provider key",
+          "enter": "Enter API key"
+        },
+        "apiBaseOptional": "API Base (optional)",
+        "apiBaseHint": "Leave empty to use default endpoint",
+        "temperatureOptional": "Temperature (optional)",
+        "temperatureHint": "Controls randomness (0–2)",
+        "maxTokensOptional": "Max tokens (optional)",
+        "maxTokensHint": "Limit maximum output tokens",
+        "enableModel": "Enable this model",
+        "editProviderDialogTitle": "Configure {{provider}}",
+        "editProviderDialogTitleGeneric": "Configure Provider",
+        "providerApiKeyHints": {
+          "localOptional": "Local/OpenAI-compatible endpoint may not require a key",
+          "keepUnchanged": "Leave empty to keep unchanged",
+          "enterValid": "Please enter a valid API key"
+        },
+        "providerApiKeyPlaceholders": {
+          "optional": "Optional",
+          "keep": "Leave empty to keep existing API key",
+          "enter": "Enter API key"
+        },
+        "enableProvider": "Enable this provider"
+      },
     "reload": "Reload",
     "save": "Save Configuration",
     "saving": "Saving...",
@@ -300,9 +453,29 @@
     },
     "messages": {
       "loadError": "Failed to load configuration, using default settings",
+      "loadModelConfigFailed": "Failed to load model configuration",
       "saveSuccess": "Configuration saved successfully!",
       "saveError": "Failed to save configuration",
-      "presetApplied": "Preset configuration applied, please fill in the corresponding API Keys"
+      "presetApplied": "Preset configuration applied, please fill in the corresponding API Keys",
+      "providerHasKeyHint": "{{provider}} API key is configured; you can leave model API key empty to reuse it",
+      "providerUpdated": "Provider updated: {{provider}}",
+      "saveProviderError": "Failed to save provider configuration",
+      "testProviderSuccess": "{{provider}} connection test succeeded",
+      "testProviderFailed": "{{provider}} connection test failed",
+      "presetSelected": "Selected preset: {{name}}. Please set API keys for each model.",
+      "presetApplyFailed": "Failed to apply preset"
+      }
+    },
+    "sharedModels": {
+      "title": "Shared Models",
+      "description": "When enabled, team admins can add members to a whitelist so they can fall back to team-shared model configuration when personal models are not configured.",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "whitelistCount": "Whitelisted users: {{count}}",
+      "goUserManagement": "Go to User Management",
+      "errors": {
+        "loadFailed": "Failed to load team settings",
+        "updateFailed": "Failed to update team settings"
       }
     }
   },
@@ -358,7 +531,8 @@
         "secure": "Secure & Reliable"
       },
       "copyright": "All rights reserved."
-    }
+    },
+    "logout": "Logout"
   },
   "userManagement": {
     "title": "User Management",
@@ -395,6 +569,7 @@
       "tenant": "Tenant",
       "kbCount": "KBs",
       "docCount": "Docs", 
+      "sharedModels": "Shared models",
       "created": "Created",
       "actions": "Actions"
     },
@@ -411,6 +586,17 @@
       "email": "Email",
       "role": "Role",
       "accountStatus": "Account Status"
+    },
+    "sharedModels": {
+      "errors": {
+        "enableFirst": "Enable \"Allow shared models\" for this tenant first.",
+        "updateFailed": "Failed to update shared model settings"
+      },
+      "tooltips": {
+        "teamDisabled": "Disabled: tenant shared models not enabled",
+        "crossTenantDisabled": "Disabled: cross-tenant shared models not allowed",
+        "allowed": "Allowed"
+      }
     }
   },
   "workflowTester": {
@@ -420,16 +606,1070 @@
     "inputPlaceholder": "Enter your question...",
     "actions": {
       "send": "Send",
-      "stop": "Stop"
+      "stop": "Stop",
+      "history": "History",
+      "details": "Details",
+      "close": "Close"
     },
     "progress": {
       "title": "Execution Progress",
       "empty": "No progress yet",
       "step": "Step {{index}}"
     },
+    "schema": {
+      "loading": "Loading schema...",
+      "loadFailed": "Failed to load schema",
+      "noStructured": "No structured parameters inferred. You can run by entering text below.",
+      "params": "Parameters",
+      "required": "(required)",
+      "select": "Please select",
+      "json": "Enter JSON",
+      "expectedOutput": "Expected output fields: {{fields}}"
+    },
+    "inputErrors": {
+      "missingRequired": "Missing required parameter: {{key}}",
+      "missingAny": "Please enter input or fill parameters before running",
+      "numberRequired": "Parameter {{key}} must be a number",
+      "invalidJson": "Parameter {{key}} is not valid JSON",
+      "validationFailed": "Parameter validation failed"
+    },
+    "messages": {
+      "doneNoResult": "Execution completed but no result returned (may be interrupted or backend did not emit complete payload).",
+      "loadDetailFailed": "Failed to load execution detail",
+      "retryFailed": "Retry failed",
+      "retried": "Retried from node: {{nodeId}}\nExecution ID: {{execId}}\n\n{{output}}"
+    },
+    "debug": {
+      "label": "Debug (include per-step input/output)",
+      "executionId": "Execution ID: {{id}}",
+      "copyExecutionId": "Copy execution ID",
+      "viewDetail": "View detail",
+      "detailTitle": "Execution Detail",
+      "finalOutput": "Final output",
+      "stepsClickable": "Steps (click to view input/output)",
+      "retryFromNode": "Retry from this node",
+      "retryTooltip": "Retry from this node and downstream"
+    },
     "errors": {
       "executeFailed": "Execution failed",
       "executeError": "Execution error"
     }
+  },
+  "workflowEditor": {
+    "title": "Workflow",
+    "defaultName": "New Workflow",
+    "header": {
+      "expand": "Expand workflow settings",
+      "collapse": "Collapse workflow settings"
+    },
+    "visibility": {
+      "team": "Visible to team",
+      "private": "Only me"
+    },
+    "palette": {
+      "open": "Open node library",
+      "collapse": "Collapse node library",
+      "zoomIn": "Zoom in",
+      "zoomOut": "Zoom out"
+    },
+    "inspector": {
+      "close": "Close inspector"
+    },
+    "selection": {
+      "selectedCount": "Selected {{count}}",
+      "align": {
+        "left": "Align Left",
+        "hcenter": "Align Center (H)",
+        "right": "Align Right",
+        "top": "Align Top",
+        "vcenter": "Align Center (V)",
+        "bottom": "Align Bottom"
+      },
+      "distribute": {
+        "x": "Distribute Horizontally",
+        "y": "Distribute Vertically"
+      }
+    },
+    "fields": {
+      "name": "Name",
+      "description": "Description"
+    },
+    "actions": {
+      "resetCanvas": "Reset Canvas",
+      "autoLayout": "Auto Layout",
+      "validate": "Validate",
+      "save": "Save",
+      "test": "Test",
+      "saveAsTemplate": "Save as Template",
+      "api": "API"
+    },
+    "validation": {
+      "valid": "Validation passed",
+      "invalid": "Validation failed",
+      "failed": "Validation failed"
+    },
+    "messages": {
+      "loadFailed": "Failed to load workflow",
+      "saved": "Saved",
+      "createdAndSaved": "Created and saved",
+      "created": "Created",
+      "saveFailed": "Save failed",
+      "saveMissingId": "Save failed: missing workflow ID",
+      "savedEnterTest": "Saved. Entering test...",
+      "saveEnterTestFailed": "Save failed. Cannot enter test."
+    },
+    "branches": {
+      "trueName": "TRUE branch",
+      "falseName": "FALSE branch",
+      "placeholderDescription": "Branch placeholder node (replace with any node)",
+      "alreadyExists": "TRUE/FALSE branches already exist"
+    },
+    "templates": {
+      "dialogTitle": "Save as Template",
+      "nameRequired": "Template name is required",
+      "saved": "Template saved",
+      "saveFailed": "Failed to save template",
+      "fields": {
+        "name": "Template name",
+        "description": "Template description",
+        "categoryOptional": "Category (optional)",
+        "categoryHint": "e.g. customer_service / document_processing / ai_assistant / data_analysis / custom",
+        "tagsOptional": "Tags (comma-separated, optional)",
+        "tagsPlaceholder": "RAG, customer support, data analysis"
+      }
+    },
+    "confirmTest": {
+      "title": "Enter Test",
+      "body": "Unsaved changes detected. Entering test will use the last saved version, or you can save before entering.",
+      "enterDirectly": "Enter Directly",
+      "saveAndEnter": "Save & Enter",
+      "later": "Later"
+    },
+    "apiDialog": {
+      "title": "Workflow API",
+      "desc": "Use Public API for external calls (requires header x-api-key). Create API keys in Settings → API Keys.",
+      "copyRunCurl": "Copy curl (run)",
+      "copyStreamCurl": "Copy curl (stream)",
+      "copySchemaCurl": "Copy curl (io-schema)",
+      "copiedRun": "Copied curl (run)",
+      "copiedStream": "Copied curl (stream)",
+      "copiedSchema": "Copied curl (io-schema)",
+      "copyFailed": "Copy failed",
+      "crossTenantHint": "Cross-tenant: the workflow must be public and the API key must bind allowed_workflow_id.",
+      "baseHint": "Full URLs are derived from VITE_PUBLIC_API_BASE_URL / VITE_BACKEND_URL or the browser address bar.",
+      "close": "Close"
+    }
+  },
+  "workflow2": {
+    "palette": {
+      "title": "Node Library",
+      "searchPlaceholder": "Search nodes…",
+      "empty": "No matching nodes",
+      "hint": "Tip: drag to canvas or click to add"
+    },
+    "categories": {
+      "basic": "Basic",
+      "ai": "AI",
+      "rag": "RAG",
+      "logic": "Logic",
+      "tool": "Tools"
+    },
+    "node": {
+      "unnamed": "Untitled node"
+    },
+    "kindLabels": {
+      "input": "Input",
+      "llm": "LLM",
+      "rag_retriever": "Retriever",
+      "http_request": "HTTP",
+      "condition": "Condition",
+      "code_executor": "Code",
+      "output": "Output"
+    },
+    "nodes": {
+      "input": { "name": "Input", "description": "Receive execution input" },
+      "llm": { "name": "LLM", "description": "Call a chat model to generate text" },
+      "rag_retriever": { "name": "RAG Retriever", "description": "Retrieve relevant content from a knowledge base" },
+      "condition": { "name": "Condition", "description": "Evaluate a condition (outputs condition_result)" },
+      "code_executor": { "name": "Code Executor", "description": "Execute Python code (outputs result)" },
+      "http_request": { "name": "HTTP Request", "description": "Send an HTTP request and return response_data/status_code" },
+      "output": { "name": "Output", "description": "Format output data" }
+    },
+    "inspector": {
+      "title": "Inspector",
+      "emptyHint": "Select a node to configure.",
+      "tabs": { "settings": "SETTINGS", "lastRun": "LAST RUN" },
+      "sections": {
+        "inputBindings": "INPUT VARIABLES",
+        "settings": "SETTINGS",
+        "outputs": "OUTPUTS"
+      },
+      "fields": {
+        "nodeName": "Node name",
+        "description": "Description",
+        "bindVariable": "Bind variable"
+      },
+      "unbound": "Unbound",
+      "clearBinding": "Clear binding (fallback to data)",
+      "noUpstreamWarning": "No upstream connections: connect first, then come back to bind inputs.",
+      "lastRunHint": "Run results are currently shown in the Test page (later we can show last input/output here).",
+      "noConfig": "This node has no configurable parameters.",
+      "outputsHint": "Downstream connections can select these output fields.",
+      "actions": {
+        "recommendedBindings": "One-click: recommended bindings",
+        "ragToLlm": "One-click: RAG→LLM (documents + system prompt)",
+        "createBranches": "Generate TRUE/FALSE branches"
+      },
+      "createBranchesHint": "Connecting from the true/false handles auto-fills the edge condition and passes through data.",
+      "ragToLlmSystemPromptTemplate": "You are a rigorous assistant. Answer based on the retrieved materials; if insufficient, say so clearly.\n\nDoc1: {{documents[0].text}}\nDoc2: {{documents[1].text}}\nDoc3: {{documents[2].text}}\n\nQuestion: {{prompt}}"
+    },
+    "schema": {
+      "groups": {
+        "config": "Config",
+        "basic": "Basic",
+        "prompt": "Prompt",
+        "retrieval": "Retrieval",
+        "request": "Request",
+        "sandbox": "Sandbox",
+        "code": "Code",
+        "template": "Template"
+      },
+      "fields": {
+        "prompt_key": "prompt_key (optional)",
+        "knowledge_base": "Knowledge base",
+        "timeoutSec": "timeout (s)",
+        "headersJsonOptional": "headers (JSON object, optional)",
+        "paramsJsonOptional": "params (JSON object, optional)",
+        "dataJsonOptional": "data (JSON object, optional, request body)",
+        "templateOptional": "template (optional)"
+      },
+      "options": {
+        "llmModelDefault": "(Use default / tenant config)",
+        "promptKeyAuto": "Auto (prompt > input/text/query)",
+        "promptKeyInputDify": "input (recommended, Dify style)",
+        "selectPlaceholder": "Select…"
+      },
+      "helpers": {
+        "temperature": "Controls randomness (0–2).",
+        "max_tokens": "Limit maximum output tokens.",
+        "templateSupport": "Template supported: {{variable}} (resolved via data/input/context at runtime).",
+        "top_k": "Return top-K results (1–50).",
+        "urlTemplate": "Template supported: {{variable}} (e.g. {{query}}).",
+        "timeoutSec": "Request timeout (seconds).",
+        "headersExample": "Example: {\"Authorization\":\"Bearer xxx\"}",
+        "paramsExample": "GET query params, e.g. {\"q\":\"{{query}}\"}",
+        "dataExample": "POST/PUT/PATCH body, e.g. {\"text\":\"{{prompt}}\"}",
+        "fieldPath": "Supports nested paths, e.g. data.class",
+        "conditionValue": "Template supported: {{variable}} (can be empty for truthy).",
+        "sandboxTimeout": "Timeout terminates the subprocess (default 3s).",
+        "maxMemoryMb": "Subprocess memory limit (MB).",
+        "maxStdoutChars": "Limit stdout length; exceeded output will be truncated.",
+        "maxInputBytes": "Limit input/context JSON size; exceeded size will error.",
+        "maxResultBytes": "Limit result JSON size; exceeded size will error.",
+        "outputTemplate": "Leave empty to output input_data directly (compatible with data wrapper)."
+      }
+    },
+    "legacyInspector": {
+      "titleWithKind": "{{name}} ({{kind}})",
+      "outputSelect": {
+        "auto": "Auto (default outputs data/input)",
+        "dataWhole": "data (whole)",
+        "inputWhole": "input (whole)",
+        "whenObject": "{{path}} (when {{base}} is an object)"
+      },
+      "validation": {
+        "maybeMissingRef": "Referenced variable may not exist: {{expr}}",
+        "nodeNameRequired": "Node name is required",
+        "temperatureRange": "temperature must be within 0–2",
+        "maxTokensPositive": "max_tokens must be a positive integer",
+        "llmNoUpstream": "This LLM node has no upstream input; it may receive an empty prompt",
+        "selectKnowledgeBase": "Please select a knowledge base",
+        "topKRange": "top_k must be within 1–50",
+        "fieldPathRequired": "field_path is required",
+        "conditionTypeRequired": "condition_type is required",
+        "conditionValueEmpty": "condition_value is empty (only optional for truthy)",
+        "codeRequired": "Code is required",
+        "codeResultHint": "Tip: set variable result as the output",
+        "sandboxNoImport": "Sandbox forbids import (use built-in json/re/math or pure logic)",
+        "sandboxNoDunder": "Sandbox forbids accessing __dunder__ attributes (e.g. __class__)",
+        "timeoutSecRange": "timeout_sec should be within 0.1–30 seconds",
+        "maxMemoryRange": "max_memory_mb should be within 16–4096",
+        "maxStdoutRange": "max_stdout_chars should be within 1000–200000",
+        "maxInputBytesRange": "max_input_bytes should be within 10000–50000000",
+        "maxResultBytesRange": "max_result_bytes should be within 10000–50000000",
+        "outputFormatUnsupported": "Unsupported format",
+        "outputSelectOverridden": "select_path is set, but template will override it when non-empty",
+        "outputTemplateBlank": "template contains only whitespace; output may be empty",
+        "outputTemplateNotConfigured": "No template configured: will output input_data directly",
+        "urlRequired": "url is required",
+        "methodUnsupported": "Unsupported method (GET/POST/PUT/PATCH/DELETE)",
+        "timeoutPositive": "timeout must be a positive number (seconds)",
+        "headersMustBeObject": "headers must be a JSON object",
+        "paramsMustBeObject": "params must be a JSON object",
+        "overridesMustBeObject": "overrides must be an object (key -> value)"
+      },
+      "jsonErrors": {
+        "mustBeObject": "Must be a JSON object",
+        "parseFailed": "JSON parse failed"
+      },
+      "templatePicker": {
+        "groups": { "runtime": "Runtime input/context (not dependent on edges)" },
+        "insert": "Insert variable",
+        "autocompleteHint": "Type {{ to autocomplete (↑↓ select, Enter confirm)",
+        "pickerHint": "Variable picker (click to insert)",
+        "empty": "No available variables",
+        "none": "None"
+      },
+      "promptKey": {
+        "sections": {
+          "runtime": "Runtime inputs (not dependent on edges)",
+          "fromEdges": "From edges (appears after connecting upstream)",
+          "other": "Other"
+        },
+        "hintConnected": "Recommended: if you mapped fields via edges, choose from “From edges”; otherwise use “Runtime inputs”.",
+        "hintDisconnected": "Tip: without upstream connections use “Runtime inputs”; after connecting, “From edges” will appear."
+      },
+      "tabs": { "config": "Config", "io": "Edges / IO", "advanced": "Advanced" },
+      "io": {
+        "inputsTitle": "Input fields ({{count}})",
+        "inputsHint": "These are input fields this node can accept; choose target_input on edges.",
+        "noInputs": "None (start node)",
+        "outputsTitle": "Output fields ({{count}})",
+        "outputsHint": "These are possible output fields; choose source_output on edges.",
+        "outgoingTitle": "Outgoing connections ({{count}})",
+        "outgoingHint": "Shows where each output is connected (source_output / target_input per edge).",
+        "noOutgoing": "None (no downstream connections)"
+      },
+      "bindings": {
+        "queryTitle": "Query bindings (from edges)",
+        "inputTitle": "Input bindings (from edges)",
+        "countSuffix": " ({{count}})",
+        "llmHint": "After connecting upstream, choose which source output maps to which LLM input field. This edits edge mapping (same as editing edge properties).",
+        "ragHint": "RAG reads query first, then prompt/text/input. Map upstream output to query.",
+        "outputHint": "Output node formats input into result. Common pattern: map LLM content to Output data.",
+        "connectUpstreamFirst": "Connect upstream nodes first (then you can choose input sources/mappings here).",
+        "applyRecommended": "Apply recommended",
+        "fields": {
+          "sourceOutput": "Source output",
+          "mapToLlm": "Map to LLM field",
+          "mapToRag": "Map to RAG field",
+          "mapToOutput": "Map to output field"
+        },
+        "recommendedPrefix": "Recommended:"
+      },
+      "quickFill": {
+        "ragToLlmSystemPrompt": "Answer the user's question based on the following materials; if insufficient, say you cannot be sure.\n\nMaterials: {{documents}}\n\n",
+        "docsToPrompt": "Materials: {{documents}}\n\nQuestion: {{prompt}}",
+        "actions": {
+          "ragToLlmSystemPrompt": "One-click: RAG→LLM system prompt",
+          "composePromptOverrides": "One-click: compose prompt (overrides)"
+        }
+      },
+      "variableHints": {
+        "title": "Variable hints (runtime {{runtime}} / edges {{edges}})",
+        "hintAutocomplete": "In template fields, typing {{ triggers autocomplete; you can also click to copy/insert below.",
+        "sections": {
+          "runtimeInput": "Runtime inputs (from test/execution input, not dependent on edges):",
+          "runtimeContext": "Runtime context (tenant/user, not dependent on edges):",
+          "fromEdges": "From edges (available after connecting upstream; will be included in this node's input_data):"
+        },
+        "emptyFromEdges": "None (connect upstream nodes first)"
+      },
+      "sandbox": {
+        "title": "Sandbox limits",
+        "resetDefaults": "Reset defaults"
+      },
+      "codeExecutor": {
+        "convention": "Convention: set variable result as output (e.g. result = {\"content\": \"...\"})."
+      },
+      "branches": {
+        "hint": "Branch hint: connecting from the true/false handles auto-fills edge condition and passes through data."
+      },
+      "output": {
+        "selectPathOptional": "select_path (optional)",
+        "priorityHint": "Priority: if template is set, template wins; otherwise select_path reads from input (e.g. data.content).",
+        "templateHint": "Templates support {{variable}} (recommended) or Python format {content} (legacy; used when template does not contain {{)."
+      },
+      "ioPreview": {
+        "title": "IO preview",
+        "hint": "Shows this node's input/output fields. Actual mapping is configured in “Edges / IO”.",
+        "inputsLabel": "Inputs ({{count}}):",
+        "outputsLabel": "Outputs ({{count}}):",
+        "goConfigure": "Go configure edges / bindings"
+      },
+      "advanced": {
+        "overridesTitle": "Advanced: input overrides (auto-fill missing fields)",
+        "overridesHint": "Use overrides to fill input fields when there is no upstream edge (e.g. set prompt for LLM). Supports {{variable}}.",
+        "addItem": "Add item",
+        "editJsonTitle": "Advanced: edit config JSON directly",
+        "applyJson": "Apply JSON"
+      },
+      "common": { "none": "None" }
+    },
+    "edgeInspector": {
+      "title": "Edge",
+      "panelTitle": "Inspector",
+      "emptyHint": "Select an edge to edit mapping/condition/transform.",
+      "sourceOutputHint": "Source output field/handle (prefer dropdown; you can override below when needed).",
+      "targetInputHint": "Target input field/handle (e.g. LLM prefers input/prompt; Output prefers data).",
+      "fields": {
+        "customSourceOutput": "Advanced: custom source_output (optional)",
+        "customTargetInput": "Advanced: custom target_input (optional)",
+        "conditionOptional": "condition (optional)",
+        "transformOptional": "transform (optional)"
+      },
+      "placeholders": {
+        "sourceOutput": "e.g. content",
+        "targetInput": "e.g. input"
+      },
+      "helpers": {
+        "condition": "Condition expression (safe eval, no function calls). Vars: value/input/context. Example: value[\"condition_result\"] == True",
+        "transform": "Transform expression (executed by backend). Example: {\"query\": value[\"content\"]}"
+      }
+    }
+  },
+  "workflowExecutions": {
+    "title": "Execution History",
+    "workflowLabel": "Workflow",
+    "actions": {
+      "refresh": "Refresh",
+      "goRun": "Run",
+      "openEditor": "Open Editor",
+      "locate": "Locate",
+      "retryFromStep": "Retry from this step",
+      "copyInputData": "Copy input_data",
+      "copyOutputData": "Copy output_data",
+      "copyInput": "Copy input",
+      "copyOutput": "Copy output"
+    },
+    "list": {
+      "title": "Executions",
+      "hint": "Only executions you have access to are shown.",
+      "empty": "No executions yet",
+      "loading": "Loading...",
+      "labels": {
+        "duration": "Duration:",
+        "steps": "Steps:",
+        "failed": "Failed:"
+      }
+    },
+    "detail": {
+      "title": "Execution Detail",
+      "selectHint": "Select an execution to view steps.",
+      "duration": "Duration",
+      "steps": "Steps",
+      "failedSteps": "Failed steps",
+      "io": "Input / Output",
+      "inputData": "input_data",
+      "outputData": "output_data",
+      "waterfall": "Waterfall",
+      "totalSpan": "Span",
+      "expand": "Expand",
+      "collapse": "Collapse",
+      "failedLocate": "Failed nodes:"
+    },
+    "messages": {
+      "loadListFailed": "Failed to load execution history",
+      "loadDetailFailed": "Failed to load execution detail",
+      "retrying": "Retrying...",
+      "retryFailed": "Retry failed",
+      "retryTriggered": "Retry triggered",
+      "retryCreated": "Created retry execution: {{id}}"
+    }
+  },
+  "apiKeys": {
+    "title": "API Keys",
+    "new": "New",
+    "refresh": "Refresh",
+    "empty": "No API keys",
+    "publicApiHint": "Public API requires header x-api-key.",
+    "crossTenantHint": "For cross-tenant public workflows, bind allowed_workflow_id on the key.",
+    "table": {
+      "name": "Name",
+      "key": "Key",
+      "scopes": "Scopes",
+      "allowedWorkflowId": "allowed_workflow_id",
+      "allowedKb": "allowed_kb",
+      "rateLimit": "Rate Limit",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "status": {
+      "active": "active",
+      "revoked": "revoked"
+    },
+    "actions": {
+      "toggleReveal": "Show/hide",
+      "copyKeyAria": "Copy key",
+      "revokeAria": "Revoke"
+    },
+    "createDialog": {
+      "title": "Create API Key",
+      "name": "Name",
+      "scopes": "Scopes (comma-separated)",
+      "scopesHelp": "e.g. chat,workflow",
+      "allowedWorkflowId": "allowed_workflow_id (recommended)",
+      "allowedWorkflowHelp": "Bind to a workflow_id for cross-tenant public workflow runs.",
+      "allowedKb": "allowed_kb (optional)",
+      "rateLimitPerMin": "rate_limit_per_min",
+      "expireInDays": "expire_in_days (optional)",
+      "cancel": "Cancel",
+      "create": "Create"
+    },
+    "messages": {
+      "loadFailed": "Failed to load API keys",
+      "createFailed": "Create failed",
+      "created": "API key created (copied if possible)",
+      "revoked": "Revoked",
+      "revokeFailed": "Revoke failed",
+      "nameRequired": "Please enter a name"
+    }
+  },
+  "topBar": {
+    "roles": {
+      "superAdmin": "Super Admin",
+      "tenantAdmin": "Tenant Admin",
+      "member": "Member"
+    }
+  },
+  "team": {
+    "errors": {
+      "fetchTeamFailed": "Failed to fetch team",
+      "fetchMembersFailed": "Failed to fetch team members",
+      "createTeamFailed": "Failed to create team",
+      "inviteUserFailed": "Failed to invite user",
+      "joinTeamFailed": "Failed to join team"
+    }
+  },
+  "teamManagement": {
+    "title": "Team Management",
+    "confirm": {
+      "leaveOwner": "As the team owner, leaving will delete the entire team. Continue?",
+      "leaveMember": "Leave the current team?"
+    },
+    "summary": {
+      "members": "Members",
+      "myRole": "My role",
+      "privacy": "Privacy"
+    },
+    "privacy": {
+      "private": "Private",
+      "public": "Public"
+    },
+    "actions": {
+      "create": "Create team",
+      "join": "Join team",
+      "invite": "Invite member",
+      "leave": "Leave team"
+    },
+    "sections": {
+      "members": "Team members"
+    },
+    "empty": {
+      "title": "You haven't joined any team yet",
+      "subtitle": "Create a new team or join an existing team with an invite code."
+    },
+    "dialogs": {
+      "create": {
+        "title": "Create team",
+        "fields": {
+          "name": "Team name",
+          "description": "Team description",
+          "type": "Team type",
+          "maxMembers": "Max members"
+        }
+      },
+      "invite": {
+        "title": "Invite user to team",
+        "fields": {
+          "email": "Email",
+          "role": "Member role",
+          "message": "Invite message",
+          "messagePlaceholder": "Optional: tell the invitee why you are inviting them..."
+        },
+        "actions": {
+          "send": "Send invite"
+        }
+      },
+      "join": {
+        "title": "Join team",
+        "fields": {
+          "inviteCode": "Invite code",
+          "inviteCodePlaceholder": "Enter invite code"
+        },
+        "hint": "Joining a new team will automatically leave the current team (if any)."
+      }
+    },
+    "teamTypes": {
+      "collaborative": "Collaborative team",
+      "project": "Project team"
+    },
+    "memberTypes": {
+      "owner": "Owner",
+      "admin": "Admin",
+      "member": "Member"
+    }
+  },
+  "permissionDisplay": {
+    "notLoggedIn": "Not logged in",
+    "roles": {
+      "superAdmin": "Super Admin",
+      "admin": "Admin",
+      "user": "User",
+      "guest": "Guest"
+    },
+    "sections": {
+      "userInfo": "User info",
+      "capabilities": "Role capabilities",
+      "permissions": "Permissions"
+    },
+    "capabilities": {
+      "isAdmin": "Admin privileges",
+      "isSuperAdmin": "Super admin privileges",
+      "canManageUsers": "Manage users",
+      "canManageTenants": "Manage tenants",
+      "canManagePermissions": "Manage permissions",
+      "canViewAnalytics": "View analytics",
+      "canManageSystem": "System management"
+    },
+    "permissions": {
+      "view_public_content": "View public content",
+      "manage_own_data": "Manage own data",
+      "chat_access": "Chat access",
+      "upload_documents": "Upload documents",
+      "create_knowledge_bases": "Create knowledge bases",
+      "manage_users": "Manage users",
+      "view_analytics": "View analytics",
+      "manage_tenant_data": "Manage tenant data"
+    },
+    "superAdminHint": "Super admin has all system permissions, including permissions not listed above."
+  },
+  "permissionManagement": {
+    "title": "Permissions & Tenants",
+    "tabs": {
+      "manage": "Permission Management",
+      "mine": "My Permissions"
+    },
+    "overview": {
+      "rolesCount": "Roles",
+      "permissionsTotal": "Total permissions",
+      "permissionCategories": "Categories"
+    },
+    "sections": {
+      "rolePermissions": "Role permissions"
+    },
+    "roleSelector": {
+      "label": "Select role"
+    },
+    "actions": {
+      "savePermissions": "Save permissions"
+    },
+    "status": {
+      "configuringRole": "Configuring role",
+      "selectedPermissions": "Selected {{count}} permissions",
+      "loadingPermissions": "Loading permissions..."
+    },
+    "messages": {
+      "permissionsUpdated": "Permissions updated"
+    },
+    "categories": {
+      "system": "System permissions",
+      "knowledge_base": "Knowledge base permissions",
+      "document": "Document permissions",
+      "chat": "Chat permissions",
+      "config": "Configuration permissions"
+    },
+    "tenants": {
+      "title": "Tenant management",
+      "actions": {
+        "add": "Add tenant"
+      },
+      "status": {
+        "active": "Active",
+        "disabled": "Disabled"
+      },
+      "metrics": {
+        "users": "Users",
+        "knowledgeBases": "Knowledge bases"
+      },
+      "createDialog": {
+        "title": "Create tenant",
+        "fields": {
+          "name": "Tenant name",
+          "slug": "Tenant slug",
+          "slugHelp": "Used in URL; letters, numbers, and hyphens only.",
+          "description": "Description",
+          "maxUsers": "Max users",
+          "maxKnowledgeBases": "Max knowledge bases",
+          "maxDocuments": "Max documents",
+          "storageQuotaMb": "Storage quota (MB)"
+        }
+      }
+    },
+    "systemOverview": {
+      "title": "System overview",
+      "tenantsTotal": "Total tenants",
+      "activeTenants": "Active tenants",
+      "usersTotal": "Total users",
+      "knowledgeBasesTotal": "Knowledge bases"
+    }
+  },
+  "tenantManagement": {
+    "title": "Tenant Management",
+    "stats": {
+      "totalTenants": "Total tenants",
+      "activeTenants": "Active tenants",
+      "totalUsers": "Total users",
+      "totalDocuments": "Total documents"
+    },
+    "filters": {
+      "searchLabel": "Search",
+      "searchPlaceholder": "Search tenants...",
+      "statusLabel": "Status",
+      "statusAll": "All"
+    },
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "actions": {
+      "addTenant": "Add tenant",
+      "update": "Update"
+    },
+    "table": {
+      "name": "Name",
+      "slug": "Slug",
+      "status": "Status",
+      "userUsage": "Users",
+      "kbUsage": "Knowledge bases",
+      "storageUsage": "Storage",
+      "createdAt": "Created",
+      "actions": "Actions"
+    },
+    "dialog": {
+      "createTitle": "Create tenant",
+      "editTitle": "Edit tenant"
+    },
+    "fields": {
+      "name": "Name",
+      "slug": "Slug",
+      "description": "Description",
+      "maxUsers": "Max users",
+      "maxKnowledgeBases": "Max knowledge bases",
+      "storageQuotaMb": "Storage quota (MB)",
+      "activeStatus": "Active"
+    },
+    "delete": {
+      "title": "Confirm delete",
+      "body": "Delete tenant \"{{name}}\"? This action cannot be undone."
+    }
+  },
+  "testPage": {
+    "title": "Diagnostics",
+    "sections": {
+      "quick": "Quick tests",
+      "create": "Create test knowledge base",
+      "results": "Results"
+    },
+    "tests": {
+      "health": "Health",
+      "info": "Info",
+      "knowledgeBases": "Knowledge bases",
+      "createKnowledgeBase": "Create knowledge base",
+      "chat": "Chat"
+    },
+    "actions": {
+      "runAll": "Run all",
+      "createTestKnowledgeBase": "Create",
+      "testChat": "Test chat"
+    },
+    "fields": {
+      "testKnowledgeBaseName": "Knowledge base name",
+      "testKnowledgeBaseNameHint": "Only letters, numbers, underscores, and hyphens."
+    },
+    "errors": {
+      "noKnowledgeBases": "No knowledge bases available."
+    },
+    "status": {
+      "notRun": "Not run",
+      "testing": "Testing...",
+      "success": "Success",
+      "error": "Error"
+    },
+    "sampleMessage": "hello",
+    "sampleKnowledgeBaseDescription": "A knowledge base created for quick verification."
+  },
+  "userSettings": {
+    "messages": {
+      "saved": "Settings saved"
+    },
+    "errors": {
+      "loadFailed": "Failed to load user settings"
+    },
+    "help": {
+      "title": "Parameter help",
+      "description": "These parameters affect only your account. If model list is empty, configure providers in Settings → Model Configuration first.",
+      "labels": {
+        "chat": "Chat model: ",
+        "embedding": "Embedding: ",
+        "rerank": "Rerank: ",
+        "chunk": "Chunk: "
+      },
+      "items": {
+        "chat": "Default model for chat responses.",
+        "embedding": "Used for document vectorization and retrieval.",
+        "rerank": "Reranks retrieval results (better relevance but more latency/cost).",
+        "chunk": "Larger chunks preserve context but increase indexing cost."
+      }
+    },
+    "sections": {
+      "aiModels": "AI model settings",
+      "modelParams": "Model parameters",
+      "ui": "UI settings"
+    },
+    "fields": {
+      "chatModel": "Chat model",
+      "embeddingModel": "Embedding model",
+      "rerankModel": "Rerank model",
+      "theme": "Theme",
+      "language": "Language"
+    },
+    "params": {
+      "maxTokens": "Max tokens ({{value}})",
+      "maxTokensHelp": "Maximum length per response",
+      "temperature": "Temperature ({{value}})",
+      "temperatureHelp": "Controls randomness (0.0–2.0)",
+      "topP": "Top-p ({{value}})",
+      "topPHelp": "Nucleus sampling (0.0–1.0)",
+      "retrievalTopK": "Retrieval top-k ({{value}})",
+      "retrievalTopKHelp": "Number of chunks returned per retrieval",
+      "chunkSize": "Chunk size ({{value}})",
+      "chunkSizeHelp": "Characters per chunk during splitting",
+      "chunkOverlap": "Chunk overlap ({{value}})",
+      "chunkOverlapHelp": "Overlap characters between adjacent chunks"
+    },
+    "theme": {
+      "light": "Light",
+      "dark": "Dark",
+      "auto": "System"
+    },
+    "language": {
+      "zh": "中文",
+      "en": "English"
+    },
+    "actions": {
+      "save": "Save settings",
+      "saving": "Saving..."
+    },
+    "meta": {
+      "createdAt": "Created at",
+      "updatedAt": "Updated at"
+    }
+  },
+  "workflowTemplates": {
+    "header": {
+      "title": "Workflow Templates",
+      "subtitle": "Discover curated workflow templates and build your AI app faster"
+    },
+    "actions": {
+      "preview": "Preview",
+      "useTemplate": "Use template",
+      "seedTemplates": "Import sample templates",
+      "newWorkflow": "New workflow"
+    },
+    "badges": {
+      "featured": "Featured",
+      "premium": "Premium"
+    },
+    "search": {
+      "placeholder": "Search templates..."
+    },
+    "sort": {
+      "label": "Sort by",
+      "popular": "Most popular",
+      "newest": "Newest",
+      "rating": "Top rated",
+      "name": "Name"
+    },
+    "difficultyFilter": {
+      "label": "Difficulty"
+    },
+    "difficulty": {
+      "beginner": "Beginner",
+      "intermediate": "Intermediate",
+      "advanced": "Advanced",
+      "unknown": "Unknown"
+    },
+    "filters": {
+      "all": "All",
+      "categoryTitle": "Category filters",
+      "showFilters": "Show filters",
+      "hideFilters": "Hide filters",
+      "mineOnly": "My templates only",
+      "viewAll": "View all templates",
+      "categoryChip": "{{name}} ({{count}})",
+      "subcategoryChip": "{{name}} ({{count}})"
+    },
+    "tabs": {
+      "all": "All templates ({{count}})",
+      "favorites": "Favorites ({{count}})",
+      "recent": "Recent"
+    },
+    "stats": {
+      "uses": "{{count}} uses",
+      "authorId": "Author #{{id}}"
+    },
+    "empty": {
+      "noMatch": "No templates match your criteria. Try adjusting your search."
+    },
+    "preview": {
+      "reviews": "({{count}} reviews)",
+      "sections": {
+        "useCases": "Use cases",
+        "requirements": "Requirements",
+        "nodes": "Workflow nodes"
+      },
+      "confirmDelete": "Delete this template?",
+      "delete": "Delete template",
+      "deleteFailed": "Delete failed (author or admin required)",
+      "visibilityFailed": "Failed to update visibility (author or admin required)",
+      "setPrivate": "Set private",
+      "setPublic": "Set public",
+      "useThis": "Use this template"
+    },
+    "messages": {
+      "loadFailed": "Failed to load templates",
+      "useFailed": "Failed to use template",
+      "seedFailed": "Failed to import sample templates (admin required)"
+    },
+    "categories": {
+      "customer_service": "Customer Service",
+      "document_processing": "Document Processing",
+      "ai_assistant": "AI Assistant",
+      "data_analysis": "Data Analysis",
+      "custom": "Custom"
+    }
+  },
+  "workflowManagement": {
+    "header": {
+      "title": "Workflow Management",
+      "subtitle": "Manage created workflows and agents"
+    },
+    "tabs": {
+      "workflows": "Workflows ({{count}})",
+      "agents": "Agents ({{count}})"
+    },
+    "demo": {
+      "banner": "Demo mode: showing sample data when backend APIs are unavailable.",
+      "workflows": {
+        "customerService": {
+          "name": "Customer Service",
+          "description": "Intent classification + RAG retrieval + LLM answer"
+        },
+        "documentAnalysis": {
+          "name": "Document Analysis",
+          "description": "Analyze documents and generate summaries"
+        }
+      },
+      "agents": {
+        "customerService": {
+          "name": "Customer Service Agent",
+          "description": "Handles user questions and retrieves knowledge"
+        },
+        "documentAssistant": {
+          "name": "Document Assistant",
+          "description": "Helps analyze and summarize documents"
+        }
+      }
+    },
+    "empty": {
+      "workflows": "No workflows yet.",
+      "agents": "No agents yet."
+    },
+    "noDescription": "No description",
+    "current": "Current",
+    "visibility": {
+      "public": "Public",
+      "private": "Private"
+    },
+    "status": {
+      "active": "Active",
+      "draft": "Draft",
+      "archived": "Archived",
+      "inactive": "Inactive"
+    },
+    "metrics": {
+      "nodes": "Nodes",
+      "edges": "Edges",
+      "executions": "Executions"
+    },
+    "agentMetrics": {
+      "conversations": "Conversations",
+      "linkedWorkflow": "Linked workflow"
+    },
+    "createdAt": "Created at",
+    "updatedAt": "Updated at",
+    "actions": {
+      "run": "Run",
+      "history": "History",
+      "setCurrent": "Set current",
+      "configure": "Configure",
+      "chat": "Chat",
+      "createWorkflow": "Create workflow",
+      "createAgent": "Create agent"
+    },
+    "menu": {
+      "setCurrent": "Set current",
+      "setPublic": "Set public",
+      "setPrivate": "Set private",
+      "copy": "Copy",
+      "export": "Export",
+      "delete": "Delete"
+    },
+    "dialogs": {
+      "create": {
+        "title": "Create workflow",
+        "fields": {
+          "name": "Workflow name",
+          "description": "Description"
+        },
+        "visibility": {
+          "publicToTeam": "Visible to team",
+          "privateOnly": "Only me"
+        },
+        "actions": {
+          "fromTemplate": "Create from template",
+          "createAndEdit": "Create and edit"
+        }
+      },
+      "templates": {
+        "title": "Choose template",
+        "loading": "Loading templates...",
+        "use": "Use",
+        "templateTitle": "{{name}} (Nodes: {{nodeCount}})",
+        "empty": "No templates available."
+      },
+      "delete": {
+        "title": "Confirm delete",
+        "confirm": "Delete \"{{name}}\"? This action cannot be undone.",
+        "delete": "Delete"
+      }
+    },
+    "messages": {
+      "useTemplateFailed": "Failed to use template",
+      "updateVisibilityFailed": "Failed to update visibility",
+      "setPublic": "Set to public: {{name}}",
+      "setPrivate": "Set to private: {{name}}",
+      "setCurrent": "Set as current workflow: {{name}}"
+    }
+  },
+  "modelConfigReminder": {
+    "title": "Model configuration required",
+    "body": "Your account has no usable chat model configuration, so LLM/RAG/workflow tests will fail.",
+    "missingKey": "A chat model is selected but API Key/Base URL is missing (or disabled). Please complete it in Settings → Model Configuration.",
+    "missingConfig": "Please select a chat model and save it in Settings → Model Configuration (remember API Key for providers that require it).",
+    "tenantHint": "If you want to use tenant-shared models, ask an admin to enable shared models and add you to the allowlist.",
+    "later": "Remind me later",
+    "go": "Configure now"
   }
-} 
+}

@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { teamApi } from '../services/api';
 import type { Team, TeamMember, TeamPermission } from '../types';
 import { MEMBER_TYPES } from '../types';
@@ -21,6 +22,7 @@ export interface UseTeamResult {
 }
 
 export const useTeam = (teamId?: number): UseTeamResult => {
+  const { t } = useTranslation();
   const [currentTeam, setCurrentTeam] = useState<Team | null>(null);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [loading, setLoading] = useState(false);
@@ -42,12 +44,12 @@ export const useTeam = (teamId?: number): UseTeamResult => {
       setCurrentTeam(response.data);
     } catch (err: any) {
       console.error('Failed to fetch team:', err);
-      setError(err.response?.data?.detail || '获取团队信息失败');
+      setError(err.response?.data?.detail || t('team.errors.fetchTeamFailed'));
       setCurrentTeam(null);
     } finally {
       setLoading(false);
     }
-  }, [teamId]);
+  }, [teamId, t]);
 
   // 获取团队成员
   const refreshMembers = useCallback(async () => {
@@ -58,9 +60,9 @@ export const useTeam = (teamId?: number): UseTeamResult => {
       setTeamMembers(response.data);
     } catch (err: any) {
       console.error('Failed to fetch team members:', err);
-      setError(err.response?.data?.detail || '获取团队成员失败');
+      setError(err.response?.data?.detail || t('team.errors.fetchMembersFailed'));
     }
-  }, [currentTeam?.id]);
+  }, [currentTeam?.id, t]);
 
   // 计算权限
   const teamPermissions: TeamPermission = {
@@ -108,6 +110,7 @@ export const useTeam = (teamId?: number): UseTeamResult => {
 };
 
 export const useCreateTeam = () => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -126,7 +129,7 @@ export const useCreateTeam = () => {
       return response.data;
     } catch (err: any) {
       console.error('Failed to create team:', err);
-      setError(err.response?.data?.detail || '创建团队失败');
+      setError(err.response?.data?.detail || t('team.errors.createTeamFailed'));
       throw err;
     } finally {
       setLoading(false);
@@ -137,6 +140,7 @@ export const useCreateTeam = () => {
 };
 
 export const useInviteUser = () => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -154,7 +158,7 @@ export const useInviteUser = () => {
       return response.data;
     } catch (err: any) {
       console.error('Failed to invite user:', err);
-      setError(err.response?.data?.detail || '邀请用户失败');
+      setError(err.response?.data?.detail || t('team.errors.inviteUserFailed'));
       throw err;
     } finally {
       setLoading(false);
@@ -165,6 +169,7 @@ export const useInviteUser = () => {
 };
 
 export const useJoinTeam = () => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -177,7 +182,7 @@ export const useJoinTeam = () => {
       return response.data;
     } catch (err: any) {
       console.error('Failed to join team:', err);
-      setError(err.response?.data?.detail || '加入团队失败');
+      setError(err.response?.data?.detail || t('team.errors.joinTeamFailed'));
       throw err;
     } finally {
       setLoading(false);

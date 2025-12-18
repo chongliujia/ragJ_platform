@@ -58,16 +58,16 @@ interface FileUploadStatus {
 const ALLOWED_EXTS = ['pdf','docx','txt','md','html'];
 const MAX_SIZE_MB = Number((import.meta as any).env?.VITE_MAX_UPLOAD_MB || 100);
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
-const PARAM_LABELS: Record<string, string> = {
-  chunk_size: '分片长度（字符）',
-  chunk_overlap: '重叠长度（字符）',
-  window_size: '窗口大小（字符）',
-  step_size: '步长（字符）',
-  target_chunk_size: '目标分片长度（字符）',
-  sentences_per_chunk: '每段句子数',
-  tokens_per_chunk: '每段 Token 数（近似）',
-  overlap_tokens: '重叠 Token 数（近似）',
-  breakpoint_threshold_type: '断点阈值类型',
+const PARAM_LABEL_KEYS: Record<string, string> = {
+  chunk_size: 'document.upload.params.chunk_size',
+  chunk_overlap: 'document.upload.params.chunk_overlap',
+  window_size: 'document.upload.params.window_size',
+  step_size: 'document.upload.params.step_size',
+  target_chunk_size: 'document.upload.params.target_chunk_size',
+  sentences_per_chunk: 'document.upload.params.sentences_per_chunk',
+  tokens_per_chunk: 'document.upload.params.tokens_per_chunk',
+  overlap_tokens: 'document.upload.params.overlap_tokens',
+  breakpoint_threshold_type: 'document.upload.params.breakpoint_threshold_type',
 };
 
 const DocumentUpload: React.FC<DocumentUploadProps> = ({
@@ -150,10 +150,10 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
       const newFiles: FileUploadStatus[] = droppedFiles.map(file => {
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         if (!ALLOWED_EXTS.includes(ext)) {
-          return { file, status: 'error', progress: 0, error: `不支持的文件类型 .${ext}` };
+          return { file, status: 'error', progress: 0, error: t('document.upload.file.invalidType', { ext: `.${ext}` }) };
         }
         if (file.size > MAX_SIZE_BYTES) {
-          return { file, status: 'error', progress: 0, error: `文件超过大小限制（≤ ${MAX_SIZE_MB} MB）` };
+          return { file, status: 'error', progress: 0, error: t('document.upload.file.sizeExceeded', { size: MAX_SIZE_MB }) };
         }
         return { file, status: 'pending', progress: 0 };
       });
@@ -181,10 +181,10 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
       const newFiles: FileUploadStatus[] = selectedFiles.map(file => {
         const ext = file.name.split('.').pop()?.toLowerCase() || '';
         if (!ALLOWED_EXTS.includes(ext)) {
-          return { file, status: 'error', progress: 0, error: `不支持的文件类型 .${ext}` };
+          return { file, status: 'error', progress: 0, error: t('document.upload.file.invalidType', { ext: `.${ext}` }) };
         }
         if (file.size > MAX_SIZE_BYTES) {
-          return { file, status: 'error', progress: 0, error: `文件超过大小限制（≤ ${MAX_SIZE_MB} MB）` };
+          return { file, status: 'error', progress: 0, error: t('document.upload.file.sizeExceeded', { size: MAX_SIZE_MB }) };
         }
         return { file, status: 'pending', progress: 0 };
       });
@@ -251,26 +251,26 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
           console.error(`Upload failed for file ${fileStatus.file.name}:`, error);
           
           // 上传失败
-          setFiles(prev => prev.map((f, idx) => 
-            idx === i ? { 
-              ...f, 
-              status: 'error', 
-              progress: 0,
-              error: (error?.name === 'CanceledError' || error?.message === 'canceled' || error?.message?.includes('aborted')) 
-                ? '已取消'
-                : (error?.response?.data?.detail || t('document.upload.error'))
-            } : f
-          ));
-          uploadControllersRef.current.delete(i);
-        }
+	          setFiles(prev => prev.map((f, idx) => 
+	            idx === i ? { 
+	              ...f, 
+	              status: 'error', 
+	              progress: 0,
+	              error: (error?.name === 'CanceledError' || error?.message === 'canceled' || error?.message?.includes('aborted')) 
+	                ? t('document.upload.status.cancelled')
+	                : (error?.response?.data?.detail || t('document.upload.error'))
+	            } : f
+	          ));
+	          uploadControllersRef.current.delete(i);
+	        }
       }
 
       // 检查是否有成功的上传
-      const successfulUploads = files.filter(f => f.status === 'success').length;
-      if (successfulUploads > 0) {
-        onUploadSuccess();
-        enqueueSnackbar('上传已接收，后台处理中', 'success');
-      }
+	      const successfulUploads = files.filter(f => f.status === 'success').length;
+	      if (successfulUploads > 0) {
+	        onUploadSuccess();
+	        enqueueSnackbar(t('document.upload.messages.accepted'), 'success');
+	      }
       
       // 如果全部成功，关闭对话框
       const failedUploads = files.filter(f => f.status === 'error').length;
@@ -278,14 +278,14 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
         handleClose();
       }
       
-    } catch (error: any) {
-      console.error('Upload process failed:', error);
-      setError(error.message || t('document.upload.error'));
-      enqueueSnackbar('上传失败', 'error');
-    } finally {
-      setUploading(false);
-    }
-  };
+	    } catch (error: any) {
+	      console.error('Upload process failed:', error);
+	      setError(error.message || t('document.upload.error'));
+	      enqueueSnackbar(t('document.upload.messages.failed'), 'error');
+	    } finally {
+	      setUploading(false);
+	    }
+	  };
 
   // 重置表单
   const handleClose = () => {
@@ -302,9 +302,9 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   // 渲染参数控件
   const renderParamControl = (paramName: string, paramConfig: any) => {
     const value = (strategyParams[paramName] ?? paramConfig.default);
-    const label =
-      PARAM_LABELS[paramName] ||
-      paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const fallbackLabel = paramName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    const labelKey = PARAM_LABEL_KEYS[paramName];
+    const label = labelKey ? t(labelKey) : fallbackLabel;
 
     if (paramConfig.type === 'number') {
       const min = typeof paramConfig.min === 'number' ? paramConfig.min : undefined;
@@ -345,7 +345,10 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
           fullWidth
           helperText={
             (typeof min === 'number' || typeof max === 'number')
-              ? `范围：${typeof min === 'number' ? min : '-'} ~ ${typeof max === 'number' ? max : '-'}`
+              ? t('document.upload.params.range', {
+                  min: typeof min === 'number' ? min : '-',
+                  max: typeof max === 'number' ? max : '-',
+                })
               : undefined
           }
         />
@@ -426,7 +429,10 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
                 : t('document.upload.file.select')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              支持：{ALLOWED_EXTS.map(ext => `.${ext}`).join(', ')} · 最大 {MAX_SIZE_MB} MB
+              {t('document.upload.file.supportedHint', {
+                types: ALLOWED_EXTS.map(ext => `.${ext}`).join(', '),
+                size: MAX_SIZE_MB,
+              })}
             </Typography>
             <Button
               variant="outlined"
@@ -469,7 +475,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
               </Box>
               <Box component="li">
                 <Typography variant="body2" color="text.secondary">
-                  提示：部分嵌入模型会限制单条输入（例如 ≤ 512 tokens）。系统会自动拆分超限分片，但建议适当减小“分片长度”以减少拆分与成本。
+                  {t('document.upload.help.embeddingHint')}
                 </Typography>
               </Box>
             </Box>

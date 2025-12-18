@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Box,
   Typography,
@@ -37,18 +38,18 @@ import {
 } from '@mui/material';
 import {
   Search as SearchIcon,
-	  AccountTree as WorkflowIcon,
-	  SmartToy as AIIcon,
-	  Description as DocumentIcon,
-	  Group as TeamIcon,
-	  Star as StarIcon,
-	  StarBorder as StarBorderIcon,
-	  Visibility as PreviewIcon,
-	  GetApp as UseIcon,
-	  TrendingUp as TrendingUpIcon,
-	  FilterList as FilterIcon,
-	  Close as CloseIcon,
-	} from '@mui/icons-material';
+  AccountTree as WorkflowIcon,
+  SmartToy as AIIcon,
+  Description as DocumentIcon,
+  Group as TeamIcon,
+  Star as StarIcon,
+  StarBorder as StarBorderIcon,
+  Visibility as PreviewIcon,
+  GetApp as UseIcon,
+  TrendingUp as TrendingUpIcon,
+  FilterList as FilterIcon,
+  Close as CloseIcon,
+} from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import { workflowApi } from '../services/api';
 
@@ -91,6 +92,7 @@ interface TemplateCategory {
 
 const WorkflowTemplateLibrary: React.FC = () => {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
   
   // 状态管理
   const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
@@ -110,13 +112,16 @@ const WorkflowTemplateLibrary: React.FC = () => {
   const [reloadNonce, setReloadNonce] = useState(0);
 
   // 分类元信息（用于 UI 图标/颜色）
-  const CATEGORY_META: Record<string, { name: string; icon: React.ReactNode; color: string }> = {
-    customer_service: { name: '客户服务', icon: <TeamIcon />, color: '#2196f3' },
-    document_processing: { name: '文档处理', icon: <DocumentIcon />, color: '#4caf50' },
-    ai_assistant: { name: 'AI助手', icon: <AIIcon />, color: '#ff9800' },
-    data_analysis: { name: '数据分析', icon: <TrendingUpIcon />, color: '#9c27b0' },
-    custom: { name: '自定义', icon: <WorkflowIcon />, color: '#607d8b' },
+  const CATEGORY_META: Record<string, { icon: React.ReactNode; color: string }> = {
+    customer_service: { icon: <TeamIcon />, color: '#2196f3' },
+    document_processing: { icon: <DocumentIcon />, color: '#4caf50' },
+    ai_assistant: { icon: <AIIcon />, color: '#ff9800' },
+    data_analysis: { icon: <TrendingUpIcon />, color: '#9c27b0' },
+    custom: { icon: <WorkflowIcon />, color: '#607d8b' },
   };
+
+  const getCategoryName = (id: string) =>
+    t(`workflowTemplates.categories.${id}`, { defaultValue: id });
 
   const buildCategoriesFromTemplates = (tpls: WorkflowTemplate[]): TemplateCategory[] => {
     const counts: Record<string, number> = {};
@@ -132,11 +137,11 @@ const WorkflowTemplateLibrary: React.FC = () => {
     const cats: TemplateCategory[] = Object.keys(counts)
       .sort()
       .map((id) => {
-        const meta = CATEGORY_META[id] || { name: id, icon: <WorkflowIcon />, color: '#2196f3' };
+        const meta = CATEGORY_META[id] || { icon: <WorkflowIcon />, color: '#2196f3' };
         const subs = Object.entries(subcounts[id] || {})
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([sid, c]) => ({ id: sid, name: sid, icon: meta.icon, color: meta.color, count: c }));
-        return { id, name: meta.name, icon: meta.icon, color: meta.color, count: counts[id] || 0, subcategories: subs };
+        return { id, name: id, icon: meta.icon, color: meta.color, count: counts[id] || 0, subcategories: subs };
       });
     return cats;
   };
@@ -185,13 +190,13 @@ const WorkflowTemplateLibrary: React.FC = () => {
       } catch (e: any) {
         setTemplates([]);
         setCategories([]);
-        setError(e?.response?.data?.detail || '加载模板失败');
+        setError(e?.response?.data?.detail || t('workflowTemplates.messages.loadFailed'));
       } finally {
         setLoading(false);
       }
     };
     load();
-  }, [mineOnly, reloadNonce]);
+  }, [mineOnly, reloadNonce, t, i18n.language]);
 
   // 过滤和排序模板
   const filteredAndSortedTemplates = React.useMemo(() => {
@@ -272,7 +277,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
       if (workflowId) navigate(`/workflows/${workflowId}/edit`);
     } catch (e) {
       console.error('Use template failed:', e);
-      alert('使用模板失败');
+      alert(t('workflowTemplates.messages.useFailed'));
     }
   };
 
@@ -289,10 +294,10 @@ const WorkflowTemplateLibrary: React.FC = () => {
   // 获取难度文本
   const getDifficultyText = (difficulty: string) => {
     switch (difficulty) {
-      case 'beginner': return '初级';
-      case 'intermediate': return '中级';
-      case 'advanced': return '高级';
-      default: return '未知';
+      case 'beginner': return t('workflowTemplates.difficulty.beginner');
+      case 'intermediate': return t('workflowTemplates.difficulty.intermediate');
+      case 'advanced': return t('workflowTemplates.difficulty.advanced');
+      default: return t('workflowTemplates.difficulty.unknown');
     }
   };
 
@@ -322,7 +327,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
         {/* 特色标识 */}
         {template.is_featured && (
           <Chip
-            label="推荐"
+            label={t('workflowTemplates.badges.featured')}
             size="small"
             sx={{
               position: 'absolute',
@@ -339,7 +344,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
         {/* 高级标识 */}
         {template.is_premium && (
           <Chip
-            label="高级"
+            label={t('workflowTemplates.badges.premium')}
             size="small"
             sx={{
               position: 'absolute',
@@ -447,14 +452,15 @@ const WorkflowTemplateLibrary: React.FC = () => {
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-                {template.downloads} 次使用
+                {t('workflowTemplates.stats.uses', { count: template.downloads })}
               </Typography>
               <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
                 v{template.version}
               </Typography>
             </Box>
             <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.5)' }}>
-              {template.author || (template.author_id != null ? `作者#${template.author_id}` : '')}
+              {template.author ||
+                (template.author_id != null ? t('workflowTemplates.stats.authorId', { id: template.author_id }) : '')}
             </Typography>
           </Box>
         </CardContent>
@@ -466,7 +472,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
             sx={{ color: 'rgba(255, 255, 255, 0.8)', mr: 1 }}
             onClick={() => handlePreviewTemplate(template)}
           >
-            预览
+            {t('workflowTemplates.actions.preview')}
           </Button>
           <Button
             startIcon={<UseIcon />}
@@ -480,7 +486,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
             }}
             onClick={() => handleUseTemplate(template)}
           >
-            使用模板
+            {t('workflowTemplates.actions.useTemplate')}
           </Button>
         </CardActions>
       </Card>
@@ -491,11 +497,11 @@ const WorkflowTemplateLibrary: React.FC = () => {
   const renderCategoryFilter = () => (
     <Paper sx={{ p: 2, mb: 3, backgroundColor: 'rgba(26, 31, 46, 0.8)', border: '1px solid rgba(0, 212, 255, 0.2)' }}>
       <Typography variant="h6" sx={{ color: 'white', mb: 2 }}>
-        分类筛选
+        {t('workflowTemplates.filters.categoryTitle')}
       </Typography>
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
         <Chip
-          label="全部"
+          label={t('workflowTemplates.filters.all')}
           onClick={() => setSelectedCategory('all')}
           variant={selectedCategory === 'all' ? 'filled' : 'outlined'}
           sx={{
@@ -511,7 +517,10 @@ const WorkflowTemplateLibrary: React.FC = () => {
         {categories.map(category => (
           <Chip
             key={category.id}
-            label={`${category.name} (${category.count})`}
+            label={t('workflowTemplates.filters.categoryChip', {
+              name: getCategoryName(category.id),
+              count: category.count,
+            })}
             onClick={() => setSelectedCategory(category.id)}
             variant={selectedCategory === category.id ? 'filled' : 'outlined'}
             sx={{
@@ -533,7 +542,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
           {categories.find(c => c.id === selectedCategory)?.subcategories?.map(subcat => (
             <Chip
               key={subcat.id}
-              label={`${subcat.name} (${subcat.count})`}
+              label={t('workflowTemplates.filters.subcategoryChip', { name: subcat.name, count: subcat.count })}
               onClick={() => setSelectedCategory(subcat.id)}
               size="small"
               variant="outlined"
@@ -571,10 +580,10 @@ const WorkflowTemplateLibrary: React.FC = () => {
             WebkitTextFillColor: 'transparent',
           }}
         >
-          工作流模板库
+          {t('workflowTemplates.header.title')}
         </Typography>
         <Typography variant="h6" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-          发现并使用精选的工作流模板，快速构建您的AI应用
+          {t('workflowTemplates.header.subtitle')}
         </Typography>
       </Box>
 
@@ -582,7 +591,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
       <Paper sx={{ p: 2, mb: 3, backgroundColor: 'rgba(26, 31, 46, 0.8)', border: '1px solid rgba(0, 212, 255, 0.2)' }}>
         <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
           <TextField
-            placeholder="搜索模板..."
+            placeholder={t('workflowTemplates.search.placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             InputProps={{
@@ -611,10 +620,10 @@ const WorkflowTemplateLibrary: React.FC = () => {
           />
           
           <FormControl sx={{ minWidth: 120 }}>
-            <InputLabel sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>排序方式</InputLabel>
+            <InputLabel sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>{t('workflowTemplates.sort.label')}</InputLabel>
             <Select
               value={sortBy}
-              label="排序方式"
+              label={t('workflowTemplates.sort.label')}
               onChange={(e) => setSortBy(e.target.value as any)}
               sx={{
                 color: 'white',
@@ -629,18 +638,18 @@ const WorkflowTemplateLibrary: React.FC = () => {
                 },
               }}
             >
-              <MenuItem value="popular">最受欢迎</MenuItem>
-              <MenuItem value="newest">最新发布</MenuItem>
-              <MenuItem value="rating">评分最高</MenuItem>
-              <MenuItem value="name">名称排序</MenuItem>
+              <MenuItem value="popular">{t('workflowTemplates.sort.popular')}</MenuItem>
+              <MenuItem value="newest">{t('workflowTemplates.sort.newest')}</MenuItem>
+              <MenuItem value="rating">{t('workflowTemplates.sort.rating')}</MenuItem>
+              <MenuItem value="name">{t('workflowTemplates.sort.name')}</MenuItem>
             </Select>
           </FormControl>
           
           <FormControl sx={{ minWidth: 100 }}>
-            <InputLabel sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>难度</InputLabel>
+            <InputLabel sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>{t('workflowTemplates.difficultyFilter.label')}</InputLabel>
             <Select
               value={difficultyFilter}
-              label="难度"
+              label={t('workflowTemplates.difficultyFilter.label')}
               onChange={(e) => setDifficultyFilter(e.target.value as string)}
               sx={{
                 color: 'white',
@@ -655,10 +664,10 @@ const WorkflowTemplateLibrary: React.FC = () => {
                 },
               }}
             >
-              <MenuItem value="all">全部</MenuItem>
-              <MenuItem value="beginner">初级</MenuItem>
-              <MenuItem value="intermediate">中级</MenuItem>
-              <MenuItem value="advanced">高级</MenuItem>
+              <MenuItem value="all">{t('workflowTemplates.filters.all')}</MenuItem>
+              <MenuItem value="beginner">{t('workflowTemplates.difficulty.beginner')}</MenuItem>
+              <MenuItem value="intermediate">{t('workflowTemplates.difficulty.intermediate')}</MenuItem>
+              <MenuItem value="advanced">{t('workflowTemplates.difficulty.advanced')}</MenuItem>
             </Select>
           </FormControl>
           
@@ -667,7 +676,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
             onClick={() => setShowFilters(!showFilters)}
             sx={{ color: '#00d4ff' }}
           >
-            {showFilters ? '隐藏' : '显示'}筛选
+            {showFilters ? t('workflowTemplates.filters.hideFilters') : t('workflowTemplates.filters.showFilters')}
           </Button>
 
           <Button
@@ -675,7 +684,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
             onClick={() => setMineOnly((v) => !v)}
             sx={{ color: '#00d4ff', borderColor: 'rgba(0, 212, 255, 0.35)' }}
           >
-            {mineOnly ? '查看全部模板' : '只看我的模板'}
+            {mineOnly ? t('workflowTemplates.filters.viewAll') : t('workflowTemplates.filters.mineOnly')}
           </Button>
 
           <Button
@@ -686,12 +695,12 @@ const WorkflowTemplateLibrary: React.FC = () => {
                 setReloadNonce((n) => n + 1);
               } catch (e) {
                 console.error('seed templates failed:', e);
-                alert('导入示例模板失败（需要管理员权限）');
+                alert(t('workflowTemplates.messages.seedFailed'));
               }
             }}
             sx={{ color: '#00d4ff', borderColor: 'rgba(0, 212, 255, 0.35)' }}
           >
-            导入示例模板
+            {t('workflowTemplates.actions.seedTemplates')}
           </Button>
 
           <Button
@@ -702,7 +711,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
             }}
             onClick={() => navigate('/workflows/new')}
           >
-            新建工作流
+            {t('workflowTemplates.actions.newWorkflow')}
           </Button>
         </Box>
       </Paper>
@@ -727,9 +736,9 @@ const WorkflowTemplateLibrary: React.FC = () => {
             },
           }}
         >
-          <Tab label={`全部模板 (${filteredAndSortedTemplates.length})`} />
-          <Tab label={`我的收藏 (${favoriteTemplates.size})`} />
-          <Tab label="最近使用" />
+          <Tab label={t('workflowTemplates.tabs.all', { count: filteredAndSortedTemplates.length })} />
+          <Tab label={t('workflowTemplates.tabs.favorites', { count: favoriteTemplates.size })} />
+          <Tab label={t('workflowTemplates.tabs.recent')} />
         </Tabs>
       </Paper>
 
@@ -737,7 +746,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
           <Typography sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-            加载中...
+            {t('common.loading')}
           </Typography>
         </Box>
       ) : (
@@ -764,7 +773,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                 border: '1px solid rgba(33, 150, 243, 0.2)'
               }}
             >
-              未找到符合条件的模板，请尝试调整搜索条件
+              {t('workflowTemplates.empty.noMatch')}
             </Alert>
           ) : (
             <Grid container spacing={3}>
@@ -820,7 +829,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                       }}
                     />
                     <Typography variant="caption" sx={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-                      ({selectedTemplate.rating_count} 评价)
+                      {t('workflowTemplates.preview.reviews', { count: selectedTemplate.rating_count })}
                     </Typography>
                   </Box>
                 </Box>
@@ -855,7 +864,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                     }}
                   />
                   <Chip
-                    label={`${selectedTemplate.downloads} 次使用`}
+                    label={t('workflowTemplates.stats.uses', { count: selectedTemplate.downloads })}
                     sx={{
                       backgroundColor: 'rgba(76, 175, 80, 0.2)',
                       color: '#4caf50',
@@ -881,7 +890,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
               <Grid container spacing={3}>
                 <Grid size={{ xs: 12, md: 4 }}>
                   <Typography variant="h6" sx={{ mb: 2, color: '#00d4ff' }}>
-                    适用场景
+                    {t('workflowTemplates.preview.sections.useCases')}
                   </Typography>
                   <List>
                     {(selectedTemplate.use_cases || []).map((useCase, index) => (
@@ -902,7 +911,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                 
                 <Grid size={{ xs: 12, md: 4 }}>
                   <Typography variant="h6" sx={{ mb: 2, color: '#4caf50' }}>
-                    所需资源
+                    {t('workflowTemplates.preview.sections.requirements')}
                   </Typography>
                   <List>
                     {(selectedTemplate.requirements || []).map((req, index) => (
@@ -923,7 +932,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                 
                 <Grid size={{ xs: 12, md: 4 }}>
                   <Typography variant="h6" sx={{ mb: 2, color: '#ff9800' }}>
-                    工作流节点
+                    {t('workflowTemplates.preview.sections.nodes')}
                   </Typography>
                   <List>
                     {(selectedTemplate.nodes || []).map((node, index) => (
@@ -949,26 +958,26 @@ const WorkflowTemplateLibrary: React.FC = () => {
                 onClick={() => setPreviewDialogOpen(false)}
                 sx={{ color: 'rgba(255, 255, 255, 0.7)' }}
               >
-                关闭
+                {t('common.close')}
               </Button>
               <Button
                 color="error"
                 variant="outlined"
                 onClick={async () => {
                   if (!selectedTemplate?.id) return;
-                  if (!confirm('确定要删除这个模板吗？')) return;
+                  if (!confirm(t('workflowTemplates.preview.confirmDelete'))) return;
                   try {
                     await workflowApi.deleteTemplate(selectedTemplate.id);
                     setPreviewDialogOpen(false);
                     setReloadNonce((n) => n + 1);
                   } catch (e) {
                     console.error('delete template failed:', e);
-                    alert('删除失败（需要作者或管理员权限）');
+                    alert(t('workflowTemplates.preview.deleteFailed'));
                   }
                 }}
                 sx={{ borderColor: 'rgba(244, 67, 54, 0.45)' }}
               >
-                删除模板
+                {t('workflowTemplates.preview.delete')}
               </Button>
               <Button
                 variant="outlined"
@@ -981,12 +990,14 @@ const WorkflowTemplateLibrary: React.FC = () => {
                     setReloadNonce((n) => n + 1);
                   } catch (e) {
                     console.error('toggle template visibility failed:', e);
-                    alert('修改可见性失败（需要作者或管理员权限）');
+                    alert(t('workflowTemplates.preview.visibilityFailed'));
                   }
                 }}
                 sx={{ color: '#00d4ff', borderColor: 'rgba(0, 212, 255, 0.35)' }}
               >
-                {selectedTemplate.is_public ? '设为私有' : '设为公开'}
+                {selectedTemplate.is_public
+                  ? t('workflowTemplates.preview.setPrivate')
+                  : t('workflowTemplates.preview.setPublic')}
               </Button>
               <Button
                 startIcon={<UseIcon />}
@@ -1002,7 +1013,7 @@ const WorkflowTemplateLibrary: React.FC = () => {
                   }
                 }}
               >
-                使用此模板
+                {t('workflowTemplates.preview.useThis')}
               </Button>
             </DialogActions>
           </>

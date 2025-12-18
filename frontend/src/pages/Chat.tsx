@@ -184,7 +184,7 @@ const Chat: React.FC = () => {
           console.error('Stream error:', err);
           const isTimeout = err?.message?.includes('timeout');
           const errorContent = isTimeout
-            ? (selectedKb ? '处理知识库查询时超时，请稍后重试。如果问题持续存在，请尝试简化您的问题。' : '请求超时，请稍后重试。')
+            ? (selectedKb ? t('chat.timeoutWithKnowledgeBase') : t('chat.timeout'))
             : t('chat.errorResponse');
           setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: errorContent } : m));
           setLoading(false);
@@ -201,8 +201,8 @@ const Chat: React.FC = () => {
       let errorContent = t('chat.errorResponse');
       if (error.code === 'ECONNABORTED') {
         errorContent = selectedKb 
-          ? '处理知识库查询时超时，请稍后重试。如果问题持续存在，请尝试简化您的问题。'
-          : '请求超时，请稍后重试。';
+          ? t('chat.timeoutWithKnowledgeBase')
+          : t('chat.timeout');
       }
       
       setMessages(prev => 

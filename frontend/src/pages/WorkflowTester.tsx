@@ -83,7 +83,7 @@ const WorkflowTester: React.FC = () => {
       })
       .catch((e: any) => {
         if (!alive) return;
-        setSchemaError(e?.response?.data?.detail || e?.message || '加载 schema 失败');
+        setSchemaError(e?.response?.data?.detail || e?.message || t('workflowTester.schema.loadFailed'));
         setIoSchema(null);
       })
       .finally(() => {
@@ -115,10 +115,10 @@ const WorkflowTester: React.FC = () => {
       return false;
     })();
     if ((required.includes('text') || required.includes('input')) && !text) {
-      errors.push(`缺少必填参数：${required.includes('input') ? 'input' : 'text'}`);
+      errors.push(t('workflowTester.inputErrors.missingRequired', { key: required.includes('input') ? 'input' : 'text' }));
     }
     if (!text && !hasOtherParams) {
-      errors.push('请输入 input 或填写参数后再执行');
+      errors.push(t('workflowTester.inputErrors.missingAny'));
     }
     if (text) {
       inputData.input = text;
@@ -135,13 +135,13 @@ const WorkflowTester: React.FC = () => {
 
       const isMissing =
         raw === undefined || raw === null || raw === '' || (typ === 'object' && String(raw || '').trim() === '') || (typ === 'array' && String(raw || '').trim() === '');
-      if (required.includes(key) && isMissing) errors.push(`缺少必填参数：${key}`);
+      if (required.includes(key) && isMissing) errors.push(t('workflowTester.inputErrors.missingRequired', { key }));
 
       if (isMissing) continue;
 
       if (typ === 'number') {
         const n = Number(raw);
-        if (!Number.isFinite(n)) errors.push(`参数 ${key} 需要是数字`);
+        if (!Number.isFinite(n)) errors.push(t('workflowTester.inputErrors.numberRequired', { key }));
         else inputData[key] = n;
       } else if (typ === 'boolean') {
         inputData[key] = !!raw;
@@ -149,7 +149,7 @@ const WorkflowTester: React.FC = () => {
         try {
           inputData[key] = JSON.parse(String(raw));
         } catch {
-          errors.push(`参数 ${key} 不是合法 JSON`);
+          errors.push(t('workflowTester.inputErrors.invalidJson', { key }));
         }
       } else {
         inputData[key] = raw;
@@ -172,13 +172,13 @@ const WorkflowTester: React.FC = () => {
     setExecutionDetail(null);
     setSelectedNodeId(null);
 
-    const built = buildInputData();
-    if (!built.ok) {
-      // Avoid “没反应”：把参数错误也显示到主区域
-      setError(built.errors.join('；') || '参数校验失败');
-      setRunning(false);
-      return;
-    }
+	    const built = buildInputData();
+	    if (!built.ok) {
+	      // Avoid “没反应”：把参数错误也显示到主区域
+	      setError(built.errors.join('；') || t('workflowTester.inputErrors.validationFailed'));
+	      setRunning(false);
+	      return;
+	    }
 
     const payload = { input_data: built.inputData, debug: debugMode };
 
@@ -194,15 +194,15 @@ const WorkflowTester: React.FC = () => {
           setRunning(false);
         },
         (result) => {
-          try {
-            if (result == null) {
-              if (!gotResultRef.current) {
-                setMessages((msgs) =>
-                  msgs.concat([{ role: 'assistant', content: '执行完成，但没有返回结果（可能被中断或后端未返回 complete payload）', timestamp: Date.now() }])
-                );
-              }
-              return;
-            }
+	          try {
+	            if (result == null) {
+	              if (!gotResultRef.current) {
+	                setMessages((msgs) =>
+	                  msgs.concat([{ role: 'assistant', content: t('workflowTester.messages.doneNoResult'), timestamp: Date.now() }])
+	                );
+	              }
+	              return;
+	            }
             gotResultRef.current = true;
             const execId = result?.result?.execution_id || result?.execution_id || null;
             if (execId) setLastExecutionId(String(execId));
@@ -254,7 +254,7 @@ const WorkflowTester: React.FC = () => {
       setExecutionDetail(res?.data || null);
     } catch (e: any) {
       setExecutionDetail(null);
-      setError(e?.response?.data?.detail || e?.message || '加载执行详情失败');
+      setError(e?.response?.data?.detail || e?.message || t('workflowTester.messages.loadDetailFailed'));
     } finally {
       setDetailLoading(false);
     }
@@ -294,11 +294,11 @@ const WorkflowTester: React.FC = () => {
         typeof out === 'string' ? out : (out?.result ?? out?.content ?? out?.text ?? JSON.stringify(out));
       setMessages((msgs) =>
         msgs.concat([
-          { role: 'assistant', content: `已从节点重试：${nodeId}\n执行ID：${newExecId || '(未知)'}\n\n${textOut}`, timestamp: Date.now() },
+          { role: 'assistant', content: t('workflowTester.messages.retried', { nodeId, execId: newExecId || '(unknown)', output: textOut }), timestamp: Date.now() },
         ])
       );
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || '重试失败');
+      setError(e?.response?.data?.detail || e?.message || t('workflowTester.messages.retryFailed'));
     } finally {
       setRunning(false);
     }
@@ -335,20 +335,20 @@ const WorkflowTester: React.FC = () => {
               }}
             />
           }
-          label="Debug（包含每步 input/output）"
+          label={t('workflowTester.debug.label')}
         />
         {lastExecutionId && (
           <>
             <Chip
               size="small"
-              label={`执行ID: ${lastExecutionId}`}
+              label={t('workflowTester.debug.executionId', { id: lastExecutionId })}
               onClick={() => void copyText(lastExecutionId)}
               onDelete={() => void copyText(lastExecutionId)}
               deleteIcon={<CopyIcon />}
               sx={{ cursor: 'pointer' }}
             />
             <Button size="small" variant="outlined" onClick={() => void openExecutionDetail()}>
-              查看详情
+              {t('workflowTester.actions.details')}
             </Button>
           </>
         )}
@@ -370,7 +370,7 @@ const WorkflowTester: React.FC = () => {
                 const nodeId = stepLike.nodeId ?? stepLike.node_id ?? null;
                 if (lastExecutionId && nodeId) void openExecutionDetail(String(nodeId));
               }}
-              title={lastExecutionId ? '点击查看该节点的输入/输出详情' : ''}
+              title={lastExecutionId ? t('workflowTester.actions.details') : ''}
             >
             {(() => {
               const stepLike: any = (p && (p.step ?? p.data ?? p)) || {};
@@ -409,7 +409,7 @@ const WorkflowTester: React.FC = () => {
                   const nodeId = stepLike.nodeId ?? stepLike.node_id ?? null;
                   if (nodeId) void retryFromNode(String(nodeId));
                 }}
-                title="从该节点及下游重试"
+                title={t('workflowTester.debug.retryTooltip')}
                 disabled={running}
               >
                 <RetryIcon fontSize="small" />
@@ -447,11 +447,11 @@ const WorkflowTester: React.FC = () => {
   const ParameterPanel = (
     <Paper variant="outlined" sx={{ p: 1.5 }}>
       <Typography variant="subtitle2" sx={{ mb: 1 }}>
-        参数
+        {t('workflowTester.schema.params')}
       </Typography>
       {schemaLoading && (
         <Typography variant="caption" color="text.secondary">
-          加载 schema...
+          {t('workflowTester.schema.loading')}
         </Typography>
       )}
       {schemaError && (
@@ -471,7 +471,7 @@ const WorkflowTester: React.FC = () => {
         if (!keys.length) {
           return (
             <Typography variant="caption" color="text.secondary">
-              未推导出结构化参数：可直接在底部输入文本执行。
+              {t('workflowTester.schema.noStructured')}
             </Typography>
           );
         }
@@ -481,7 +481,7 @@ const WorkflowTester: React.FC = () => {
               const p: any = props[k] || {};
               const typ = String(p?.type || 'string');
               const isRequired = required.includes(k);
-              const label = `${k}${isRequired ? '（必填）' : ''}`;
+              const label = `${k}${isRequired ? t('workflowTester.schema.required') : ''}`;
               const helper = String(p?.description || '');
               const enumVals: any[] | null = Array.isArray(p?.enum) ? p.enum : null;
 
@@ -510,7 +510,7 @@ const WorkflowTester: React.FC = () => {
                     label={label}
                     value={paramValues[k] ?? ''}
                     onChange={(e) => setParamValues((prev) => ({ ...prev, [k]: e.target.value }))}
-                    helperText={helper || '请选择'}
+                    helperText={helper || t('workflowTester.schema.select')}
                   >
                     {enumVals.map((v, idx) => (
                       <MenuItem key={idx} value={v}>
@@ -530,7 +530,7 @@ const WorkflowTester: React.FC = () => {
                   label={label}
                   value={paramValues[k] ?? ''}
                   onChange={(e) => setParamValues((prev) => ({ ...prev, [k]: e.target.value }))}
-                  helperText={helper || (isJson ? '输入 JSON' : '')}
+                  helperText={helper || (isJson ? t('workflowTester.schema.json') : '')}
                   multiline={isJson}
                   minRows={isJson ? 4 : undefined}
                   inputProps={typ === 'number' ? { inputMode: 'numeric' } : undefined}
@@ -543,7 +543,7 @@ const WorkflowTester: React.FC = () => {
       {ioSchema?.output_schema?.properties && (
         <Box sx={{ mt: 1 }}>
           <Typography variant="caption" color="text.secondary">
-            预期输出字段：{Object.keys(ioSchema.output_schema.properties || {}).join(', ') || '（未知）'}
+            {t('workflowTester.schema.expectedOutput', { fields: Object.keys(ioSchema.output_schema.properties || {}).join(', ') || '-' })}
           </Typography>
         </Box>
       )}
@@ -563,7 +563,7 @@ const WorkflowTester: React.FC = () => {
         <Stack direction="row" spacing={1}>
           {id && (
             <Button size="small" variant="outlined" startIcon={<HistoryIcon />} onClick={() => navigate(`/workflows/${id}/executions`)}>
-              历史
+              {t('workflowTester.actions.history')}
             </Button>
           )}
           <Button size="small" variant="outlined" startIcon={<StopIcon />} disabled={!running} onClick={() => { const c = cancelRef.current; if (c) { try { c(); } catch {} } }}>
@@ -656,7 +656,7 @@ const WorkflowTester: React.FC = () => {
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
           <Box sx={{ minWidth: 0 }}>
             <Typography variant="subtitle1" sx={{ fontWeight: 900 }} noWrap>
-              执行详情
+              {t('workflowTester.debug.detailTitle')}
             </Typography>
             {lastExecutionId && (
               <Typography variant="caption" color="text.secondary">
@@ -665,21 +665,21 @@ const WorkflowTester: React.FC = () => {
             )}
           </Box>
           <Button size="small" startIcon={<CopyIcon />} onClick={() => lastExecutionId && void copyText(lastExecutionId)}>
-            复制执行ID
+            {t('workflowTester.debug.copyExecutionId')}
           </Button>
         </DialogTitle>
         <DialogContent dividers>
           {detailLoading && (
-            <Alert severity="info">加载中…</Alert>
+            <Alert severity="info">{t('common.loading')}</Alert>
           )}
           {!detailLoading && !executionDetail && (
-            <Alert severity="warning">暂无详情（请先完成一次执行）</Alert>
+            <Alert severity="warning">{t('workflowTester.progress.empty')}</Alert>
           )}
           {!detailLoading && executionDetail && (
             <Stack spacing={2}>
               <Box>
                 <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
-                  最终输出
+                  {t('workflowTester.debug.finalOutput')}
                 </Typography>
                 <Paper variant="outlined" sx={{ p: 1.25, bgcolor: alpha(theme.palette.background.paper, 0.6) }}>
                   <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
@@ -690,7 +690,7 @@ const WorkflowTester: React.FC = () => {
 
               <Box>
                 <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
-                  步骤（点击查看 input/output）
+                  {t('workflowTester.debug.stepsClickable')}
                 </Typography>
                 <Stack spacing={1}>
                   {(executionDetail.steps || []).map((s: any) => {
@@ -723,7 +723,7 @@ const WorkflowTester: React.FC = () => {
                             }}
                             disabled={running}
                           >
-                            从此节点重试
+                            {t('workflowTester.debug.retryFromNode')}
                           </Button>
                         </Stack>
 
@@ -761,7 +761,7 @@ const WorkflowTester: React.FC = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDetailOpen(false)}>关闭</Button>
+          <Button onClick={() => setDetailOpen(false)}>{t('workflowTester.actions.close')}</Button>
         </DialogActions>
       </Dialog>
     </Box>

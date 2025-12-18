@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Box,
@@ -58,6 +59,7 @@ import { NODE_TEMPLATES } from '../components/workflow2/nodeTemplates';
 import type { WorkflowEdgeData, WorkflowNodeData, WorkflowNodeKind } from '../components/workflow2/types';
 import { WORKFLOW_NODE_TYPE, toBackendEdges, toBackendNodes, toReactFlowEdges, toReactFlowNodes } from '../components/workflow2/serde';
 import { resolvePublicApiBaseUrl } from '../utils/publicApi';
+import type { TFunction } from 'i18next';
 
 function genId(prefix: string) {
   try {
@@ -72,13 +74,12 @@ const nodeTypes = {
   [WORKFLOW_NODE_TYPE]: WorkflowNode,
 };
 
-const DEFAULT_WORKFLOW_NAME = '新工作流';
 const HEADER_EXPANDED_KEY = 'ragj_workflow_editor_header_expanded';
 const PALETTE_OPEN_KEY = 'ragj_workflow_editor_palette_open';
 const PALETTE_WIDTH_KEY = 'ragj_workflow_editor_palette_width';
 const PALETTE_SCALE_KEY = 'ragj_workflow_editor_palette_scale';
 
-function defaultGraph(): { nodes: Node<WorkflowNodeData>[]; edges: Edge<WorkflowEdgeData>[] } {
+function defaultGraph(t: TFunction): { nodes: Node<WorkflowNodeData>[]; edges: Edge<WorkflowEdgeData>[] } {
   const inputId = genId('n');
   const llmId = genId('n');
   const outputId = genId('n');
@@ -88,7 +89,7 @@ function defaultGraph(): { nodes: Node<WorkflowNodeData>[]; edges: Edge<Workflow
         id: inputId,
         type: WORKFLOW_NODE_TYPE,
         position: { x: 0, y: 80 },
-        data: { kind: 'input', name: '输入', description: '执行输入', config: {} },
+        data: { kind: 'input', name: t('workflow2.nodes.input.name'), description: t('workflow2.nodes.input.description'), config: {} },
       },
       {
         id: llmId,
@@ -96,8 +97,8 @@ function defaultGraph(): { nodes: Node<WorkflowNodeData>[]; edges: Edge<Workflow
         position: { x: 300, y: 80 },
         data: {
           kind: 'llm',
-          name: 'LLM',
-          description: '生成回复',
+          name: t('workflow2.nodes.llm.name'),
+          description: t('workflow2.nodes.llm.description'),
           config: { model: '', temperature: 0.7, max_tokens: 1000, system_prompt: '' },
         },
       },
@@ -105,7 +106,7 @@ function defaultGraph(): { nodes: Node<WorkflowNodeData>[]; edges: Edge<Workflow
         id: outputId,
         type: WORKFLOW_NODE_TYPE,
         position: { x: 600, y: 80 },
-        data: { kind: 'output', name: '输出', description: '格式化输出', config: { format: 'json', template: '' } },
+        data: { kind: 'output', name: t('workflow2.nodes.output.name'), description: t('workflow2.nodes.output.description'), config: { format: 'json', template: '' } },
       },
     ],
     edges: [
@@ -135,11 +136,12 @@ const WorkflowEditor: React.FC = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [rf, setRf] = useState<ReactFlowInstance | null>(null);
 
-  const [name, setName] = useState(DEFAULT_WORKFLOW_NAME);
+  const [name, setName] = useState(() => t('workflowEditor.defaultName'));
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(false);
 
@@ -262,13 +264,13 @@ const WorkflowEditor: React.FC = () => {
   );
 
   const resetToDefault = useCallback(() => {
-    const g = defaultGraph();
+    const g = defaultGraph(t);
     setNodes(g.nodes);
     setEdges(g.edges);
     setSelectedNodeId(null);
     setDirty(true);
     setValidation(null);
-  }, [setEdges, setNodes]);
+  }, [setEdges, setNodes, t]);
 
   useEffect(() => {
     try {
@@ -381,7 +383,7 @@ const WorkflowEditor: React.FC = () => {
       setValidation(null);
       setSelectedNodeId(null);
       if (!id) {
-        setName(DEFAULT_WORKFLOW_NAME);
+        setName(t('workflowEditor.defaultName'));
         setDescription('');
         setIsPublic(false);
         resetToDefault();
@@ -392,14 +394,14 @@ const WorkflowEditor: React.FC = () => {
       try {
         const res = await workflowApi.getDetail(id);
         const wf = res.data || {};
-        setName(wf.name || DEFAULT_WORKFLOW_NAME);
+        setName(wf.name || t('workflowEditor.defaultName'));
         setDescription(wf.description || '');
         setIsPublic(!!wf.is_public);
         setNodes(toReactFlowNodes(wf.nodes || []));
         setEdges(toReactFlowEdges(wf.edges || []));
         setDirty(false);
       } catch (e: any) {
-        setSnack({ type: 'error', message: e?.response?.data?.detail || '加载工作流失败' });
+        setSnack({ type: 'error', message: e?.response?.data?.detail || t('workflowEditor.messages.loadFailed') });
       } finally {
         setBusy(false);
       }
@@ -437,28 +439,28 @@ const WorkflowEditor: React.FC = () => {
 
   const serialize = useCallback(() => {
     return {
-      name: name || DEFAULT_WORKFLOW_NAME,
+      name: name || t('workflowEditor.defaultName'),
       description: description || '',
       nodes: toBackendNodes(nodes),
       edges: toBackendEdges(edges),
       global_config: {},
       is_public: !!isPublic,
     };
-  }, [description, edges, isPublic, name, nodes]);
+  }, [description, edges, isPublic, name, nodes, t]);
 
   const openSaveAsTemplate = useCallback(() => {
-    setTemplateName(name || DEFAULT_WORKFLOW_NAME);
+    setTemplateName(name || t('workflowEditor.defaultName'));
     setTemplateDescription(description || '');
     setTemplateCategory('custom');
     setTemplateTags('');
     setTemplateIsPublic(false);
     setTemplateDialogOpen(true);
-  }, [description, name]);
+  }, [description, name, t]);
 
   const saveAsTemplate = useCallback(async () => {
     const tname = (templateName || '').trim();
     if (!tname) {
-      setSnack({ type: 'error', message: '模板名称不能为空' });
+      setSnack({ type: 'error', message: t('workflowEditor.templates.nameRequired') });
       return;
     }
     setBusy(true);
@@ -478,13 +480,13 @@ const WorkflowEditor: React.FC = () => {
         is_public: !!templateIsPublic,
       });
       setTemplateDialogOpen(false);
-      setSnack({ type: 'success', message: '模板已保存' });
+      setSnack({ type: 'success', message: t('workflowEditor.templates.saved') });
     } catch (e: any) {
-      setSnack({ type: 'error', message: e?.response?.data?.detail || '保存模板失败' });
+      setSnack({ type: 'error', message: e?.response?.data?.detail || t('workflowEditor.templates.saveFailed') });
     } finally {
       setBusy(false);
     }
-  }, [serialize, templateCategory, templateDescription, templateIsPublic, templateName, templateTags]);
+  }, [serialize, t, templateCategory, templateDescription, templateIsPublic, templateName, templateTags]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -575,8 +577,8 @@ const WorkflowEditor: React.FC = () => {
         position: position || { x: 0, y: 0 },
         data: {
           kind,
-          name: tpl?.name || kind,
-          description: tpl?.description || '',
+          name: tpl ? t(tpl.nameKey) : kind,
+          description: tpl ? t(tpl.descriptionKey) : '',
           config: base,
         },
       };
@@ -585,7 +587,7 @@ const WorkflowEditor: React.FC = () => {
       setDirty(true);
       setValidation(null);
     },
-    [setNodes]
+    [setNodes, t]
   );
 
   const addAtCenter = useCallback(
@@ -702,8 +704,8 @@ const WorkflowEditor: React.FC = () => {
         position: { x, y: y + dy },
         data: {
           kind: 'code_executor',
-          name: which === 'true' ? 'TRUE 分支' : 'FALSE 分支',
-          description: '分支占位节点（可替换为任意节点）',
+          name: which === 'true' ? t('workflowEditor.branches.trueName') : t('workflowEditor.branches.falseName'),
+          description: t('workflowEditor.branches.placeholderDescription'),
           config: { language: 'python', code: 'result = input_data' },
         },
       });
@@ -731,7 +733,7 @@ const WorkflowEditor: React.FC = () => {
     if (!hasFalse) makeBranch('false', 120);
 
     if (newNodes.length === 0) {
-      setSnack({ type: 'info', message: '已存在 True/False 分支，无需重复生成' });
+      setSnack({ type: 'info', message: t('workflowEditor.branches.alreadyExists') });
       return;
     }
 
@@ -739,7 +741,7 @@ const WorkflowEditor: React.FC = () => {
     setEdges((es) => es.concat(newEdges));
     setDirty(true);
     setValidation(null);
-  }, [edges, nodes, selectedNodeId, setEdges, setNodes]);
+  }, [edges, nodes, selectedNodeId, setEdges, setNodes, t]);
 
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNodeId) return;
@@ -757,13 +759,16 @@ const WorkflowEditor: React.FC = () => {
       const payload = serialize();
       const res = await workflowApi.validate(payload as any);
       setValidation(res.data);
-      setSnack({ type: res.data?.is_valid ? 'success' : 'error', message: res.data?.is_valid ? '校验通过' : '校验失败' });
+      setSnack({
+        type: res.data?.is_valid ? 'success' : 'error',
+        message: res.data?.is_valid ? t('workflowEditor.validation.valid') : t('workflowEditor.validation.invalid'),
+      });
     } catch (e: any) {
-      setSnack({ type: 'error', message: e?.response?.data?.detail || '校验失败' });
+      setSnack({ type: 'error', message: e?.response?.data?.detail || t('workflowEditor.validation.failed') });
     } finally {
       setBusy(false);
     }
-  }, [serialize]);
+  }, [serialize, t]);
 
   const save = useCallback(async () => {
     setBusy(true);
@@ -772,24 +777,24 @@ const WorkflowEditor: React.FC = () => {
       if (id) {
         await workflowApi.update(id, payload as any);
         setDirty(false);
-        setSnack({ type: 'success', message: '已保存' });
+        setSnack({ type: 'success', message: t('workflowEditor.messages.saved') });
       } else {
         const res = await workflowApi.create(payload as any);
         const newId = res.data?.id;
         if (newId) {
           setDirty(false);
           navigate(`/workflows/${newId}/edit`, { replace: true });
-          setSnack({ type: 'success', message: '已创建并保存' });
+          setSnack({ type: 'success', message: t('workflowEditor.messages.createdAndSaved') });
         } else {
-          setSnack({ type: 'success', message: '已创建' });
+          setSnack({ type: 'success', message: t('workflowEditor.messages.created') });
         }
       }
     } catch (e: any) {
-      setSnack({ type: 'error', message: e?.response?.data?.detail || '保存失败' });
+      setSnack({ type: 'error', message: e?.response?.data?.detail || t('workflowEditor.messages.saveFailed') });
     } finally {
       setBusy(false);
     }
-  }, [id, navigate, serialize]);
+  }, [id, navigate, serialize, t]);
 
   const saveAndEnterTest = useCallback(async () => {
     setBusy(true);
@@ -803,18 +808,18 @@ const WorkflowEditor: React.FC = () => {
         workflowId = res.data?.id || null;
       }
       if (!workflowId) {
-        setSnack({ type: 'error', message: '保存失败：未获取到工作流 ID' });
+        setSnack({ type: 'error', message: t('workflowEditor.messages.saveMissingId') });
         return;
       }
       setDirty(false);
-      setSnack({ type: 'success', message: '已保存，进入测试' });
+      setSnack({ type: 'success', message: t('workflowEditor.messages.savedEnterTest') });
       navigate(`/workflows/${workflowId}/test`);
     } catch (e: any) {
-      setSnack({ type: 'error', message: e?.response?.data?.detail || '保存失败，无法进入测试' });
+      setSnack({ type: 'error', message: e?.response?.data?.detail || t('workflowEditor.messages.saveEnterTestFailed') });
     } finally {
       setBusy(false);
     }
-  }, [id, navigate, serialize]);
+  }, [id, navigate, serialize, t]);
 
   const goTest = useCallback(async () => {
     // Fast path: saved workflow without changes -> enter immediately.
@@ -1036,8 +1041,12 @@ const WorkflowEditor: React.FC = () => {
       <Paper variant="outlined" sx={{ p: 1.25, flexShrink: 0 }}>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.25} alignItems={{ md: 'center' }}>
           <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: 1, minWidth: 0 }}>
-            <Tooltip title={headerExpanded ? '收起工作流设置' : '展开工作流设置'}>
-              <IconButton size="small" onClick={toggleHeader} aria-label="切换工作流设置展开">
+            <Tooltip title={headerExpanded ? t('workflowEditor.header.collapse') : t('workflowEditor.header.expand')}>
+              <IconButton
+                size="small"
+                onClick={toggleHeader}
+                aria-label={headerExpanded ? t('workflowEditor.header.collapse') : t('workflowEditor.header.expand')}
+              >
                 <ExpandMoreIcon
                   fontSize="small"
                   sx={{
@@ -1048,11 +1057,11 @@ const WorkflowEditor: React.FC = () => {
               </IconButton>
             </Tooltip>
             <Typography variant="subtitle1" sx={{ fontWeight: 900, whiteSpace: 'nowrap' }}>
-              工作流
+              {t('workflowEditor.title')}
             </Typography>
             <TextField
               size="small"
-              label="名称"
+              label={t('workflowEditor.fields.name')}
               value={name}
               onChange={(e) => {
                 setName(e.target.value);
@@ -1070,7 +1079,7 @@ const WorkflowEditor: React.FC = () => {
               disabled={busy}
               size="small"
             >
-              重置画布
+              {t('workflowEditor.actions.resetCanvas')}
             </Button>
             <Button
               variant="outlined"
@@ -1078,7 +1087,7 @@ const WorkflowEditor: React.FC = () => {
               disabled={busy}
               size="small"
             >
-              自动布局
+              {t('workflowEditor.actions.autoLayout')}
             </Button>
             <Button
               variant="outlined"
@@ -1087,7 +1096,7 @@ const WorkflowEditor: React.FC = () => {
               disabled={busy}
               size="small"
             >
-              校验
+              {t('workflowEditor.actions.validate')}
             </Button>
             <Button
               variant="contained"
@@ -1096,7 +1105,7 @@ const WorkflowEditor: React.FC = () => {
               disabled={busy}
               size="small"
             >
-              保存
+              {t('workflowEditor.actions.save')}
             </Button>
             <Button
               variant="outlined"
@@ -1105,7 +1114,7 @@ const WorkflowEditor: React.FC = () => {
               disabled={busy}
               size="small"
             >
-              测试
+              {t('workflowEditor.actions.test')}
             </Button>
             {!!id && (
               <Button
@@ -1115,7 +1124,7 @@ const WorkflowEditor: React.FC = () => {
                 disabled={busy}
                 size="small"
               >
-                API
+                {t('workflowEditor.actions.api')}
               </Button>
             )}
             <Button
@@ -1125,7 +1134,7 @@ const WorkflowEditor: React.FC = () => {
               disabled={busy}
               size="small"
             >
-              保存为模板
+              {t('workflowEditor.actions.saveAsTemplate')}
             </Button>
           </Stack>
         </Stack>
@@ -1135,7 +1144,7 @@ const WorkflowEditor: React.FC = () => {
             <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
               <TextField
                 size="small"
-                label="描述"
+                label={t('workflowEditor.fields.description')}
                 value={description}
                 onChange={(e) => {
                   setDescription(e.target.value);
@@ -1156,7 +1165,7 @@ const WorkflowEditor: React.FC = () => {
                       size="small"
                     />
                   }
-                  label={isPublic ? '公开给团队' : '仅自己可见'}
+                  label={isPublic ? t('workflowEditor.visibility.team') : t('workflowEditor.visibility.private')}
                 />
               </Box>
             </Stack>
@@ -1164,7 +1173,7 @@ const WorkflowEditor: React.FC = () => {
             {validation && (
               <Box sx={{ mt: 1.25 }}>
                 <Alert severity={validation.is_valid ? 'success' : 'error'}>
-                  {validation.is_valid ? '校验通过' : '校验失败'}
+                  {validation.is_valid ? t('workflowEditor.validation.valid') : t('workflowEditor.validation.invalid')}
                   {!!validation.errors?.length && (
                     <Box component="ul" sx={{ m: 0.5, pl: 2 }}>
                       {validation.errors.slice(0, 5).map((x, i) => (
@@ -1276,20 +1285,20 @@ const WorkflowEditor: React.FC = () => {
               >
                 <Stack direction="row" spacing={0.5} alignItems="center" sx={{ px: 1, py: 0.75 }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 900, flex: 1 }}>
-                    节点库
+                    {t('workflow2.palette.title')}
                   </Typography>
-                  <Tooltip title="缩小">
+                  <Tooltip title={t('workflowEditor.palette.zoomOut')}>
                     <IconButton size="small" onClick={() => bumpPaletteScale(-0.05)}>
                       <ZoomOutIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="放大">
+                  <Tooltip title={t('workflowEditor.palette.zoomIn')}>
                     <IconButton size="small" onClick={() => bumpPaletteScale(0.05)}>
                       <ZoomInIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="折叠">
-                    <IconButton size="small" onClick={togglePalette} aria-label="折叠节点库">
+                  <Tooltip title={t('workflowEditor.palette.collapse')}>
+                    <IconButton size="small" onClick={togglePalette} aria-label={t('workflowEditor.palette.collapse')}>
                       <CloseIcon fontSize="small" />
                     </IconButton>
                   </Tooltip>
@@ -1330,7 +1339,7 @@ const WorkflowEditor: React.FC = () => {
                 />
               </Paper>
             ) : (
-              <Tooltip title="打开节点库">
+              <Tooltip title={t('workflowEditor.palette.open')}>
                 <IconButton
                   size="small"
                   onClick={togglePalette}
@@ -1341,7 +1350,7 @@ const WorkflowEditor: React.FC = () => {
                     borderColor: 'divider',
                     '&:hover': { bgcolor: 'background.paper' },
                   }}
-                  aria-label="打开节点库"
+                  aria-label={t('workflowEditor.palette.open')}
                 >
                   <ViewModuleIcon fontSize="small" />
                 </IconButton>
@@ -1359,9 +1368,9 @@ const WorkflowEditor: React.FC = () => {
               zIndex: 10,
             }}
           >
-            {NODE_TEMPLATES.slice(0, 6).map((t) => (
-              <Button key={t.kind} size="small" variant="outlined" onClick={() => addAtCenter(t.kind)}>
-                + {t.name}
+            {NODE_TEMPLATES.slice(0, 6).map((tpl) => (
+              <Button key={tpl.kind} size="small" variant="outlined" onClick={() => addAtCenter(tpl.kind)}>
+                + {t(tpl.nameKey)}
               </Button>
             ))}
           </Box>
@@ -1379,37 +1388,37 @@ const WorkflowEditor: React.FC = () => {
             >
               <Paper variant="outlined" sx={{ p: 1, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
                 <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-                  已选 {selectedNodeIds.length}
+                  {t('workflowEditor.selection.selectedCount', { count: selectedNodeIds.length })}
                 </Typography>
                 <Button size="small" variant="outlined" onClick={() => alignSelection('left')}>
-                  左对齐
+                  {t('workflowEditor.selection.align.left')}
                 </Button>
                 <Button size="small" variant="outlined" onClick={() => alignSelection('hcenter')}>
-                  水平居中
+                  {t('workflowEditor.selection.align.hcenter')}
                 </Button>
                 <Button size="small" variant="outlined" onClick={() => alignSelection('right')}>
-                  右对齐
+                  {t('workflowEditor.selection.align.right')}
                 </Button>
                 <Button size="small" variant="outlined" onClick={() => alignSelection('top')}>
-                  顶对齐
+                  {t('workflowEditor.selection.align.top')}
                 </Button>
                 <Button size="small" variant="outlined" onClick={() => alignSelection('vcenter')}>
-                  垂直居中
+                  {t('workflowEditor.selection.align.vcenter')}
                 </Button>
                 <Button size="small" variant="outlined" onClick={() => alignSelection('bottom')}>
-                  底对齐
+                  {t('workflowEditor.selection.align.bottom')}
                 </Button>
                 <Button size="small" variant="outlined" onClick={() => distributeSelection('x')}>
-                  水平分布
+                  {t('workflowEditor.selection.distribute.x')}
                 </Button>
                 <Button size="small" variant="outlined" onClick={() => distributeSelection('y')}>
-                  垂直分布
+                  {t('workflowEditor.selection.distribute.y')}
                 </Button>
                 <Button size="small" variant="outlined" onClick={autoLayout}>
-                  自动布局
+                  {t('workflowEditor.actions.autoLayout')}
                 </Button>
                 <Button size="small" color="error" variant="outlined" onClick={deleteSelection}>
-                  删除
+                  {t('common.delete')}
                 </Button>
               </Paper>
             </Box>
@@ -1441,7 +1450,7 @@ const WorkflowEditor: React.FC = () => {
                     borderColor: 'divider',
                     '&:hover': { bgcolor: 'background.paper' },
                   }}
-                  aria-label="关闭属性面板"
+                  aria-label={t('workflowEditor.inspector.close')}
                 >
                   <CloseIcon fontSize="small" />
                 </IconButton>
@@ -1519,10 +1528,10 @@ const WorkflowEditor: React.FC = () => {
       />
 
       <Dialog open={testConfirmOpen} onClose={() => setTestConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>进入测试</DialogTitle>
+        <DialogTitle>{t('workflowEditor.confirmTest.title')}</DialogTitle>
         <DialogContent sx={{ pt: 1 }}>
           <Typography variant="body2" color="text.secondary">
-            检测到未保存更改。直接进入测试会使用上次保存的版本；也可以先保存再进入。
+            {t('workflowEditor.confirmTest.body')}
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -1533,7 +1542,7 @@ const WorkflowEditor: React.FC = () => {
             }}
             disabled={busy}
           >
-            直接进入
+            {t('workflowEditor.confirmTest.enterDirectly')}
           </Button>
           <Button
             variant="contained"
@@ -1543,13 +1552,13 @@ const WorkflowEditor: React.FC = () => {
             }}
             disabled={busy}
           >
-            保存并进入
+            {t('workflowEditor.confirmTest.saveAndEnter')}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={apiDialogOpen} onClose={() => setApiDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Workflow API</DialogTitle>
+        <DialogTitle>{t('workflowEditor.apiDialog.title')}</DialogTitle>
         <DialogContent sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
             <Button
@@ -1563,13 +1572,13 @@ const WorkflowEditor: React.FC = () => {
                 const cmd = `curl -sS -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: YOUR_KEY" \\\n  -d '{"input_data":{"text":"hello"}}'`;
                 try {
                   await navigator.clipboard.writeText(cmd);
-                  setSnack({ type: 'success', message: '已复制 curl（run）' });
+                  setSnack({ type: 'success', message: t('workflowEditor.apiDialog.copiedRun') });
                 } catch {
-                  setSnack({ type: 'error', message: '复制失败' });
+                  setSnack({ type: 'error', message: t('workflowEditor.apiDialog.copyFailed') });
                 }
               }}
             >
-              复制 curl（run）
+              {t('workflowEditor.apiDialog.copyRunCurl')}
             </Button>
             <Button
               size="small"
@@ -1582,13 +1591,13 @@ const WorkflowEditor: React.FC = () => {
                 const cmd = `curl -N -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: YOUR_KEY" \\\n  -d '{"input_data":{"text":"hello"},"debug":false}'`;
                 try {
                   await navigator.clipboard.writeText(cmd);
-                  setSnack({ type: 'success', message: '已复制 curl（stream）' });
+                  setSnack({ type: 'success', message: t('workflowEditor.apiDialog.copiedStream') });
                 } catch {
-                  setSnack({ type: 'error', message: '复制失败' });
+                  setSnack({ type: 'error', message: t('workflowEditor.apiDialog.copyFailed') });
                 }
               }}
             >
-              复制 curl（stream）
+              {t('workflowEditor.apiDialog.copyStreamCurl')}
             </Button>
             <Button
               size="small"
@@ -1601,18 +1610,17 @@ const WorkflowEditor: React.FC = () => {
                 const cmd = `curl -sS -X GET "${url}" -H "x-api-key: YOUR_KEY"`;
                 try {
                   await navigator.clipboard.writeText(cmd);
-                  setSnack({ type: 'success', message: '已复制 curl（io-schema）' });
+                  setSnack({ type: 'success', message: t('workflowEditor.apiDialog.copiedSchema') });
                 } catch {
-                  setSnack({ type: 'error', message: '复制失败' });
+                  setSnack({ type: 'error', message: t('workflowEditor.apiDialog.copyFailed') });
                 }
               }}
             >
-              复制 curl（io-schema）
+              {t('workflowEditor.apiDialog.copySchemaCurl')}
             </Button>
           </Stack>
           <Typography variant="body2" color="text.secondary">
-            对外调用使用 Public API（需要请求头 <Box component="span" sx={{ fontFamily: 'monospace' }}>x-api-key</Box>）。
-            API Key 在“设置 → API Keys”里创建。
+            {t('workflowEditor.apiDialog.desc')}
           </Typography>
           <Box component="pre" sx={{ m: 0, p: 1, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
 {`${publicApiBaseUrl ? `POST ${publicApiBaseUrl}/api/v1/public/workflows/${id || '<workflow_id>'}/run\n` : ''}POST /api/v1/public/workflows/${id || '<workflow_id>'}/run
@@ -1621,30 +1629,30 @@ ${publicApiBaseUrl ? `GET  ${publicApiBaseUrl}/api/v1/public/workflows/${id || '
           </Box>
           {!!publicApiBaseUrl && (
             <Typography variant="caption" color="text.secondary">
-              当前展示的完整 URL 来自 <Box component="span" sx={{ fontFamily: 'monospace' }}>VITE_PUBLIC_API_BASE_URL</Box> / <Box component="span" sx={{ fontFamily: 'monospace' }}>VITE_BACKEND_URL</Box> 或浏览器地址栏。
+              {t('workflowEditor.apiDialog.baseHint')}
             </Typography>
           )}
           <Typography variant="caption" color="text.secondary">
-            跨租户运行：Workflow 需设为公开，并且 API Key 需要绑定 <Box component="span" sx={{ fontFamily: 'monospace' }}>allowed_workflow_id</Box>。
+            {t('workflowEditor.apiDialog.crossTenantHint')}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setApiDialogOpen(false)}>关闭</Button>
+          <Button onClick={() => setApiDialogOpen(false)}>{t('workflowEditor.apiDialog.close')}</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={templateDialogOpen} onClose={() => setTemplateDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>保存为模板</DialogTitle>
+        <DialogTitle>{t('workflowEditor.templates.dialogTitle')}</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: 1 }}>
           <TextField
-            label="模板名称"
+            label={t('workflowEditor.templates.fields.name')}
             value={templateName}
             onChange={(e) => setTemplateName(e.target.value)}
             fullWidth
             size="small"
           />
           <TextField
-            label="模板描述"
+            label={t('workflowEditor.templates.fields.description')}
             value={templateDescription}
             onChange={(e) => setTemplateDescription(e.target.value)}
             fullWidth
@@ -1653,20 +1661,20 @@ ${publicApiBaseUrl ? `GET  ${publicApiBaseUrl}/api/v1/public/workflows/${id || '
             minRows={2}
           />
           <TextField
-            label="分类（可选）"
+            label={t('workflowEditor.templates.fields.categoryOptional')}
             value={templateCategory}
             onChange={(e) => setTemplateCategory(e.target.value)}
             fullWidth
             size="small"
-            helperText="例如 customer_service / document_processing / ai_assistant / data_analysis / custom"
+            helperText={t('workflowEditor.templates.fields.categoryHint')}
           />
           <TextField
-            label="标签（逗号分隔，可选）"
+            label={t('workflowEditor.templates.fields.tagsOptional')}
             value={templateTags}
             onChange={(e) => setTemplateTags(e.target.value)}
             fullWidth
             size="small"
-            placeholder="RAG, 客服, 数据分析"
+            placeholder={t('workflowEditor.templates.fields.tagsPlaceholder')}
           />
           <FormControlLabel
             control={
@@ -1676,15 +1684,15 @@ ${publicApiBaseUrl ? `GET  ${publicApiBaseUrl}/api/v1/public/workflows/${id || '
                 size="small"
               />
             }
-            label={templateIsPublic ? '公开给团队' : '仅自己可见'}
+            label={templateIsPublic ? t('workflowEditor.visibility.team') : t('workflowEditor.visibility.private')}
           />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setTemplateDialogOpen(false)} disabled={busy}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button onClick={saveAsTemplate} variant="contained" disabled={busy}>
-            保存
+            {t('common.save')}
           </Button>
         </DialogActions>
       </Dialog>

@@ -3,6 +3,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Box,
   Paper,
@@ -69,6 +70,7 @@ interface SystemStats {
 }
 
 const TenantManagement: React.FC = () => {
+  const { t } = useTranslation();
   const [tenants, setTenants] = useState<TenantInfo[]>([]);
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -260,7 +262,7 @@ const TenantManagement: React.FC = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
-        租户管理
+        {t('tenantManagement.title')}
       </Typography>
 
       {error && (
@@ -275,9 +277,9 @@ const TenantManagement: React.FC = () => {
           <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  总租户数
-                </Typography>
+                  <Typography color="textSecondary" gutterBottom>
+                  {t('tenantManagement.stats.totalTenants')}
+                  </Typography>
                 <Typography variant="h5" component="div">
                   {stats.total_tenants}
                 </Typography>
@@ -287,9 +289,9 @@ const TenantManagement: React.FC = () => {
           <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  活跃租户
-                </Typography>
+                  <Typography color="textSecondary" gutterBottom>
+                  {t('tenantManagement.stats.activeTenants')}
+                  </Typography>
                 <Typography variant="h5" component="div">
                   {stats.active_tenants}
                 </Typography>
@@ -299,9 +301,9 @@ const TenantManagement: React.FC = () => {
           <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  总用户数
-                </Typography>
+                  <Typography color="textSecondary" gutterBottom>
+                  {t('tenantManagement.stats.totalUsers')}
+                  </Typography>
                 <Typography variant="h5" component="div">
                   {stats.total_users}
                 </Typography>
@@ -311,9 +313,9 @@ const TenantManagement: React.FC = () => {
           <Grid size={{ xs: 12, sm: 6, md: 3 }}>
             <Card>
               <CardContent>
-                <Typography color="textSecondary" gutterBottom>
-                  总文档
-                </Typography>
+                  <Typography color="textSecondary" gutterBottom>
+                  {t('tenantManagement.stats.totalDocuments')}
+                  </Typography>
                 <Typography variant="h5" component="div">
                   {stats.total_documents}
                 </Typography>
@@ -342,25 +344,25 @@ const TenantManagement: React.FC = () => {
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid size={{ xs: 12, md: 6 }}>
-            <TextField
-              fullWidth
-              label="搜索租户"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="租户名称或标识"
-            />
+              <TextField
+                fullWidth
+                label={t('tenantManagement.filters.searchLabel')}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={t('tenantManagement.filters.searchPlaceholder')}
+              />
           </Grid>
           <Grid size={{ xs: 12, md: 3 }}>
             <FormControl fullWidth>
-              <InputLabel>状态</InputLabel>
+              <InputLabel>{t('tenantManagement.filters.statusLabel')}</InputLabel>
               <Select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value)}
-                label="状态"
+                label={t('tenantManagement.filters.statusLabel')}
               >
-                <MenuItem value="">全部</MenuItem>
-                <MenuItem value="true">活跃</MenuItem>
-                <MenuItem value="false">禁用</MenuItem>
+                <MenuItem value="">{t('tenantManagement.filters.statusAll')}</MenuItem>
+                <MenuItem value="true">{t('tenantManagement.status.active')}</MenuItem>
+                <MenuItem value="false">{t('tenantManagement.status.disabled')}</MenuItem>
               </Select>
             </FormControl>
           </Grid>
@@ -371,7 +373,7 @@ const TenantManagement: React.FC = () => {
               startIcon={<AddIcon />}
               onClick={handleCreateTenant}
             >
-              添加租户
+              {t('tenantManagement.actions.addTenant')}
             </Button>
           </Grid>
         </Grid>
@@ -382,14 +384,14 @@ const TenantManagement: React.FC = () => {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>租户名称</TableCell>
-              <TableCell>标识</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell>用户使用率</TableCell>
-              <TableCell>知识库使用率</TableCell>
-              <TableCell>存储使用率</TableCell>
-              <TableCell>创建时间</TableCell>
-              <TableCell>操作</TableCell>
+              <TableCell>{t('tenantManagement.table.name')}</TableCell>
+              <TableCell>{t('tenantManagement.table.slug')}</TableCell>
+              <TableCell>{t('tenantManagement.table.status')}</TableCell>
+              <TableCell>{t('tenantManagement.table.userUsage')}</TableCell>
+              <TableCell>{t('tenantManagement.table.kbUsage')}</TableCell>
+              <TableCell>{t('tenantManagement.table.storageUsage')}</TableCell>
+              <TableCell>{t('tenantManagement.table.createdAt')}</TableCell>
+              <TableCell>{t('tenantManagement.table.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -410,7 +412,7 @@ const TenantManagement: React.FC = () => {
                 <TableCell>{tenant.slug}</TableCell>
                 <TableCell>
                   <Chip
-                    label={tenant.is_active ? '活跃' : '禁用'}
+                    label={tenant.is_active ? t('tenantManagement.status.active') : t('tenantManagement.status.disabled')}
                     color={tenant.is_active ? 'success' : 'default'}
                     size="small"
                   />
@@ -501,14 +503,14 @@ const TenantManagement: React.FC = () => {
         fullWidth
       >
         <DialogTitle>
-          {selectedTenant ? '编辑租户' : '创建租户'}
+          {selectedTenant ? t('tenantManagement.dialog.editTitle') : t('tenantManagement.dialog.createTitle')}
         </DialogTitle>
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 1 }}>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
-                label="租户名称"
+                label={t('tenantManagement.fields.name')}
                 value={tenantForm.name}
                 onChange={(e) => setTenantForm({ ...tenantForm, name: e.target.value })}
               />
@@ -516,7 +518,7 @@ const TenantManagement: React.FC = () => {
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField
                 fullWidth
-                label="租户标识"
+                label={t('tenantManagement.fields.slug')}
                 value={tenantForm.slug}
                 onChange={(e) => setTenantForm({ ...tenantForm, slug: e.target.value })}
                 disabled={!!selectedTenant} // 编辑时不允许修改slug
@@ -525,7 +527,7 @@ const TenantManagement: React.FC = () => {
             <Grid size={12}>
               <TextField
                 fullWidth
-                label="描述"
+                label={t('tenantManagement.fields.description')}
                 multiline
                 rows={3}
                 value={tenantForm.description}
@@ -535,7 +537,7 @@ const TenantManagement: React.FC = () => {
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
                 fullWidth
-                label="最大用户数"
+                label={t('tenantManagement.fields.maxUsers')}
                 type="number"
                 value={tenantForm.max_users}
                 onChange={(e) => setTenantForm({ ...tenantForm, max_users: parseInt(e.target.value) })}
@@ -544,7 +546,7 @@ const TenantManagement: React.FC = () => {
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
                 fullWidth
-                label="最大知识库数"
+                label={t('tenantManagement.fields.maxKnowledgeBases')}
                 type="number"
                 value={tenantForm.max_knowledge_bases}
                 onChange={(e) => setTenantForm({ ...tenantForm, max_knowledge_bases: parseInt(e.target.value) })}
@@ -553,7 +555,7 @@ const TenantManagement: React.FC = () => {
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField
                 fullWidth
-                label="存储配额 (MB)"
+                label={t('tenantManagement.fields.storageQuotaMb')}
                 type="number"
                 value={tenantForm.storage_quota_mb}
                 onChange={(e) => setTenantForm({ ...tenantForm, storage_quota_mb: parseInt(e.target.value) })}
@@ -567,7 +569,7 @@ const TenantManagement: React.FC = () => {
                     onChange={(e) => setTenantForm({ ...tenantForm, is_active: e.target.checked })}
                   />
                 }
-                label="活跃状态"
+                label={t('tenantManagement.fields.activeStatus')}
               />
             </Grid>
           </Grid>
@@ -577,26 +579,26 @@ const TenantManagement: React.FC = () => {
             setEditDialogOpen(false);
             setCreateDialogOpen(false);
           }}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button onClick={handleSaveTenant} variant="contained">
-            {selectedTenant ? '更新' : '创建'}
+            {selectedTenant ? t('tenantManagement.actions.update') : t('common.create')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* 删除确认对话框 */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>确认删除</DialogTitle>
+        <DialogTitle>{t('tenantManagement.delete.title')}</DialogTitle>
         <DialogContent>
           <Typography>
-            确定要删除租户 "{selectedTenant?.name}" 吗？此操作将删除该租户下的所有用户和数据，且无法撤销。
+            {t('tenantManagement.delete.body', { name: selectedTenant?.name || '' })}
           </Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>取消</Button>
+          <Button onClick={() => setDeleteDialogOpen(false)}>{t('common.cancel')}</Button>
           <Button onClick={handleConfirmDelete} color="error" variant="contained">
-            删除
+            {t('common.delete')}
           </Button>
         </DialogActions>
       </Dialog>

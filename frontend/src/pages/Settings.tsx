@@ -85,7 +85,7 @@ const Settings: React.FC = () => {
   return (
     <Box>
       <Typography variant="h4" sx={{ fontWeight: 'bold', mb: 3 }}>
-        {t('settings.title')}
+        {t('nav.settings')}
       </Typography>
       
       <Paper sx={{ mb: 2 }}>
@@ -110,7 +110,7 @@ const Settings: React.FC = () => {
           <Tab
             icon={<ModelIcon />}
             iconPosition="start"
-            label="模型配置"
+            label={t('settings.tabs.modelConfig')}
             id="settings-tab-1"
             aria-controls="settings-tabpanel-1"
           />
@@ -120,7 +120,7 @@ const Settings: React.FC = () => {
               <Tab
                 icon={<KeyIcon />}
                 iconPosition="start"
-                label="API Keys"
+                label={t('settings.tabs.apiKeys')}
                 id="settings-tab-2"
                 aria-controls="settings-tabpanel-2"
               />

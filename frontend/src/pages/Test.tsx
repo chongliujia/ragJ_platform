@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Typography,
   Box,
@@ -19,6 +20,7 @@ import {
 import { systemApi, knowledgeBaseApi, chatApi } from '../services/api';
 
 const Test: React.FC = () => {
+  const { t } = useTranslation();
   const [results, setResults] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [testKbName, setTestKbName] = useState('test_kb_' + Date.now());
@@ -82,7 +84,7 @@ const Test: React.FC = () => {
     try {
       const response = await knowledgeBaseApi.create({
         name: testKbName,
-        description: '测试知识库 - 可以删除'
+        description: t('testPage.sampleKnowledgeBaseDescription')
       });
       setResult('createKb', { status: 'success', data: response.data });
       // 自动刷新知识库列表
@@ -108,14 +110,14 @@ const Test: React.FC = () => {
       if (!kbList || kbList.length === 0) {
         setResult('chat', { 
           status: 'error', 
-          error: '没有可用的知识库。请先创建一个知识库再测试聊天功能。' 
+          error: t('testPage.errors.noKnowledgeBases') 
         });
         return;
       }
 
       const firstKb = kbList[0];
       const response = await chatApi.sendMessage({
-        message: '你好，这是一个测试消息',
+        message: t('testPage.sampleMessage'),
         knowledge_base_id: firstKb.name || firstKb.id
       });
       setResult('chat', { status: 'success', data: response.data });
@@ -148,7 +150,7 @@ const Test: React.FC = () => {
         {isLoading ? (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <CircularProgress size={20} />
-            <Typography variant="body2">测试中...</Typography>
+            <Typography variant="body2">{t('testPage.status.testing')}</Typography>
           </Box>
         ) : result ? (
           <Alert 
@@ -157,14 +159,14 @@ const Test: React.FC = () => {
           >
             {result.status === 'success' ? (
               <Typography component="div" variant="body2">
-                <strong>成功:</strong><br />
+                <strong>{t('testPage.status.success')}:</strong><br />
                 <pre style={{ margin: 0, fontSize: '12px' }}>
                   {JSON.stringify(result.data, null, 2)}
                 </pre>
               </Typography>
             ) : (
               <Typography component="div" variant="body2">
-                <strong>错误:</strong><br />
+                <strong>{t('testPage.status.error')}:</strong><br />
                 <pre style={{ margin: 0, fontSize: '12px' }}>
                   {JSON.stringify(result.error, null, 2)}
                 </pre>
@@ -173,7 +175,7 @@ const Test: React.FC = () => {
           </Alert>
         ) : (
           <Typography variant="body2" color="text.secondary">
-            未测试
+            {t('testPage.status.notRun')}
           </Typography>
         )}
       </Box>
@@ -183,13 +185,13 @@ const Test: React.FC = () => {
   return (
     <Box>
       <Typography variant="h4" sx={{ fontWeight: 'bold', mb: 3 }}>
-        前后端连接测试
+        {t('testPage.title')}
       </Typography>
 
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            快速测试
+            {t('testPage.sections.quick')}
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 2 }}>
             <Button
@@ -198,7 +200,7 @@ const Test: React.FC = () => {
               onClick={testHealthCheck}
               disabled={loading.health}
             >
-              健康检查
+              {t('testPage.tests.health')}
             </Button>
             <Button
               variant="contained"
@@ -206,7 +208,7 @@ const Test: React.FC = () => {
               onClick={testSystemInfo}
               disabled={loading.info}
             >
-              系统信息
+              {t('testPage.tests.info')}
             </Button>
             <Button
               variant="contained"
@@ -214,29 +216,29 @@ const Test: React.FC = () => {
               onClick={testKnowledgeBases}
               disabled={loading.kbs}
             >
-              知识库列表
+              {t('testPage.tests.knowledgeBases')}
             </Button>
             <Button
               variant="outlined"
               onClick={runAllTests}
               disabled={Object.values(loading).some(Boolean)}
             >
-              运行所有基础测试
+              {t('testPage.actions.runAll')}
             </Button>
           </Box>
 
           <Divider sx={{ my: 2 }} />
 
           <Typography variant="h6" sx={{ mb: 2 }}>
-            创建测试
+            {t('testPage.sections.create')}
           </Typography>
           <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2 }}>
             <TextField
-              label="测试知识库名称"
+              label={t('testPage.fields.testKnowledgeBaseName')}
               value={testKbName}
               onChange={(e) => setTestKbName(e.target.value)}
               size="small"
-              helperText="只能包含字母、数字和下划线"
+              helperText={t('testPage.fields.testKnowledgeBaseNameHint')}
               error={Boolean(testKbName) && !/^[a-zA-Z0-9_]+$/.test(testKbName)}
             />
             <Button
@@ -245,7 +247,7 @@ const Test: React.FC = () => {
               onClick={testCreateKnowledgeBase}
               disabled={loading.createKb || !testKbName.trim() || !/^[a-zA-Z0-9_]+$/.test(testKbName)}
             >
-              创建测试知识库
+              {t('testPage.actions.createTestKnowledgeBase')}
             </Button>
           </Box>
 
@@ -256,7 +258,7 @@ const Test: React.FC = () => {
               onClick={testChat}
               disabled={loading.chat}
             >
-              测试聊天
+              {t('testPage.actions.testChat')}
             </Button>
           </Box>
         </CardContent>
@@ -265,14 +267,14 @@ const Test: React.FC = () => {
       <Card>
         <CardContent>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            测试结果
+            {t('testPage.sections.results')}
           </Typography>
           
-          {renderResult('health', '健康检查')}
-          {renderResult('info', '系统信息')}
-          {renderResult('kbs', '知识库列表')}
-          {renderResult('createKb', '创建知识库')}
-          {renderResult('chat', '聊天测试')}
+          {renderResult('health', t('testPage.tests.health'))}
+          {renderResult('info', t('testPage.tests.info'))}
+          {renderResult('kbs', t('testPage.tests.knowledgeBases'))}
+          {renderResult('createKb', t('testPage.tests.createKnowledgeBase'))}
+          {renderResult('chat', t('testPage.tests.chat'))}
         </CardContent>
       </Card>
     </Box>

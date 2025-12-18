@@ -16,6 +16,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import type { Edge, Node } from 'reactflow';
 import type { WorkflowEdgeData, WorkflowNodeData, WorkflowNodeKind } from './types';
 import { NODE_SCHEMAS, type NodeFieldSchema } from './nodeSchemas';
@@ -104,6 +105,7 @@ export default function DifyNodeInspector({
   allNodes,
   allEdges,
 }: Props) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<'settings' | 'last_run'>('settings');
   const cfg = node?.data.config || {};
   const kind = node?.data.kind;
@@ -157,9 +159,9 @@ export default function DifyNodeInspector({
   }, [allNodes, incomingEdges, kind, node]);
 
   const title = useMemo(() => {
-    if (!node) return '属性面板';
-    return node.data.name || '未命名节点';
-  }, [node]);
+    if (!node) return t('workflow2.inspector.title');
+    return node.data.name || t('workflow2.node.unnamed');
+  }, [node, t]);
 
   const updateConfig = (key: string, value: any) => {
     if (!node) return;
@@ -184,19 +186,22 @@ export default function DifyNodeInspector({
 
   const renderField = (f: NodeFieldSchema) => {
     const val = (cfg as any)?.[f.key];
+    const fieldLabel = f.labelKey ? t(f.labelKey) : f.label;
+    const helperText = f.helperTextKey ? t(f.helperTextKey) : f.helperText;
+    const placeholder = f.placeholderKey ? t(f.placeholderKey) : f.placeholder;
     if (f.type === 'select') {
       const opts = typeof f.options === 'function' ? f.options({ knowledgeBases, availableChatModels }) : (f.options || []);
       return (
         <FormControl key={f.key} size="small" fullWidth>
-          <InputLabel>{f.label}</InputLabel>
+          <InputLabel>{fieldLabel}</InputLabel>
           <Select
-            label={f.label}
+            label={fieldLabel}
             value={val ?? ''}
             onChange={(e) => updateConfig(f.key, e.target.value)}
           >
             {opts.map((o) => (
               <MenuItem key={`${f.key}_${o.value}`} value={o.value}>
-                {o.label}
+                {o.labelKey ? t(o.labelKey) : (o.label ?? '')}
               </MenuItem>
             ))}
           </Select>
@@ -210,10 +215,10 @@ export default function DifyNodeInspector({
           size="small"
           fullWidth
           type="number"
-          label={f.label}
+          label={fieldLabel}
           value={val ?? ''}
           onChange={(e) => updateConfig(f.key, e.target.value === '' ? '' : Number(e.target.value))}
-          helperText={f.helperText}
+          helperText={helperText}
           inputProps={f.inputProps}
         />
       );
@@ -226,11 +231,11 @@ export default function DifyNodeInspector({
           fullWidth
           multiline
           minRows={f.minRows ?? 4}
-          label={f.label}
+          label={fieldLabel}
           value={typeof val === 'string' ? val : (val ?? '')}
           onChange={(e) => updateConfig(f.key, e.target.value)}
-          helperText={f.helperText}
-          placeholder={f.placeholder}
+          helperText={helperText}
+          placeholder={placeholder}
         />
       );
     }
@@ -242,7 +247,7 @@ export default function DifyNodeInspector({
           fullWidth
           multiline
           minRows={f.minRows ?? 4}
-          label={f.label}
+          label={fieldLabel}
           value={typeof val === 'string' ? val : JSON.stringify(val ?? {}, null, 2)}
           onChange={(e) => {
             try {
@@ -252,8 +257,8 @@ export default function DifyNodeInspector({
               updateConfig(f.key, e.target.value);
             }
           }}
-          helperText={f.helperText}
-          placeholder={f.placeholder}
+          helperText={helperText}
+          placeholder={placeholder}
         />
       );
     }
@@ -262,11 +267,11 @@ export default function DifyNodeInspector({
         key={f.key}
         size="small"
         fullWidth
-        label={f.label}
+        label={fieldLabel}
         value={typeof val === 'string' ? val : (val ?? '')}
         onChange={(e) => updateConfig(f.key, e.target.value)}
-        helperText={f.helperText}
-        placeholder={f.placeholder}
+        helperText={helperText}
+        placeholder={placeholder}
       />
     );
   };
@@ -274,7 +279,7 @@ export default function DifyNodeInspector({
   const schemaByGroup = useMemo(() => {
     const map = new Map<string, NodeFieldSchema[]>();
     for (const f of schema) {
-      const g = f.group || '设置';
+      const g = f.group || 'config';
       const list = map.get(g) || [];
       list.push(f);
       map.set(g, list);
@@ -314,7 +319,7 @@ export default function DifyNodeInspector({
       if (mode === 'rag_to_llm') {
         const docsOpt = findFirstOption((o) => o.sourceKind === 'rag_retriever', ['documents']);
         if (docsOpt) bindInput('documents', docsOpt);
-        const next = `你是一个严谨的助手。请基于已检索到的资料回答问题；若资料不足请明确说明。\n\n资料1：{{documents[0].text}}\n资料2：{{documents[1].text}}\n资料3：{{documents[2].text}}\n\n问题：{{prompt}}`;
+        const next = t('workflow2.inspector.ragToLlmSystemPromptTemplate');
         if (!String((cfg as any)?.system_prompt || '').trim()) updateConfig('system_prompt', next);
       }
     }
@@ -337,10 +342,10 @@ export default function DifyNodeInspector({
     return (
       <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
         <Typography variant="subtitle1" sx={{ fontWeight: 800, mb: 1 }}>
-          属性面板
+          {t('workflow2.inspector.title')}
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          选择一个节点开始配置。
+          {t('workflow2.inspector.emptyHint')}
         </Typography>
       </Paper>
     );
@@ -353,7 +358,7 @@ export default function DifyNodeInspector({
           {title}
         </Typography>
         <Button color="error" variant="outlined" size="small" onClick={onDelete}>
-          删除
+          {t('common.delete')}
         </Button>
       </Stack>
       <Divider sx={{ my: 1.5 }} />
@@ -361,7 +366,7 @@ export default function DifyNodeInspector({
       <TextField
         fullWidth
         size="small"
-        label="节点名称"
+        label={t('workflow2.inspector.fields.nodeName')}
         value={node.data.name}
         onChange={(e) => onChange({ name: e.target.value })}
         sx={{ mb: 1.5 }}
@@ -369,20 +374,20 @@ export default function DifyNodeInspector({
       <TextField
         fullWidth
         size="small"
-        label="描述"
+        label={t('workflow2.inspector.fields.description')}
         value={node.data.description || ''}
         onChange={(e) => onChange({ description: e.target.value })}
         sx={{ mb: 2 }}
       />
 
       <Tabs value={tab} onChange={(_e, v) => setTab(v)} variant="fullWidth" sx={{ mb: 2 }}>
-        <Tab value="settings" label="SETTINGS" />
-        <Tab value="last_run" label="LAST RUN" />
+        <Tab value="settings" label={t('workflow2.inspector.tabs.settings')} />
+        <Tab value="last_run" label={t('workflow2.inspector.tabs.lastRun')} />
       </Tabs>
 
       {tab === 'last_run' && (
         <Alert severity="info">
-          运行结果目前在“测试”页查看（后续可把最近一次执行的 input/output 回填到这里）。
+          {t('workflow2.inspector.lastRunHint')}
         </Alert>
       )}
 
@@ -391,12 +396,12 @@ export default function DifyNodeInspector({
           {nodeInputs.length > 0 && (
             <Box>
               <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 1 }}>
-                INPUT VARIABLES
+                {t('workflow2.inspector.sections.inputBindings')}
               </Typography>
 
               {incomingEdges.length === 0 && (
                 <Alert severity="warning" sx={{ mb: 1.25 }}>
-                  未连接上游节点：这里无法选择变量。请先连线，再回到这里进行输入绑定。
+                  {t('workflow2.inspector.noUpstreamWarning')}
                 </Alert>
               )}
 
@@ -409,7 +414,7 @@ export default function DifyNodeInspector({
                       disabled={incomingEdges.length === 0}
                       onClick={() => applyRecommendedBindings('basic')}
                     >
-                      一键：推荐绑定
+                      {t('workflow2.inspector.actions.recommendedBindings')}
                     </Button>
                     {kind === 'llm' && (
                       <Button
@@ -418,7 +423,7 @@ export default function DifyNodeInspector({
                         disabled={incomingEdges.length === 0}
                         onClick={() => applyRecommendedBindings('rag_to_llm')}
                       >
-                        一键：RAG→LLM（documents + 系统提示）
+                        {t('workflow2.inspector.actions.ragToLlm')}
                       </Button>
                     )}
                   </Stack>
@@ -436,14 +441,14 @@ export default function DifyNodeInspector({
                         {cur ? (
                           <Chip size="small" label={`${cur.sourceName}.${cur.outputKey}`} />
                         ) : (
-                          <Chip size="small" variant="outlined" label="未绑定" />
+                          <Chip size="small" variant="outlined" label={t('workflow2.inspector.unbound')} />
                         )}
                       </Stack>
 
                       <FormControl size="small" fullWidth sx={{ mt: 1 }} disabled={incomingEdges.length === 0}>
-                        <InputLabel>绑定变量</InputLabel>
+                        <InputLabel>{t('workflow2.inspector.fields.bindVariable')}</InputLabel>
                         <Select
-                          label="绑定变量"
+                          label={t('workflow2.inspector.fields.bindVariable')}
                           value={value}
                           onChange={(e) => {
                             const raw = String(e.target.value || '');
@@ -457,7 +462,7 @@ export default function DifyNodeInspector({
                           }}
                         >
                           <MenuItem value="">
-                            <em>清除绑定（回退到 data）</em>
+                            <em>{t('workflow2.inspector.clearBinding')}</em>
                           </MenuItem>
                           {variableOptions.map((o) => (
                             <MenuItem key={`${o.edgeId}::${o.outputKey}`} value={`${o.edgeId}::${o.outputKey}`}>
@@ -475,28 +480,28 @@ export default function DifyNodeInspector({
 
           <Box>
             <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 1 }}>
-              SETTINGS
+              {t('workflow2.inspector.sections.settings')}
             </Typography>
 
             {schema.length === 0 && (
-              <Alert severity="info">当前节点没有可配置参数。</Alert>
+              <Alert severity="info">{t('workflow2.inspector.noConfig')}</Alert>
             )}
 
             <Stack spacing={1.5}>
               {schemaByGroup.map(([g, fields]) => (
                 <Box key={g} sx={{ p: 1.25, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                   <Typography variant="body2" sx={{ fontWeight: 800, mb: 1 }}>
-                    {g.toUpperCase()}
+                    {t(`workflow2.schema.groups.${g}`, { defaultValue: g })}
                   </Typography>
                   <Stack spacing={1.25}>
                     {fields.map(renderField)}
-                    {kind === 'condition' && g === '基础配置' && (
+                    {kind === 'condition' && g === 'basic' && (
                       <>
                         <Button variant="outlined" onClick={() => onCreateBranches?.()} disabled={!onCreateBranches}>
-                          一键生成 True/False 分支
+                          {t('workflow2.inspector.actions.createBranches')}
                         </Button>
                         <Typography variant="caption" color="text.secondary">
-                          从节点右侧 true/false 句柄连线会自动写入边条件并透传 data。
+                          {t('workflow2.inspector.createBranchesHint')}
                         </Typography>
                       </>
                     )}
@@ -508,10 +513,10 @@ export default function DifyNodeInspector({
 
           <Box>
             <Typography variant="subtitle2" sx={{ fontWeight: 900, mb: 1 }}>
-              OUTPUTS
+              {t('workflow2.inspector.sections.outputs')}
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              下游连线时可选择这些输出字段。
+              {t('workflow2.inspector.outputsHint')}
             </Typography>
             <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
               {nodeOutputs.map((k) => (

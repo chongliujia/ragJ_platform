@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Stack, Typography } from '@mui/material';
 import { modelConfigApi } from '../services/modelConfigApi';
 import { AuthManager } from '../services/authApi';
@@ -18,6 +19,7 @@ const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
 
 const ModelConfigReminder: React.FC = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const authManager = AuthManager.getInstance();
   const user = authManager.getCurrentUser();
   const userId = user?.id;
@@ -102,34 +104,34 @@ const ModelConfigReminder: React.FC = () => {
 
   return (
     <Dialog open={open} onClose={dismiss} maxWidth="sm" fullWidth>
-      <DialogTitle>需要先配置模型</DialogTitle>
+      <DialogTitle>{t('modelConfigReminder.title')}</DialogTitle>
       <DialogContent sx={{ pt: 1 }}>
         <Stack spacing={1}>
           <Typography variant="body2" color="text.secondary">
-            当前账号还没有可用的聊天模型配置，因此 LLM/RAG/工作流测试会失败。
+            {t('modelConfigReminder.body')}
           </Typography>
 
           {reason === 'missing_api_key' ? (
             <Alert severity="warning">
-              已选择了 Chat 模型，但缺少 API Key/Base URL（或未启用）。请到“设置 → 模型配置”补全配置。
+              {t('modelConfigReminder.missingKey')}
             </Alert>
           ) : (
             <Alert severity="info">
-              请到“设置 → 模型配置”选择一个 Chat 模型并保存（需要 API Key 的 provider 记得填写）。
+              {t('modelConfigReminder.missingConfig')}
             </Alert>
           )}
 
           <Box sx={{ p: 1, borderRadius: 1, bgcolor: 'background.default' }}>
             <Typography variant="caption" color="text.secondary">
-              提示：如果你是普通用户且希望使用租户共享模型，请联系管理员开启“允许共享模型”并将你加入白名单。
+              {t('modelConfigReminder.tenantHint')}
             </Typography>
           </Box>
         </Stack>
       </DialogContent>
       <DialogActions>
-        <Button onClick={dismiss}>稍后提醒</Button>
+        <Button onClick={dismiss}>{t('modelConfigReminder.later')}</Button>
         <Button variant="contained" onClick={goSettings}>
-          去配置
+          {t('modelConfigReminder.go')}
         </Button>
       </DialogActions>
     </Dialog>
@@ -137,4 +139,3 @@ const ModelConfigReminder: React.FC = () => {
 };
 
 export default ModelConfigReminder;
-

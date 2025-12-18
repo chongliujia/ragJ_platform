@@ -9,6 +9,7 @@ import {
   Typography,
 } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { teamApi } from '../services/api';
 
 type TeamSettings = {
@@ -17,6 +18,7 @@ type TeamSettings = {
 };
 
 const SharedModelSettings: React.FC = () => {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<TeamSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -32,7 +34,7 @@ const SharedModelSettings: React.FC = () => {
       setSettings(resp.data);
       setError(null);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'Failed to load team settings');
+      setError(e?.response?.data?.detail || e?.message || t('settings.sharedModels.errors.loadFailed'));
     }
   };
 
@@ -48,7 +50,7 @@ const SharedModelSettings: React.FC = () => {
       setSettings(resp.data);
       setError(null);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'Failed to update team settings');
+      setError(e?.response?.data?.detail || e?.message || t('settings.sharedModels.errors.updateFailed'));
     } finally {
       setSaving(false);
     }
@@ -57,10 +59,10 @@ const SharedModelSettings: React.FC = () => {
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
       <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
-        共享模型
+        {t('settings.sharedModels.title')}
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        开启后，团队管理员可将成员加入白名单，使其在未配置个人模型时可回退使用团队共享模型配置。
+        {t('settings.sharedModels.description')}
       </Typography>
 
       {error && (
@@ -77,15 +79,15 @@ const SharedModelSettings: React.FC = () => {
             disabled={!settings || saving}
           />
         }
-        label={settings?.allow_shared_models ? '已开启' : '未开启'}
+        label={settings?.allow_shared_models ? t('settings.sharedModels.enabled') : t('settings.sharedModels.disabled')}
       />
 
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
         <Typography variant="caption" color="text.secondary">
-          白名单用户数：{sharedCount}
+          {t('settings.sharedModels.whitelistCount', { count: sharedCount })}
         </Typography>
         <Button component={RouterLink} to="/users" size="small" variant="outlined">
-          去用户管理
+          {t('settings.sharedModels.goUserManagement')}
         </Button>
       </Box>
     </Paper>
@@ -93,4 +95,3 @@ const SharedModelSettings: React.FC = () => {
 };
 
 export default SharedModelSettings;
-

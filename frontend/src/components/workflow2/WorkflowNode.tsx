@@ -1,32 +1,13 @@
 import { useMemo, useState } from 'react';
 import { Box, Chip, Paper, Typography, alpha, useTheme } from '@mui/material';
+import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import type { WorkflowNodeData } from './types';
-
-function kindLabel(kind: WorkflowNodeData['kind']): string {
-  switch (kind) {
-    case 'input':
-      return '输入';
-    case 'llm':
-      return 'LLM';
-    case 'rag_retriever':
-      return '检索';
-    case 'http_request':
-      return 'HTTP';
-    case 'condition':
-      return '条件';
-    case 'code_executor':
-      return '代码';
-    case 'output':
-      return '输出';
-    default:
-      return kind;
-  }
-}
 
 export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
   const { data, selected } = props;
   const theme = useTheme();
+  const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
   const showPortLabels = selected || hovered;
 
@@ -62,6 +43,27 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
         return [] as string[];
     }
   }, [data.kind]);
+
+  const kindLabel = useMemo(() => {
+    switch (data.kind) {
+      case 'input':
+        return t('workflow2.kindLabels.input');
+      case 'llm':
+        return t('workflow2.kindLabels.llm');
+      case 'rag_retriever':
+        return t('workflow2.kindLabels.rag_retriever');
+      case 'http_request':
+        return t('workflow2.kindLabels.http_request');
+      case 'condition':
+        return t('workflow2.kindLabels.condition');
+      case 'code_executor':
+        return t('workflow2.kindLabels.code_executor');
+      case 'output':
+        return t('workflow2.kindLabels.output');
+      default:
+        return data.kind;
+    }
+  }, [data.kind, t]);
 
   const outputs = useMemo(() => {
     switch (data.kind) {
@@ -124,7 +126,7 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
       <Box sx={{ px: 1.25, py: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
         <Chip
           size="small"
-          label={kindLabel(data.kind)}
+          label={kindLabel}
           sx={{
             height: 22,
             fontWeight: 700,
@@ -133,7 +135,7 @@ export default function WorkflowNode(props: NodeProps<WorkflowNodeData>) {
           }}
         />
         <Typography variant="subtitle2" sx={{ fontWeight: 700, flex: 1 }} noWrap>
-          {data.name || '未命名节点'}
+          {data.name || t('workflow2.node.unnamed')}
         </Typography>
       </Box>
 

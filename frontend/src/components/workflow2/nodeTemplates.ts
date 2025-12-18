@@ -1,26 +1,28 @@
 import type { WorkflowNodeKind } from './types';
 
+export type NodeCategoryId = 'basic' | 'ai' | 'rag' | 'logic' | 'tool';
+
 export type NodeTemplate = {
   kind: WorkflowNodeKind;
-  name: string;
-  description: string;
+  nameKey: string;
+  descriptionKey: string;
   defaultConfig: Record<string, any>;
-  category: '基础' | 'AI' | 'RAG' | '逻辑' | '工具';
+  category: NodeCategoryId;
 };
 
 export const NODE_TEMPLATES: NodeTemplate[] = [
   {
-    category: '基础',
+    category: 'basic',
     kind: 'input',
-    name: '输入',
-    description: '接收执行输入数据',
+    nameKey: 'workflow2.nodes.input.name',
+    descriptionKey: 'workflow2.nodes.input.description',
     defaultConfig: {},
   },
   {
-    category: 'AI',
+    category: 'ai',
     kind: 'llm',
-    name: 'LLM',
-    description: '调用大语言模型生成文本',
+    nameKey: 'workflow2.nodes.llm.name',
+    descriptionKey: 'workflow2.nodes.llm.description',
     defaultConfig: {
       model: '',
       temperature: 0.7,
@@ -30,20 +32,20 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
     },
   },
   {
-    category: 'RAG',
+    category: 'rag',
     kind: 'rag_retriever',
-    name: 'RAG 检索',
-    description: '在知识库中检索相关内容',
+    nameKey: 'workflow2.nodes.rag_retriever.name',
+    descriptionKey: 'workflow2.nodes.rag_retriever.description',
     defaultConfig: {
       knowledge_base: '',
       top_k: 5,
     },
   },
   {
-    category: '逻辑',
+    category: 'logic',
     kind: 'condition',
-    name: '条件判断',
-    description: '对输入字段做条件判断（输出 condition_result）',
+    nameKey: 'workflow2.nodes.condition.name',
+    descriptionKey: 'workflow2.nodes.condition.description',
     defaultConfig: {
       field_path: 'value',
       condition_type: 'equals',
@@ -51,10 +53,10 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
     },
   },
   {
-    category: '工具',
+    category: 'tool',
     kind: 'code_executor',
-    name: '代码执行',
-    description: '执行 Python 代码（输出 result）',
+    nameKey: 'workflow2.nodes.code_executor.name',
+    descriptionKey: 'workflow2.nodes.code_executor.description',
     defaultConfig: {
       language: 'python',
       code: 'result = input_data',
@@ -66,10 +68,10 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
     },
   },
   {
-    category: '工具',
+    category: 'tool',
     kind: 'http_request',
-    name: 'HTTP 请求',
-    description: '发起 HTTP 请求并返回 response_data/status_code',
+    nameKey: 'workflow2.nodes.http_request.name',
+    descriptionKey: 'workflow2.nodes.http_request.description',
     defaultConfig: {
       method: 'GET',
       url: '',
@@ -80,10 +82,10 @@ export const NODE_TEMPLATES: NodeTemplate[] = [
     },
   },
   {
-    category: '基础',
+    category: 'basic',
     kind: 'output',
-    name: '输出',
-    description: '格式化输出数据',
+    nameKey: 'workflow2.nodes.output.name',
+    descriptionKey: 'workflow2.nodes.output.description',
     defaultConfig: {
       format: 'json',
       template: '',

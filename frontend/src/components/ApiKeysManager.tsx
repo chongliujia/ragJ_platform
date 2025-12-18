@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Alert,
   Box,
@@ -53,6 +54,7 @@ function maskKey(key: string) {
 }
 
 const ApiKeysManager: React.FC = () => {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<ApiKeyRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [snack, setSnack] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -76,11 +78,11 @@ const ApiKeysManager: React.FC = () => {
       const res = await apiKeyApi.list();
       setRows(Array.isArray(res.data) ? res.data : []);
     } catch (e: any) {
-      setSnack({ type: 'error', message: e?.response?.data?.detail || '获取 API Keys 失败' });
+      setSnack({ type: 'error', message: e?.response?.data?.detail || t('apiKeys.messages.loadFailed') });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     fetchList();
@@ -106,7 +108,7 @@ const ApiKeysManager: React.FC = () => {
   const createKey = useCallback(async () => {
     const name = form.name.trim();
     if (!name) {
-      setSnack({ type: 'error', message: '请填写名称' });
+      setSnack({ type: 'error', message: t('apiKeys.messages.nameRequired') });
       return;
     }
     setCreating(true);
@@ -121,7 +123,7 @@ const ApiKeysManager: React.FC = () => {
       if (String(form.expire_in_days || '').trim()) payload.expire_in_days = Number(form.expire_in_days);
       const res = await apiKeyApi.create(payload);
       const created = res.data as ApiKeyRow;
-      setSnack({ type: 'success', message: 'API Key 已创建（可复制 Key）' });
+      setSnack({ type: 'success', message: t('apiKeys.messages.created') });
       try {
         if (created?.key) await copyToClipboard(created.key);
       } catch {
@@ -131,11 +133,11 @@ const ApiKeysManager: React.FC = () => {
       setForm({ name: '', scopes: 'chat,workflow', allowed_kb: '', allowed_workflow_id: '', rate_limit_per_min: 60, expire_in_days: '' });
       await fetchList();
     } catch (e: any) {
-      setSnack({ type: 'error', message: e?.response?.data?.detail || '创建失败' });
+      setSnack({ type: 'error', message: e?.response?.data?.detail || t('apiKeys.messages.createFailed') });
     } finally {
       setCreating(false);
     }
-  }, [fetchList, form]);
+  }, [fetchList, form, t]);
 
   const revoke = useCallback(
     async (id: number) => {
@@ -143,35 +145,35 @@ const ApiKeysManager: React.FC = () => {
       setLoading(true);
       try {
         await apiKeyApi.revoke(id);
-        setSnack({ type: 'success', message: '已吊销' });
+        setSnack({ type: 'success', message: t('apiKeys.messages.revoked') });
         await fetchList();
       } catch (e: any) {
-        setSnack({ type: 'error', message: e?.response?.data?.detail || '吊销失败' });
+        setSnack({ type: 'error', message: e?.response?.data?.detail || t('apiKeys.messages.revokeFailed') });
       } finally {
         setLoading(false);
       }
     },
-    [fetchList]
+    [fetchList, t]
   );
 
   return (
     <Box>
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
         <Typography variant="h6" sx={{ fontWeight: 900, flex: 1 }}>
-          API Keys
+          {t('apiKeys.title')}
         </Typography>
         <Button size="small" variant="outlined" startIcon={<RefreshIcon />} onClick={fetchList} disabled={loading}>
-          刷新
+          {t('apiKeys.refresh')}
         </Button>
         <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>
-          新建
+          {t('apiKeys.new')}
         </Button>
       </Stack>
 
       <Alert severity="info" sx={{ mb: 1.5 }}>
         <Typography variant="body2">
-          Public API（对外调用）需要请求头 <Box component="span" sx={{ fontFamily: 'monospace' }}>x-api-key</Box>。
-          跨租户运行公开工作流时，请将 API Key 绑定 <Box component="span" sx={{ fontFamily: 'monospace' }}>allowed_workflow_id</Box>。
+          {t('apiKeys.publicApiHint')} <Box component="span" sx={{ fontFamily: 'monospace' }}>x-api-key</Box>。
+          {t('apiKeys.crossTenantHint')} <Box component="span" sx={{ fontFamily: 'monospace' }}>allowed_workflow_id</Box>。
         </Typography>
         <Box component="pre" sx={{ m: 0, mt: 0.75, p: 1, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
           {publicApiHint}
@@ -182,14 +184,14 @@ const ApiKeysManager: React.FC = () => {
         <Table size="small" sx={{ minWidth: 880 }}>
           <TableHead>
             <TableRow>
-              <TableCell>名称</TableCell>
-              <TableCell>Key</TableCell>
-              <TableCell>Scopes</TableCell>
-              <TableCell>allowed_workflow_id</TableCell>
-              <TableCell>allowed_kb</TableCell>
-              <TableCell>限流</TableCell>
-              <TableCell>状态</TableCell>
-              <TableCell align="right">操作</TableCell>
+              <TableCell>{t('apiKeys.table.name')}</TableCell>
+              <TableCell>{t('apiKeys.table.key')}</TableCell>
+              <TableCell>{t('apiKeys.table.scopes')}</TableCell>
+              <TableCell>{t('apiKeys.table.allowedWorkflowId')}</TableCell>
+              <TableCell>{t('apiKeys.table.allowedKb')}</TableCell>
+              <TableCell>{t('apiKeys.table.rateLimit')}</TableCell>
+              <TableCell>{t('apiKeys.table.status')}</TableCell>
+              <TableCell align="right">{t('apiKeys.table.actions')}</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -199,10 +201,14 @@ const ApiKeysManager: React.FC = () => {
                 <TableCell sx={{ fontFamily: 'monospace' }}>
                   <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                     <Box component="span">{reveal[r.id] ? r.key : maskKey(r.key)}</Box>
-                    <IconButton size="small" onClick={() => setReveal((m) => ({ ...m, [r.id]: !m[r.id] }))} aria-label="显示/隐藏">
+                    <IconButton
+                      size="small"
+                      onClick={() => setReveal((m) => ({ ...m, [r.id]: !m[r.id] }))}
+                      aria-label={t('apiKeys.actions.toggleReveal')}
+                    >
                       {reveal[r.id] ? <HideIcon fontSize="small" /> : <ShowIcon fontSize="small" />}
                     </IconButton>
-                    <IconButton size="small" onClick={() => void copyToClipboard(r.key)} aria-label="复制 Key">
+                    <IconButton size="small" onClick={() => void copyToClipboard(r.key)} aria-label={t('apiKeys.actions.copyKeyAria')}>
                       <CopyIcon fontSize="small" />
                     </IconButton>
                   </Stack>
@@ -211,9 +217,15 @@ const ApiKeysManager: React.FC = () => {
                 <TableCell sx={{ fontFamily: 'monospace' }}>{r.allowed_workflow_id || '-'}</TableCell>
                 <TableCell sx={{ fontFamily: 'monospace' }}>{r.allowed_kb || '-'}</TableCell>
                 <TableCell>{r.rate_limit_per_min}/min</TableCell>
-                <TableCell>{r.revoked ? 'revoked' : 'active'}</TableCell>
+                <TableCell>{r.revoked ? t('apiKeys.status.revoked') : t('apiKeys.status.active')}</TableCell>
                 <TableCell align="right">
-                  <IconButton size="small" color="error" disabled={r.revoked || loading} onClick={() => void revoke(r.id)} aria-label="吊销">
+                  <IconButton
+                    size="small"
+                    color="error"
+                    disabled={r.revoked || loading}
+                    onClick={() => void revoke(r.id)}
+                    aria-label={t('apiKeys.actions.revokeAria')}
+                  >
                     <DeleteIcon fontSize="small" />
                   </IconButton>
                 </TableCell>
@@ -223,7 +235,7 @@ const ApiKeysManager: React.FC = () => {
               <TableRow>
                 <TableCell colSpan={8}>
                   <Typography variant="caption" color="text.secondary">
-                    {loading ? '加载中…' : '暂无 API Key'}
+                    {loading ? t('common.loading') : t('apiKeys.empty')}
                   </Typography>
                 </TableCell>
               </TableRow>
@@ -233,11 +245,11 @@ const ApiKeysManager: React.FC = () => {
       </Paper>
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>新建 API Key</DialogTitle>
+        <DialogTitle>{t('apiKeys.createDialog.title')}</DialogTitle>
         <DialogContent sx={{ pt: 1 }}>
           <Stack spacing={1.25}>
             <TextField
-              label="名称"
+              label={t('apiKeys.createDialog.name')}
               value={form.name}
               onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
               size="small"
@@ -245,24 +257,24 @@ const ApiKeysManager: React.FC = () => {
               autoFocus
             />
             <TextField
-              label="Scopes（逗号分隔）"
+              label={t('apiKeys.createDialog.scopes')}
               value={form.scopes}
               onChange={(e) => setForm((p) => ({ ...p, scopes: e.target.value }))}
               size="small"
               fullWidth
-              helperText="例如：chat,workflow"
+              helperText={t('apiKeys.createDialog.scopesHelp')}
             />
             <Divider />
             <TextField
-              label="allowed_workflow_id（跨租户/限制访问时建议填写）"
+              label={t('apiKeys.createDialog.allowedWorkflowId')}
               value={form.allowed_workflow_id}
               onChange={(e) => setForm((p) => ({ ...p, allowed_workflow_id: e.target.value }))}
               size="small"
               fullWidth
-              helperText="绑定到某个 workflow_id，可用于跨租户运行公开工作流。"
+              helperText={t('apiKeys.createDialog.allowedWorkflowHelp')}
             />
             <TextField
-              label="allowed_kb（可选）"
+              label={t('apiKeys.createDialog.allowedKb')}
               value={form.allowed_kb}
               onChange={(e) => setForm((p) => ({ ...p, allowed_kb: e.target.value }))}
               size="small"
@@ -270,7 +282,7 @@ const ApiKeysManager: React.FC = () => {
             />
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
               <TextField
-                label="rate_limit_per_min"
+                label={t('apiKeys.createDialog.rateLimitPerMin')}
                 value={form.rate_limit_per_min}
                 onChange={(e) => setForm((p) => ({ ...p, rate_limit_per_min: Number(e.target.value) }))}
                 size="small"
@@ -278,7 +290,7 @@ const ApiKeysManager: React.FC = () => {
                 inputProps={{ inputMode: 'numeric' }}
               />
               <TextField
-                label="expire_in_days（可选）"
+                label={t('apiKeys.createDialog.expireInDays')}
                 value={form.expire_in_days}
                 onChange={(e) => setForm((p) => ({ ...p, expire_in_days: e.target.value }))}
                 size="small"
@@ -289,12 +301,8 @@ const ApiKeysManager: React.FC = () => {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setCreateOpen(false)} disabled={creating}>
-            取消
-          </Button>
-          <Button variant="contained" onClick={() => void createKey()} disabled={creating}>
-            创建
-          </Button>
+          <Button onClick={() => setCreateOpen(false)} disabled={creating}>{t('apiKeys.createDialog.cancel')}</Button>
+          <Button variant="contained" onClick={() => void createKey()} disabled={creating}>{t('apiKeys.createDialog.create')}</Button>
         </DialogActions>
       </Dialog>
 

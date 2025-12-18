@@ -251,7 +251,7 @@ const UserManagement: React.FC = () => {
     try {
       setError(null);
       if (!canToggleSharedModelsForUser(user)) {
-        setError('请先在“设置 → 系统设置 → 共享模型”开启共享模型开关');
+        setError(t('userManagement.sharedModels.errors.enableFirst'));
         return;
       }
       if (enabled) {
@@ -262,7 +262,7 @@ const UserManagement: React.FC = () => {
         setTeamSettings(resp.data);
       }
     } catch (e: any) {
-      setError(e?.response?.data?.detail || e?.message || 'Failed to update shared model whitelist');
+      setError(e?.response?.data?.detail || e?.message || t('userManagement.sharedModels.errors.updateFailed'));
     }
   };
 
@@ -572,7 +572,7 @@ const UserManagement: React.FC = () => {
               <TableCell sx={{ minWidth: 120, display: { xs: 'none', md: 'table-cell' } }}>{t('userManagement.table.tenant')}</TableCell>
               <TableCell sx={{ minWidth: 80, display: { xs: 'none', lg: 'table-cell' } }}>{t('userManagement.table.kbCount')}</TableCell>
               <TableCell sx={{ minWidth: 80, display: { xs: 'none', lg: 'table-cell' } }}>{t('userManagement.table.docCount')}</TableCell>
-              <TableCell sx={{ minWidth: 140, display: { xs: 'none', lg: 'table-cell' } }}>共享模型</TableCell>
+              <TableCell sx={{ minWidth: 140, display: { xs: 'none', lg: 'table-cell' } }}>{t('userManagement.table.sharedModels')}</TableCell>
               <TableCell sx={{ minWidth: 100, display: { xs: 'none', md: 'table-cell' } }}>{t('userManagement.table.created')}</TableCell>
               <TableCell sx={{ minWidth: 120, position: 'sticky', right: 0, backgroundColor: 'background.paper', zIndex: 1 }}>{t('userManagement.table.actions')}</TableCell>
             </TableRow>
@@ -639,16 +639,16 @@ const UserManagement: React.FC = () => {
                 <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' }, textAlign: 'center' }}>{user.knowledge_bases_count}</TableCell>
                 <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' }, textAlign: 'center' }}>{user.documents_count}</TableCell>
                 <TableCell sx={{ display: { xs: 'none', lg: 'table-cell' } }}>
-                  <Tooltip
-                    title={
+                    <Tooltip
+                      title={
                       !teamSettings?.allow_shared_models
-                        ? '团队未开启共享模型'
+                        ? t('userManagement.sharedModels.tooltips.teamDisabled')
                         : (isSuperAdmin && user.tenant_id !== currentUser?.tenant_id)
-                          ? '仅支持管理当前团队成员'
-                          : '允许该用户在未配置个人模型时使用团队共享模型'
-                    }
-                    placement="top"
-                  >
+                          ? t('userManagement.sharedModels.tooltips.crossTenantDisabled')
+                          : t('userManagement.sharedModels.tooltips.allowed')
+                      }
+                      placement="top"
+                    >
                     <span>
                       <Switch
                         size="small"
