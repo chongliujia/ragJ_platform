@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert, Stack, LinearProgress, useMediaQuery, MenuItem, Switch, FormControlLabel } from '@mui/material';
-import { ArrowBack as BackIcon, Send as SendIcon, PlayArrow as PlayIcon, Stop as StopIcon, History as HistoryIcon } from '@mui/icons-material';
+import { Box, Paper, Typography, TextField, Button, IconButton, Divider, Chip, Alert, Stack, LinearProgress, useMediaQuery, MenuItem, Switch, FormControlLabel, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import { ArrowBack as BackIcon, Send as SendIcon, PlayArrow as PlayIcon, Stop as StopIcon, History as HistoryIcon, ContentCopy as CopyIcon, Refresh as RetryIcon } from '@mui/icons-material';
 import { workflowApi } from '../services/api';
 import { useTranslation } from 'react-i18next';
 import { alpha, useTheme } from '@mui/material/styles';
@@ -31,10 +31,26 @@ const WorkflowTester: React.FC = () => {
   const [paramValues, setParamValues] = useState<Record<string, any>>({ data: '{}' });
   const [paramErrors, setParamErrors] = useState<string[]>([]);
   const gotResultRef = useRef(false);
+  const [debugMode, setDebugMode] = useState(false);
+  const [lastExecutionId, setLastExecutionId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [executionDetail, setExecutionDetail] = useState<any | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
   }, [messages]);
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('ragj_workflow_tester_debug');
+      if (v === '1') setDebugMode(true);
+      if (v === '0') setDebugMode(false);
+    } catch {
+      // ignore
+    }
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -152,6 +168,9 @@ const WorkflowTester: React.FC = () => {
     setProgress([]);
     setParamErrors([]);
     gotResultRef.current = false;
+    setLastExecutionId(null);
+    setExecutionDetail(null);
+    setSelectedNodeId(null);
 
     const built = buildInputData();
     if (!built.ok) {
@@ -161,7 +180,7 @@ const WorkflowTester: React.FC = () => {
       return;
     }
 
-    const payload = { input_data: built.inputData, debug: false };
+    const payload = { input_data: built.inputData, debug: debugMode };
 
     try {
       const { cancel, promise } = workflowApi.executeStreamCancelable(
@@ -185,6 +204,8 @@ const WorkflowTester: React.FC = () => {
               return;
             }
             gotResultRef.current = true;
+            const execId = result?.result?.execution_id || result?.execution_id || null;
+            if (execId) setLastExecutionId(String(execId));
             let out = result?.result?.output_data ?? result?.output_data ?? result;
             // Unwrap common {result: ...} shape, but keep object when result is empty (avoid “没反应”)
             if (out && typeof out === 'object' && 'result' in out && Object.keys(out).length <= 2) {
@@ -214,6 +235,75 @@ const WorkflowTester: React.FC = () => {
     }
   };
 
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // ignore
+    }
+  };
+
+  const openExecutionDetail = async (nodeId?: string) => {
+    if (!id || !lastExecutionId) return;
+    setDetailOpen(true);
+    setSelectedNodeId(nodeId || null);
+    if (executionDetail?.execution_id === lastExecutionId) return;
+    setDetailLoading(true);
+    try {
+      const res: any = await workflowApi.getExecutionDetail(id, lastExecutionId);
+      setExecutionDetail(res?.data || null);
+    } catch (e: any) {
+      setExecutionDetail(null);
+      setError(e?.response?.data?.detail || e?.message || '加载执行详情失败');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const retryFromNode = async (nodeId: string) => {
+    if (!id || !lastExecutionId) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const res: any = await workflowApi.retryStep(id, lastExecutionId, nodeId);
+      const data = res?.data || {};
+      const newExecId = data?.execution_id ? String(data.execution_id) : null;
+      if (newExecId) setLastExecutionId(newExecId);
+      setExecutionDetail(null);
+      setSelectedNodeId(nodeId);
+      // Replace progress with returned steps snapshot for quick visibility
+      if (Array.isArray(data?.steps)) {
+        const steps = data.steps.map((s: any, idx: number) => ({
+          type: 'progress',
+          step: {
+            id: s.step_id,
+            nodeId: s.node_id,
+            nodeName: s.node_name,
+            status: s.status,
+            duration: s.duration,
+            input: s.input,
+            output: s.output,
+            error: s.error,
+          },
+          progress: { current: idx + 1, total: data.steps.length },
+        }));
+        setProgress(steps);
+      }
+      const out = data?.output_data ?? {};
+      const textOut =
+        typeof out === 'string' ? out : (out?.result ?? out?.content ?? out?.text ?? JSON.stringify(out));
+      setMessages((msgs) =>
+        msgs.concat([
+          { role: 'assistant', content: `已从节点重试：${nodeId}\n执行ID：${newExecId || '(未知)'}\n\n${textOut}`, timestamp: Date.now() },
+        ])
+      );
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || e?.message || '重试失败');
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const onSend = async () => {
     const text = input.trim();
     if (running) return;
@@ -229,6 +319,40 @@ const WorkflowTester: React.FC = () => {
       <Typography variant="subtitle2" sx={{ mb: 1 }}>
         {t('workflowTester.progress.title')}
       </Typography>
+      <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={debugMode}
+              onChange={(_e, checked) => {
+                setDebugMode(checked);
+                try {
+                  localStorage.setItem('ragj_workflow_tester_debug', checked ? '1' : '0');
+                } catch {
+                  // ignore
+                }
+              }}
+            />
+          }
+          label="Debug（包含每步 input/output）"
+        />
+        {lastExecutionId && (
+          <>
+            <Chip
+              size="small"
+              label={`执行ID: ${lastExecutionId}`}
+              onClick={() => void copyText(lastExecutionId)}
+              onDelete={() => void copyText(lastExecutionId)}
+              deleteIcon={<CopyIcon />}
+              sx={{ cursor: 'pointer' }}
+            />
+            <Button size="small" variant="outlined" onClick={() => void openExecutionDetail()}>
+              查看详情
+            </Button>
+          </>
+        )}
+      </Stack>
       {progress.length === 0 && (
         <Typography variant="caption" color="text.secondary">
           {t('workflowTester.progress.empty')}
@@ -236,7 +360,18 @@ const WorkflowTester: React.FC = () => {
       )}
       {progress.map((p, i) => (
         <Box key={i} sx={{ mb: 1 }}>
-          <Typography variant="caption" color="text.secondary">
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+            <Typography
+              variant="caption"
+              color="text.secondary"
+              sx={{ flex: 1, cursor: lastExecutionId ? 'pointer' : 'default' }}
+              onClick={() => {
+                const stepLike: any = (p && (p.step ?? p.data ?? p)) || {};
+                const nodeId = stepLike.nodeId ?? stepLike.node_id ?? null;
+                if (lastExecutionId && nodeId) void openExecutionDetail(String(nodeId));
+              }}
+              title={lastExecutionId ? '点击查看该节点的输入/输出详情' : ''}
+            >
             {(() => {
               const stepLike: any = (p && (p.step ?? p.data ?? p)) || {};
               const label =
@@ -265,7 +400,22 @@ const WorkflowTester: React.FC = () => {
 
               return extra ? `${base} · ${extra}` : base;
             })()}
-          </Typography>
+            </Typography>
+            {lastExecutionId && (
+              <IconButton
+                size="small"
+                onClick={() => {
+                  const stepLike: any = (p && (p.step ?? p.data ?? p)) || {};
+                  const nodeId = stepLike.nodeId ?? stepLike.node_id ?? null;
+                  if (nodeId) void retryFromNode(String(nodeId));
+                }}
+                title="从该节点及下游重试"
+                disabled={running}
+              >
+                <RetryIcon fontSize="small" />
+              </IconButton>
+            )}
+          </Stack>
           <LinearProgress
             variant="determinate"
             value={(() => {
@@ -501,6 +651,119 @@ const WorkflowTester: React.FC = () => {
           {t('workflowTester.actions.send')}
         </Button>
       </Box>
+
+      <Dialog open={detailOpen} onClose={() => setDetailOpen(false)} fullWidth maxWidth="md">
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1 }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle1" sx={{ fontWeight: 900 }} noWrap>
+              执行详情
+            </Typography>
+            {lastExecutionId && (
+              <Typography variant="caption" color="text.secondary">
+                {lastExecutionId}
+              </Typography>
+            )}
+          </Box>
+          <Button size="small" startIcon={<CopyIcon />} onClick={() => lastExecutionId && void copyText(lastExecutionId)}>
+            复制执行ID
+          </Button>
+        </DialogTitle>
+        <DialogContent dividers>
+          {detailLoading && (
+            <Alert severity="info">加载中…</Alert>
+          )}
+          {!detailLoading && !executionDetail && (
+            <Alert severity="warning">暂无详情（请先完成一次执行）</Alert>
+          )}
+          {!detailLoading && executionDetail && (
+            <Stack spacing={2}>
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
+                  最终输出
+                </Typography>
+                <Paper variant="outlined" sx={{ p: 1.25, bgcolor: alpha(theme.palette.background.paper, 0.6) }}>
+                  <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                    {JSON.stringify(executionDetail.output_data ?? {}, null, 2)}
+                  </Typography>
+                </Paper>
+              </Box>
+
+              <Box>
+                <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 0.5 }}>
+                  步骤（点击查看 input/output）
+                </Typography>
+                <Stack spacing={1}>
+                  {(executionDetail.steps || []).map((s: any) => {
+                    const isSel = selectedNodeId && String(s.node_id) === String(selectedNodeId);
+                    const dur = Number(s.duration);
+                    const durTxt = Number.isFinite(dur) && dur > 0 ? `${dur.toFixed(2)}s` : '';
+                    return (
+                      <Paper
+                        key={s.step_id}
+                        variant="outlined"
+                        sx={{
+                          p: 1.25,
+                          borderColor: isSel ? theme.palette.primary.main : undefined,
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => setSelectedNodeId(String(s.node_id))}
+                      >
+                        <Stack direction="row" spacing={1} alignItems="center">
+                          <Typography variant="body2" sx={{ fontWeight: 800, flex: 1 }} noWrap>
+                            {s.node_name} · {s.status}{durTxt ? ` · ${durTxt}` : ''}
+                          </Typography>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<RetryIcon />}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              void retryFromNode(String(s.node_id));
+                            }}
+                            disabled={running}
+                          >
+                            从此节点重试
+                          </Button>
+                        </Stack>
+
+                        {isSel && (
+                          <Box sx={{ mt: 1 }}>
+                            <Typography variant="caption" color="text.secondary">
+                              input
+                            </Typography>
+                            <Paper variant="outlined" sx={{ p: 1, mt: 0.5 }}>
+                              <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                                {JSON.stringify(s.input ?? {}, null, 2)}
+                              </Typography>
+                            </Paper>
+                            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                              output
+                            </Typography>
+                            <Paper variant="outlined" sx={{ p: 1, mt: 0.5 }}>
+                              <Typography variant="body2" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                                {JSON.stringify(s.output ?? {}, null, 2)}
+                              </Typography>
+                            </Paper>
+                            {s.error && (
+                              <Alert severity="error" sx={{ mt: 1 }}>
+                                {String(s.error)}
+                              </Alert>
+                            )}
+                          </Box>
+                        )}
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              </Box>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDetailOpen(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

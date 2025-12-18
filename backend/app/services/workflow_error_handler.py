@@ -166,8 +166,8 @@ class WorkflowErrorHandler:
                 )
             ),
             ErrorType.CONFIGURATION_ERROR: RecoveryStrategy(
-                action=RecoveryAction.USE_DEFAULT_VALUE,
-                fallback_value={"error": "config_error", "data": {}}
+                # 配置错误是确定性的，继续执行只会产出误导性的空结果；默认快速失败
+                action=RecoveryAction.FAIL_FAST
             ),
             ErrorType.PERMISSION_ERROR: RecoveryStrategy(
                 action=RecoveryAction.FAIL_FAST

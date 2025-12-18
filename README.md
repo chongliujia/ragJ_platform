@@ -27,12 +27,35 @@ The platform exposes a simple public API (x-api-key) so you can validate workflo
 - Public endpoints (no login, require `x-api-key`):
   - `POST /api/v1/public/chat` — non-stream chat, request body is `ChatRequest`.
   - `POST /api/v1/public/chat/stream` — streaming chat (SSE), suitable for web embeds.
-  - `POST /api/v1/public/workflows/{workflow_id}/execute` — run a saved workflow with input payload.
+  - `POST /api/v1/public/workflows/{workflow_id}/run` — run a saved workflow (non-stream).
+  - `POST /api/v1/public/workflows/{workflow_id}/run/stream` — run a saved workflow (SSE: started/progress/complete).
+  - `GET /api/v1/public/workflows/{workflow_id}/io-schema` — infer workflow-level input/output schema for integration.
+  - `POST /api/v1/public/workflows/{workflow_id}/execute` — legacy alias of `run` (kept for compatibility).
 
 - Admin endpoints for API key management:
   - `POST /api/v1/admin/api-keys` — create a key (scopes: `chat`, `workflow`; optional `allowed_kb`, `allowed_workflow_id`).
   - `GET /api/v1/admin/api-keys` — list keys for your tenant.
   - `DELETE /api/v1/admin/api-keys/{id}` — revoke key.
+
+### Workflow API examples
+
+Run (non-stream):
+
+```bash
+curl -sS -X POST "https://your-host/api/v1/public/workflows/<workflow_id>/run" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_KEY" \
+  -d '{"input_data":{"text":"hello"}}'
+```
+
+Run (stream, SSE):
+
+```bash
+curl -N -X POST "https://your-host/api/v1/public/workflows/<workflow_id>/run/stream" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_KEY" \
+  -d '{"input_data":{"text":"hello"},"debug":false}'
+```
 
 ### Embedding example
 
@@ -58,7 +81,9 @@ const res = await fetch('https://your-host/api/v1/public/chat/stream', {
 
 Notes:
 - Public chat supports RAG with `knowledge_base_id` and will route to your tenant’s KB automatically.
-- Public workflow execution injects `tenant_id` and a system user for isolation and auditing.
+- Public workflow execution supports cross-tenant **public workflows**: an API key from tenant A can run a workflow owned by tenant B if that workflow is marked `is_public=true`.
+- Public workflow execution supports cross-tenant **public workflows**: an API key from tenant A can run a workflow owned by tenant B if that workflow is marked `is_public=true` and the API key is explicitly bound via `allowed_workflow_id`.
+- Runtime injects execution context (`tenant_id` is set to the workflow owner tenant; `user_id=0`) for isolation.
 
 The system is designed with a clean separation of concerns:
 

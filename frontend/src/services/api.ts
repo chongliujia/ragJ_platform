@@ -464,6 +464,21 @@ export const workflowApi = {
   getCode: (id: string) => api.get(`/api/v1/workflows/${id}/code`),
 };
 
+// API Keys (Admin)
+export const apiKeyApi = {
+  create: (data: {
+    name: string;
+    tenant_id?: number;
+    scopes?: string;
+    allowed_kb?: string | null;
+    allowed_workflow_id?: string | null;
+    rate_limit_per_min?: number;
+    expire_in_days?: number | null;
+  }) => api.post('/api/v1/admin/api-keys', data),
+  list: () => api.get('/api/v1/admin/api-keys'),
+  revoke: (id: number) => api.delete(`/api/v1/admin/api-keys/${id}`),
+};
+
 // 智能体相关 API
 export const agentApi = {
   // 获取智能体列表

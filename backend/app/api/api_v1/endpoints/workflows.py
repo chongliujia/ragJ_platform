@@ -407,8 +407,9 @@ async def execute_workflow(
         # 后台执行工作流
         # 注入租户/用户上下文信息
         input_data = dict(request.input_data or {})
-        input_data.setdefault("tenant_id", tenant_id)
-        input_data.setdefault("user_id", current_user.id)
+        # Always enforce authenticated execution context (avoid spoofing tenant/user ids).
+        input_data["tenant_id"] = tenant_id
+        input_data["user_id"] = current_user.id
 
         execution_context = await workflow_execution_engine.execute_workflow(
             workflow_definition=workflow_def,
@@ -514,8 +515,9 @@ async def execute_workflow_stream(
             async def _runner() -> None:
                 try:
                     input_data = dict(request.input_data or {})
-                    input_data.setdefault("tenant_id", tenant_id)
-                    input_data.setdefault("user_id", current_user.id)
+                    # Always enforce authenticated execution context (avoid spoofing tenant/user ids).
+                    input_data["tenant_id"] = tenant_id
+                    input_data["user_id"] = current_user.id
 
                     # For real-time progress, run serially (parallel executor currently batches steps).
                     execution_context = await workflow_execution_engine.execute_workflow(

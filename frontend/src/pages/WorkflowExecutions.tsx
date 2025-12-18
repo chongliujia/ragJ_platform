@@ -18,9 +18,10 @@ import {
   Stack,
   TablePagination,
   Typography,
+  Tooltip,
   useMediaQuery,
 } from '@mui/material';
-import { ExpandMore as ExpandMoreIcon, ArrowBack as BackIcon, Refresh as RefreshIcon, Replay as ReplayIcon, Edit as EditIcon } from '@mui/icons-material';
+import { ExpandMore as ExpandMoreIcon, ArrowBack as BackIcon, Refresh as RefreshIcon, Replay as ReplayIcon, Edit as EditIcon, ContentCopy as CopyIcon } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { workflowApi } from '../services/api';
 
@@ -77,6 +78,14 @@ function toPrettyJson(value: any): string {
   }
 }
 
+async function copyToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // ignore
+  }
+}
+
 function formatTimeIso(iso?: string | null): string {
   if (!iso) return '-';
   try {
@@ -111,6 +120,7 @@ const WorkflowExecutions: React.FC = () => {
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detail, setDetail] = useState<ExecutionDetail | null>(null);
   const [snack, setSnack] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [timelineExpanded, setTimelineExpanded] = useState(false);
 
   const selectedExecutionId = sp.get('execution') || '';
 
@@ -162,6 +172,39 @@ const WorkflowExecutions: React.FC = () => {
   const failedSteps = useMemo(() => {
     const steps = detail?.steps || [];
     return steps.filter((s) => statusColor(s.status) === 'error' || (s.error && String(s.error).trim()));
+  }, [detail?.steps]);
+
+  const timeline = useMemo(() => {
+    const steps = detail?.steps || [];
+    const withTime = steps
+      .map((s) => ({
+        ...s,
+        _start: Number(s.start_time),
+        _end: Number(s.end_time),
+      }))
+      .filter((s) => Number.isFinite(s._start) && Number.isFinite(s._end) && s._end >= s._start);
+    if (withTime.length === 0) return null;
+    const minStart = Math.min(...withTime.map((s) => s._start));
+    const maxEnd = Math.max(...withTime.map((s) => s._end));
+    const span = Math.max(maxEnd - minStart, 0.001);
+    const items = withTime.map((s) => {
+      const left = ((s._start - minStart) / span) * 100;
+      const width = Math.max(((s._end - s._start) / span) * 100, 0.6);
+      return {
+        node_id: String(s.node_id),
+        node_name: String(s.node_name || s.node_id),
+        status: String(s.status || ''),
+        duration: Number(s.duration || (s._end - s._start)) || 0,
+        left,
+        width,
+      };
+    });
+    items.sort((a, b) => a.left - b.left);
+    const slowest = items
+      .slice()
+      .sort((a, b) => (b.duration || 0) - (a.duration || 0))
+      .slice(0, 5);
+    return { minStart, maxEnd, span, items, slowest };
   }, [detail?.steps]);
 
   const retryFromNode = useCallback(
@@ -360,6 +403,134 @@ const WorkflowExecutions: React.FC = () => {
                   </Button>
                 </Stack>
 
+                {timeline && (
+                  <Paper variant="outlined" sx={{ p: 1, mb: 1 }}>
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline', flexWrap: 'wrap' }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                        耗时分布（瀑布图）
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        总跨度 {timeline.span.toFixed(2)}s
+                      </Typography>
+                      <Box sx={{ flex: 1 }} />
+                      <Button size="small" variant="text" onClick={() => setTimelineExpanded((v) => !v)}>
+                        {timelineExpanded ? '收起' : '展开'}
+                      </Button>
+                    </Stack>
+
+                    <Box sx={{ mt: 0.75, position: 'relative', height: 14, borderRadius: 1, bgcolor: 'background.default', overflow: 'hidden' }}>
+                      {timeline.items.map((it) => {
+                        const c = statusColor(it.status);
+                        const bg =
+                          c === 'success'
+                            ? theme.palette.success.main
+                            : c === 'error'
+                              ? theme.palette.error.main
+                              : c === 'warning'
+                                ? theme.palette.warning.main
+                                : theme.palette.grey[500];
+                        return (
+                          <Tooltip key={`${it.node_id}_${it.left.toFixed(2)}`} title={`${it.node_name} · ${it.status || '-'} · ${it.duration.toFixed(2)}s`}>
+                            <Box
+                              onClick={() => navigate(`/workflows/${id}/edit?node=${encodeURIComponent(it.node_id)}`)}
+                              sx={{
+                                position: 'absolute',
+                                left: `${it.left}%`,
+                                width: `${it.width}%`,
+                                top: 0,
+                                bottom: 0,
+                                bgcolor: bg,
+                                opacity: 0.8,
+                                cursor: 'pointer',
+                              }}
+                            />
+                          </Tooltip>
+                        );
+                      })}
+                    </Box>
+
+                    <Box sx={{ mt: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                      {timeline.slowest.map((it) => (
+                        <Chip
+                          key={`slow_${it.node_id}`}
+                          size="small"
+                          label={`${it.node_name} ${it.duration.toFixed(2)}s`}
+                          onClick={() => navigate(`/workflows/${id}/edit?node=${encodeURIComponent(it.node_id)}`)}
+                        />
+                      ))}
+                    </Box>
+
+                    {timelineExpanded && (
+                      <Box
+                        sx={{
+                          mt: 1,
+                          pt: 1,
+                          borderTop: `1px solid ${theme.palette.divider}`,
+                          maxHeight: 280,
+                          overflow: 'auto',
+                        }}
+                      >
+                        <Stack spacing={0.75}>
+                          {timeline.items.map((it) => {
+                            const c = statusColor(it.status);
+                            const bg =
+                              c === 'success'
+                                ? theme.palette.success.main
+                                : c === 'error'
+                                  ? theme.palette.error.main
+                                  : c === 'warning'
+                                    ? theme.palette.warning.main
+                                    : theme.palette.grey[500];
+                            return (
+                              <Box
+                                key={`row_${it.node_id}_${it.left.toFixed(2)}`}
+                                sx={{
+                                  display: 'grid',
+                                  gridTemplateColumns: '180px 1fr 72px',
+                                  gap: 1,
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <Tooltip title={it.node_name}>
+                                  <Typography variant="caption" noWrap sx={{ fontWeight: 700 }}>
+                                    {it.node_name}
+                                  </Typography>
+                                </Tooltip>
+                                <Box
+                                  sx={{
+                                    position: 'relative',
+                                    height: 10,
+                                    borderRadius: 1,
+                                    bgcolor: 'background.default',
+                                    overflow: 'hidden',
+                                    cursor: 'pointer',
+                                  }}
+                                  onClick={() => navigate(`/workflows/${id}/edit?node=${encodeURIComponent(it.node_id)}`)}
+                                >
+                                  <Box
+                                    sx={{
+                                      position: 'absolute',
+                                      left: `${it.left}%`,
+                                      width: `${it.width}%`,
+                                      top: 0,
+                                      bottom: 0,
+                                      bgcolor: bg,
+                                      opacity: 0.85,
+                                    }}
+                                  />
+                                </Box>
+                                <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'right' }}>
+                                  {it.duration.toFixed(2)}s
+                                </Typography>
+                              </Box>
+                            );
+                          })}
+                        </Stack>
+                      </Box>
+                    )}
+                  </Paper>
+                )}
+
                 {!!failedSteps.length && (
                   <Paper variant="outlined" sx={{ p: 1, mb: 1 }}>
                     <Typography variant="caption" color="text.secondary">
@@ -392,16 +563,36 @@ const WorkflowExecutions: React.FC = () => {
                         <Typography variant="caption" color="text.secondary">
                           input_data
                         </Typography>
-                        <Box component="pre" sx={{ m: 0, mt: 0.5, p: 1, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
-                          {toPrettyJson(detail.input_data)}
+                        <Box sx={{ position: 'relative' }}>
+                          <IconButton
+                            size="small"
+                            onClick={() => void copyToClipboard(toPrettyJson(detail.input_data))}
+                            sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+                            aria-label="复制 input_data"
+                          >
+                            <CopyIcon fontSize="small" />
+                          </IconButton>
+                          <Box component="pre" sx={{ m: 0, mt: 0.5, p: 1, pr: 5, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
+                            {toPrettyJson(detail.input_data)}
+                          </Box>
                         </Box>
                       </Box>
                       <Box>
                         <Typography variant="caption" color="text.secondary">
                           output_data
                         </Typography>
-                        <Box component="pre" sx={{ m: 0, mt: 0.5, p: 1, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
-                          {toPrettyJson(detail.output_data)}
+                        <Box sx={{ position: 'relative' }}>
+                          <IconButton
+                            size="small"
+                            onClick={() => void copyToClipboard(toPrettyJson(detail.output_data))}
+                            sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+                            aria-label="复制 output_data"
+                          >
+                            <CopyIcon fontSize="small" />
+                          </IconButton>
+                          <Box component="pre" sx={{ m: 0, mt: 0.5, p: 1, pr: 5, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
+                            {toPrettyJson(detail.output_data)}
+                          </Box>
                         </Box>
                       </Box>
                       {!!detail.error && (
@@ -459,16 +650,36 @@ const WorkflowExecutions: React.FC = () => {
                             <Typography variant="caption" color="text.secondary">
                               input
                             </Typography>
-                            <Box component="pre" sx={{ m: 0, mt: 0.5, p: 1, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
-                              {toPrettyJson(s.input)}
+                            <Box sx={{ position: 'relative' }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => void copyToClipboard(toPrettyJson(s.input))}
+                                sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+                                aria-label="复制 input"
+                              >
+                                <CopyIcon fontSize="small" />
+                              </IconButton>
+                              <Box component="pre" sx={{ m: 0, mt: 0.5, p: 1, pr: 5, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
+                                {toPrettyJson(s.input)}
+                              </Box>
                             </Box>
                           </Box>
                           <Box>
                             <Typography variant="caption" color="text.secondary">
                               output
                             </Typography>
-                            <Box component="pre" sx={{ m: 0, mt: 0.5, p: 1, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
-                              {toPrettyJson(s.output)}
+                            <Box sx={{ position: 'relative' }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => void copyToClipboard(toPrettyJson(s.output))}
+                                sx={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+                                aria-label="复制 output"
+                              >
+                                <CopyIcon fontSize="small" />
+                              </IconButton>
+                              <Box component="pre" sx={{ m: 0, mt: 0.5, p: 1, pr: 5, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
+                                {toPrettyJson(s.output)}
+                              </Box>
                             </Box>
                           </Box>
                         </Stack>

@@ -24,6 +24,8 @@ import {
   CheckCircle as ValidateIcon,
   Close as CloseIcon,
   ExpandMore as ExpandMoreIcon,
+  ContentCopy as CopyIcon,
+  Key as KeyIcon,
   ViewModule as ViewModuleIcon,
   ZoomIn as ZoomInIcon,
   ZoomOut as ZoomOutIcon,
@@ -35,6 +37,7 @@ import {
 import ReactFlow, {
   Background,
   Controls,
+  MiniMap,
   addEdge,
   useEdgesState,
   useNodesState,
@@ -54,6 +57,7 @@ import EdgeInspector from '../components/workflow2/EdgeInspector';
 import { NODE_TEMPLATES } from '../components/workflow2/nodeTemplates';
 import type { WorkflowEdgeData, WorkflowNodeData, WorkflowNodeKind } from '../components/workflow2/types';
 import { WORKFLOW_NODE_TYPE, toBackendEdges, toBackendNodes, toReactFlowEdges, toReactFlowNodes } from '../components/workflow2/serde';
+import { resolvePublicApiBaseUrl } from '../utils/publicApi';
 
 function genId(prefix: string) {
   try {
@@ -139,10 +143,12 @@ const WorkflowEditor: React.FC = () => {
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(false);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState<WorkflowNodeData>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<WorkflowEdgeData>([]);
+  const [nodes, setNodes, onNodesChangeBase] = useNodesState<WorkflowNodeData>([]);
+  const [edges, setEdges, onEdgesChangeBase] = useEdgesState<WorkflowEdgeData>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
 
   const focusNodeId = useMemo(() => {
     const sp = new URLSearchParams(location.search || '');
@@ -157,6 +163,16 @@ const WorkflowEditor: React.FC = () => {
     () => edges.find((e) => e.id === selectedEdgeId) || null,
     [edges, selectedEdgeId]
   );
+
+  const sameIdList = useCallback((a: string[], b: string[]) => {
+    if (a === b) return true;
+    if (!a || !b) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i += 1) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }, []);
 
   const inputsForKind = useCallback((kind?: WorkflowNodeKind): string[] => {
     switch (kind) {
@@ -203,6 +219,9 @@ const WorkflowEditor: React.FC = () => {
   const [availableChatModels, setAvailableChatModels] = useState<string[]>([]);
 
   const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [testConfirmOpen, setTestConfirmOpen] = useState(false);
+  const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [snack, setSnack] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
   const [templateName, setTemplateName] = useState('');
@@ -222,12 +241,32 @@ const WorkflowEditor: React.FC = () => {
   const [paletteWidth, setPaletteWidth] = useState(280);
   const [paletteScale, setPaletteScale] = useState(1);
   const paletteResizeRef = useRef<null | { startX: number; startWidth: number }>(null);
+  const publicApiBaseUrl = useMemo(() => resolvePublicApiBaseUrl(), []);
+
+  const onNodesChange = useCallback(
+    (changes: any[]) => {
+      const meaningful = (changes || []).some((c) => c?.type && c.type !== 'select');
+      if (meaningful) setDirty(true);
+      onNodesChangeBase(changes);
+    },
+    [onNodesChangeBase]
+  );
+
+  const onEdgesChange = useCallback(
+    (changes: any[]) => {
+      const meaningful = (changes || []).some((c) => c?.type && c.type !== 'select');
+      if (meaningful) setDirty(true);
+      onEdgesChangeBase(changes);
+    },
+    [onEdgesChangeBase]
+  );
 
   const resetToDefault = useCallback(() => {
     const g = defaultGraph();
     setNodes(g.nodes);
     setEdges(g.edges);
     setSelectedNodeId(null);
+    setDirty(true);
     setValidation(null);
   }, [setEdges, setNodes]);
 
@@ -358,6 +397,7 @@ const WorkflowEditor: React.FC = () => {
         setIsPublic(!!wf.is_public);
         setNodes(toReactFlowNodes(wf.nodes || []));
         setEdges(toReactFlowEdges(wf.edges || []));
+        setDirty(false);
       } catch (e: any) {
         setSnack({ type: 'error', message: e?.response?.data?.detail || '加载工作流失败' });
       } finally {
@@ -369,11 +409,31 @@ const WorkflowEditor: React.FC = () => {
 
   useEffect(() => {
     if (!focusNodeId) return;
-    if (nodes.some((n) => n.id === focusNodeId)) {
-      setSelectedNodeId(focusNodeId);
-      setSelectedEdgeId(null);
+    const exists = nodes.some((n) => n.id === focusNodeId);
+    if (!exists) return;
+
+    const nodesAlreadySelected = nodes.every((n) => {
+      const selected = !!(n as any).selected;
+      return selected === (n.id === focusNodeId);
+    });
+    if (!nodesAlreadySelected) {
+      setNodes((ns) =>
+        ns.map((n) => ({
+          ...n,
+          selected: n.id === focusNodeId,
+        }))
+      );
     }
-  }, [focusNodeId, nodes]);
+
+    if (edges.some((e) => !!(e as any).selected)) {
+      setEdges((es) => es.map((e) => ({ ...e, selected: false })));
+    }
+
+    setSelectedNodeId(focusNodeId);
+    setSelectedEdgeId(null);
+    setSelectedNodeIds([focusNodeId]);
+    setSelectedEdgeIds([]);
+  }, [edges, focusNodeId, nodes, setEdges, setNodes]);
 
   const serialize = useCallback(() => {
     return {
@@ -499,6 +559,7 @@ const WorkflowEditor: React.FC = () => {
       }
 
       edge.data = edgeData;
+      setDirty(true);
       setEdges((eds) => addEdge(edge, eds));
     },
     [nodes, setEdges]
@@ -521,6 +582,7 @@ const WorkflowEditor: React.FC = () => {
       };
       setNodes((ns) => ns.concat(next));
       setSelectedNodeId(next.id);
+      setDirty(true);
       setValidation(null);
     },
     [setNodes]
@@ -578,6 +640,7 @@ const WorkflowEditor: React.FC = () => {
       setNodes((ns) =>
         ns.map((n) => (n.id === selectedNodeId ? { ...n, data: { ...n.data, ...patch } } : n))
       );
+      setDirty(true);
       setValidation(null);
     },
     [selectedNodeId, setNodes]
@@ -605,6 +668,8 @@ const WorkflowEditor: React.FC = () => {
   const closeInspector = useCallback(() => {
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
+    setSelectedNodeIds([]);
+    setSelectedEdgeIds([]);
     // Unselect in ReactFlow state (prevents panel immediately re-opening).
     setNodes((ns) => ns.map((n) => ({ ...n, selected: false })));
     setEdges((es) => es.map((e) => ({ ...e, selected: false })));
@@ -672,6 +737,7 @@ const WorkflowEditor: React.FC = () => {
 
     setNodes((ns) => ns.concat(newNodes));
     setEdges((es) => es.concat(newEdges));
+    setDirty(true);
     setValidation(null);
   }, [edges, nodes, selectedNodeId, setEdges, setNodes]);
 
@@ -680,6 +746,8 @@ const WorkflowEditor: React.FC = () => {
     setNodes((ns) => ns.filter((n) => n.id !== selectedNodeId));
     setEdges((es) => es.filter((e) => e.source !== selectedNodeId && e.target !== selectedNodeId));
     setSelectedNodeId(null);
+    setSelectedNodeIds((ids) => ids.filter((x) => x !== selectedNodeId));
+    setDirty(true);
     setValidation(null);
   }, [selectedNodeId, setEdges, setNodes]);
 
@@ -703,11 +771,13 @@ const WorkflowEditor: React.FC = () => {
       const payload = serialize();
       if (id) {
         await workflowApi.update(id, payload as any);
+        setDirty(false);
         setSnack({ type: 'success', message: '已保存' });
       } else {
         const res = await workflowApi.create(payload as any);
         const newId = res.data?.id;
         if (newId) {
+          setDirty(false);
           navigate(`/workflows/${newId}/edit`, { replace: true });
           setSnack({ type: 'success', message: '已创建并保存' });
         } else {
@@ -721,8 +791,7 @@ const WorkflowEditor: React.FC = () => {
     }
   }, [id, navigate, serialize]);
 
-  const goTest = useCallback(async () => {
-    // Ensure tester runs the latest graph (avoid “改了没保存，测试没反应/还是旧流程”)
+  const saveAndEnterTest = useCallback(async () => {
     setBusy(true);
     try {
       const payload = serialize();
@@ -737,6 +806,7 @@ const WorkflowEditor: React.FC = () => {
         setSnack({ type: 'error', message: '保存失败：未获取到工作流 ID' });
         return;
       }
+      setDirty(false);
       setSnack({ type: 'success', message: '已保存，进入测试' });
       navigate(`/workflows/${workflowId}/test`);
     } catch (e: any) {
@@ -745,6 +815,221 @@ const WorkflowEditor: React.FC = () => {
       setBusy(false);
     }
   }, [id, navigate, serialize]);
+
+  const goTest = useCallback(async () => {
+    // Fast path: saved workflow without changes -> enter immediately.
+    if (id && !dirty) {
+      navigate(`/workflows/${id}/test`);
+      return;
+    }
+    // Existing workflow with unsaved changes -> ask before saving.
+    if (id && dirty) {
+      setTestConfirmOpen(true);
+      return;
+    }
+    // New workflow -> must create first.
+    await saveAndEnterTest();
+  }, [dirty, id, navigate, saveAndEnterTest]);
+
+  const autoLayout = useCallback(() => {
+    // Simple DAG layout (no extra deps): layer by longest-path depth.
+    const nodeIds = nodes.map((n) => n.id);
+    const idSet = new Set(nodeIds);
+    const incoming = new Map<string, string[]>();
+    const outgoing = new Map<string, string[]>();
+    for (const id of nodeIds) {
+      incoming.set(id, []);
+      outgoing.set(id, []);
+    }
+    for (const e of edges) {
+      if (!idSet.has(e.source) || !idSet.has(e.target)) continue;
+      incoming.get(e.target)!.push(e.source);
+      outgoing.get(e.source)!.push(e.target);
+    }
+
+    const indeg = new Map<string, number>();
+    for (const id of nodeIds) indeg.set(id, incoming.get(id)!.length);
+
+    const q: string[] = [];
+    for (const id of nodeIds) if ((indeg.get(id) || 0) === 0) q.push(id);
+    // Fallback: if cycle, just keep existing order.
+    if (q.length === 0) return;
+
+    const topo: string[] = [];
+    while (q.length) {
+      const cur = q.shift()!;
+      topo.push(cur);
+      for (const nxt of outgoing.get(cur) || []) {
+        indeg.set(nxt, (indeg.get(nxt) || 0) - 1);
+        if ((indeg.get(nxt) || 0) === 0) q.push(nxt);
+      }
+    }
+
+    const level = new Map<string, number>();
+    for (const id of topo) {
+      const preds = incoming.get(id) || [];
+      const maxPred = preds.reduce((m, p) => Math.max(m, level.get(p) || 0), 0);
+      level.set(id, preds.length ? maxPred + 1 : 0);
+    }
+
+    const byLevel = new Map<number, Node<WorkflowNodeData>[]>();
+    for (const n of nodes) {
+      const lv = level.get(n.id);
+      if (lv == null) continue;
+      const list = byLevel.get(lv) || [];
+      list.push(n);
+      byLevel.set(lv, list);
+    }
+    for (const list of byLevel.values()) {
+      list.sort((a, b) => a.position.y - b.position.y);
+    }
+
+    const X_GAP = 320;
+    const Y_GAP = 140;
+    const nextPos = new Map<string, { x: number; y: number }>();
+    for (const [lv, list] of Array.from(byLevel.entries()).sort((a, b) => a[0] - b[0])) {
+      for (let i = 0; i < list.length; i += 1) {
+        nextPos.set(list[i].id, { x: lv * X_GAP, y: i * Y_GAP + 60 });
+      }
+    }
+
+    setNodes((ns) =>
+      ns.map((n) => (nextPos.has(n.id) ? { ...n, position: nextPos.get(n.id)! } : n))
+    );
+    setDirty(true);
+    setValidation(null);
+  }, [edges, nodes, setNodes]);
+
+  const alignSelection = useCallback(
+    (mode: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => {
+      const ids = selectedNodeIds;
+      if (ids.length < 2) return;
+      const selected = nodes.filter((n) => ids.includes(n.id));
+      if (selected.length < 2) return;
+
+      const xs = selected.map((n) => n.position.x);
+      const ys = selected.map((n) => n.position.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const midX = (minX + maxX) / 2;
+      const midY = (minY + maxY) / 2;
+
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (!ids.includes(n.id)) return n;
+          const p = { ...n.position };
+          if (mode === 'left') p.x = minX;
+          if (mode === 'right') p.x = maxX;
+          if (mode === 'hcenter') p.x = midX;
+          if (mode === 'top') p.y = minY;
+          if (mode === 'bottom') p.y = maxY;
+          if (mode === 'vcenter') p.y = midY;
+          return { ...n, position: p };
+        })
+      );
+      setDirty(true);
+      setValidation(null);
+    },
+    [nodes, selectedNodeIds, setNodes]
+  );
+
+  const distributeSelection = useCallback(
+    (axis: 'x' | 'y') => {
+      const ids = selectedNodeIds;
+      if (ids.length < 3) return;
+      const selected = nodes.filter((n) => ids.includes(n.id));
+      if (selected.length < 3) return;
+      const sorted = selected.slice().sort((a, b) => (axis === 'x' ? a.position.x - b.position.x : a.position.y - b.position.y));
+      const start = axis === 'x' ? sorted[0].position.x : sorted[0].position.y;
+      const end = axis === 'x' ? sorted[sorted.length - 1].position.x : sorted[sorted.length - 1].position.y;
+      const step = (end - start) / (sorted.length - 1);
+      const target = new Map<string, number>();
+      for (let i = 0; i < sorted.length; i += 1) {
+        target.set(sorted[i].id, start + step * i);
+      }
+      setNodes((ns) =>
+        ns.map((n) => {
+          if (!ids.includes(n.id)) return n;
+          const v = target.get(n.id);
+          if (v == null) return n;
+          return { ...n, position: { ...n.position, [axis]: v } as any };
+        })
+      );
+      setDirty(true);
+      setValidation(null);
+    },
+    [nodes, selectedNodeIds, setNodes]
+  );
+
+  const deleteSelection = useCallback(() => {
+    if (selectedNodeIds.length > 0) {
+      const toDel = new Set(selectedNodeIds);
+      setNodes((ns) => ns.filter((n) => !toDel.has(n.id)));
+      setEdges((es) => es.filter((e) => !toDel.has(e.source) && !toDel.has(e.target)));
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+      setSelectedNodeIds([]);
+      setSelectedEdgeIds([]);
+      setDirty(true);
+      setValidation(null);
+      return;
+    }
+    if (selectedEdgeIds.length > 0) {
+      const toDel = new Set(selectedEdgeIds);
+      setEdges((es) => es.filter((e) => !toDel.has(e.id)));
+      setSelectedEdgeId(null);
+      setSelectedEdgeIds([]);
+      setDirty(true);
+      setValidation(null);
+    }
+  }, [selectedEdgeIds, selectedNodeIds, setEdges, setNodes]);
+
+  useEffect(() => {
+    const isTypingTarget = (el: EventTarget | null) => {
+      const t = el as HTMLElement | null;
+      if (!t) return false;
+      const tag = (t.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+      if ((t as any).isContentEditable) return true;
+      return false;
+    };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+
+      const key = (e.key || '').toLowerCase();
+      const meta = e.metaKey || e.ctrlKey;
+
+      if (key === 'escape') {
+        closeInspector();
+        return;
+      }
+
+      if (key === 'backspace' || key === 'delete') {
+        if (selectedNodeIds.length > 0 || selectedEdgeIds.length > 0) {
+          e.preventDefault();
+          deleteSelection();
+        }
+        return;
+      }
+
+      if (meta && key === 's') {
+        e.preventDefault();
+        void save();
+        return;
+      }
+
+      if (meta && key === 'enter') {
+        e.preventDefault();
+        void goTest();
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [closeInspector, deleteSelection, goTest, save, selectedEdgeIds.length, selectedNodeIds.length]);
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -769,7 +1054,10 @@ const WorkflowEditor: React.FC = () => {
               size="small"
               label="名称"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                setDirty(true);
+              }}
               fullWidth
             />
           </Stack>
@@ -783,6 +1071,14 @@ const WorkflowEditor: React.FC = () => {
               size="small"
             >
               重置画布
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={autoLayout}
+              disabled={busy}
+              size="small"
+            >
+              自动布局
             </Button>
             <Button
               variant="outlined"
@@ -811,6 +1107,17 @@ const WorkflowEditor: React.FC = () => {
             >
               测试
             </Button>
+            {!!id && (
+              <Button
+                variant="outlined"
+                startIcon={<KeyIcon />}
+                onClick={() => setApiDialogOpen(true)}
+                disabled={busy}
+                size="small"
+              >
+                API
+              </Button>
+            )}
             <Button
               variant="outlined"
               startIcon={<TemplateIcon />}
@@ -830,7 +1137,10 @@ const WorkflowEditor: React.FC = () => {
                 size="small"
                 label="描述"
                 value={description}
-                onChange={(e) => setDescription(e.target.value)}
+                onChange={(e) => {
+                  setDescription(e.target.value);
+                  setDirty(true);
+                }}
                 fullWidth
               />
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -838,7 +1148,10 @@ const WorkflowEditor: React.FC = () => {
                   control={
                     <Switch
                       checked={isPublic}
-                      onChange={(_e, checked) => setIsPublic(checked)}
+                      onChange={(_e, checked) => {
+                        setIsPublic(checked);
+                        setDirty(true);
+                      }}
                       disabled={busy}
                       size="small"
                     />
@@ -891,9 +1204,23 @@ const WorkflowEditor: React.FC = () => {
             onInit={setRf}
             nodeTypes={nodeTypes}
             onSelectionChange={(sel) => {
-              const id = sel.nodes?.[0]?.id || null;
-              setSelectedNodeId(id);
-              setSelectedEdgeId(sel.edges?.[0]?.id || null);
+              const nodeIds = (sel.nodes || []).map((n) => n.id);
+              const edgeIds = (sel.edges || []).map((e) => e.id);
+              setSelectedNodeIds((prev) => (sameIdList(prev, nodeIds) ? prev : nodeIds));
+              setSelectedEdgeIds((prev) => (sameIdList(prev, edgeIds) ? prev : edgeIds));
+
+              if (nodeIds.length === 1 && edgeIds.length === 0) {
+                setSelectedNodeId((prev) => (prev === nodeIds[0] ? prev : nodeIds[0]));
+                setSelectedEdgeId((prev) => (prev === null ? prev : null));
+                return;
+              }
+              if (edgeIds.length === 1 && nodeIds.length === 0) {
+                setSelectedEdgeId((prev) => (prev === edgeIds[0] ? prev : edgeIds[0]));
+                setSelectedNodeId((prev) => (prev === null ? prev : null));
+                return;
+              }
+              setSelectedNodeId((prev) => (prev === null ? prev : null));
+              setSelectedEdgeId((prev) => (prev === null ? prev : null));
             }}
             onDragOver={onDragOver}
             onDrop={onDrop}
@@ -901,6 +1228,26 @@ const WorkflowEditor: React.FC = () => {
           >
             <Background />
             <Controls />
+            <MiniMap
+              pannable
+              zoomable
+              nodeStrokeWidth={2}
+              nodeColor={(n: any) => {
+                const k = n?.data?.kind;
+                if (k === 'input') return '#29b6f6';
+                if (k === 'llm') return '#42a5f5';
+                if (k === 'rag_retriever') return '#ab47bc';
+                if (k === 'http_request') return '#26c6da';
+                if (k === 'condition') return '#ffa726';
+                if (k === 'code_executor') return '#66bb6a';
+                if (k === 'output') return '#ef5350';
+                return '#90a4ae';
+              }}
+              style={{
+                height: 120,
+                width: 180,
+              }}
+            />
           </ReactFlow>
 
           {/* Floating node palette (Dify-like): does not shrink canvas */}
@@ -1019,6 +1366,55 @@ const WorkflowEditor: React.FC = () => {
             ))}
           </Box>
 
+          {selectedNodeIds.length > 1 && (
+            <Box
+              sx={{
+                position: 'absolute',
+                left: '50%',
+                bottom: 12,
+                transform: 'translateX(-50%)',
+                zIndex: 19,
+                maxWidth: '92vw',
+              }}
+            >
+              <Paper variant="outlined" sx={{ p: 1, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                  已选 {selectedNodeIds.length}
+                </Typography>
+                <Button size="small" variant="outlined" onClick={() => alignSelection('left')}>
+                  左对齐
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => alignSelection('hcenter')}>
+                  水平居中
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => alignSelection('right')}>
+                  右对齐
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => alignSelection('top')}>
+                  顶对齐
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => alignSelection('vcenter')}>
+                  垂直居中
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => alignSelection('bottom')}>
+                  底对齐
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => distributeSelection('x')}>
+                  水平分布
+                </Button>
+                <Button size="small" variant="outlined" onClick={() => distributeSelection('y')}>
+                  垂直分布
+                </Button>
+                <Button size="small" variant="outlined" onClick={autoLayout}>
+                  自动布局
+                </Button>
+                <Button size="small" color="error" variant="outlined" onClick={deleteSelection}>
+                  删除
+                </Button>
+              </Paper>
+            </Box>
+          )}
+
           {(selectedNode || selectedEdge) && (
             <Box
               sx={{
@@ -1097,12 +1493,14 @@ const WorkflowEditor: React.FC = () => {
                             : e
                         )
                       );
+                      setDirty(true);
                       setValidation(null);
                     }}
                     onDelete={() => {
                       if (!selectedEdgeId) return;
                       setEdges((es) => es.filter((e) => e.id !== selectedEdgeId));
                       setSelectedEdgeId(null);
+                      setDirty(true);
                       setValidation(null);
                     }}
                   />
@@ -1119,6 +1517,121 @@ const WorkflowEditor: React.FC = () => {
         onClose={() => setSnack(null)}
         message={snack?.message || ''}
       />
+
+      <Dialog open={testConfirmOpen} onClose={() => setTestConfirmOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>进入测试</DialogTitle>
+        <DialogContent sx={{ pt: 1 }}>
+          <Typography variant="body2" color="text.secondary">
+            检测到未保存更改。直接进入测试会使用上次保存的版本；也可以先保存再进入。
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              setTestConfirmOpen(false);
+              if (id) navigate(`/workflows/${id}/test`);
+            }}
+            disabled={busy}
+          >
+            直接进入
+          </Button>
+          <Button
+            variant="contained"
+            onClick={async () => {
+              setTestConfirmOpen(false);
+              await saveAndEnterTest();
+            }}
+            disabled={busy}
+          >
+            保存并进入
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={apiDialogOpen} onClose={() => setApiDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Workflow API</DialogTitle>
+        <DialogContent sx={{ pt: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<CopyIcon />}
+              onClick={async () => {
+                const wid = id || '<workflow_id>';
+                const base = publicApiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+                const url = `${String(base).replace(/\/+$/, '')}/api/v1/public/workflows/${wid}/run`;
+                const cmd = `curl -sS -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: YOUR_KEY" \\\n  -d '{"input_data":{"text":"hello"}}'`;
+                try {
+                  await navigator.clipboard.writeText(cmd);
+                  setSnack({ type: 'success', message: '已复制 curl（run）' });
+                } catch {
+                  setSnack({ type: 'error', message: '复制失败' });
+                }
+              }}
+            >
+              复制 curl（run）
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<CopyIcon />}
+              onClick={async () => {
+                const wid = id || '<workflow_id>';
+                const base = publicApiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+                const url = `${String(base).replace(/\/+$/, '')}/api/v1/public/workflows/${wid}/run/stream`;
+                const cmd = `curl -N -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: YOUR_KEY" \\\n  -d '{"input_data":{"text":"hello"},"debug":false}'`;
+                try {
+                  await navigator.clipboard.writeText(cmd);
+                  setSnack({ type: 'success', message: '已复制 curl（stream）' });
+                } catch {
+                  setSnack({ type: 'error', message: '复制失败' });
+                }
+              }}
+            >
+              复制 curl（stream）
+            </Button>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<CopyIcon />}
+              onClick={async () => {
+                const wid = id || '<workflow_id>';
+                const base = publicApiBaseUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+                const url = `${String(base).replace(/\/+$/, '')}/api/v1/public/workflows/${wid}/io-schema`;
+                const cmd = `curl -sS -X GET "${url}" -H "x-api-key: YOUR_KEY"`;
+                try {
+                  await navigator.clipboard.writeText(cmd);
+                  setSnack({ type: 'success', message: '已复制 curl（io-schema）' });
+                } catch {
+                  setSnack({ type: 'error', message: '复制失败' });
+                }
+              }}
+            >
+              复制 curl（io-schema）
+            </Button>
+          </Stack>
+          <Typography variant="body2" color="text.secondary">
+            对外调用使用 Public API（需要请求头 <Box component="span" sx={{ fontFamily: 'monospace' }}>x-api-key</Box>）。
+            API Key 在“设置 → API Keys”里创建。
+          </Typography>
+          <Box component="pre" sx={{ m: 0, p: 1, borderRadius: 1, bgcolor: 'background.default', overflow: 'auto' }}>
+{`${publicApiBaseUrl ? `POST ${publicApiBaseUrl}/api/v1/public/workflows/${id || '<workflow_id>'}/run\n` : ''}POST /api/v1/public/workflows/${id || '<workflow_id>'}/run
+${publicApiBaseUrl ? `POST ${publicApiBaseUrl}/api/v1/public/workflows/${id || '<workflow_id>'}/run/stream\n` : ''}POST /api/v1/public/workflows/${id || '<workflow_id>'}/run/stream
+${publicApiBaseUrl ? `GET  ${publicApiBaseUrl}/api/v1/public/workflows/${id || '<workflow_id>'}/io-schema\n` : ''}GET  /api/v1/public/workflows/${id || '<workflow_id>'}/io-schema`}
+          </Box>
+          {!!publicApiBaseUrl && (
+            <Typography variant="caption" color="text.secondary">
+              当前展示的完整 URL 来自 <Box component="span" sx={{ fontFamily: 'monospace' }}>VITE_PUBLIC_API_BASE_URL</Box> / <Box component="span" sx={{ fontFamily: 'monospace' }}>VITE_BACKEND_URL</Box> 或浏览器地址栏。
+            </Typography>
+          )}
+          <Typography variant="caption" color="text.secondary">
+            跨租户运行：Workflow 需设为公开，并且 API Key 需要绑定 <Box component="span" sx={{ fontFamily: 'monospace' }}>allowed_workflow_id</Box>。
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setApiDialogOpen(false)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={templateDialogOpen} onClose={() => setTemplateDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>保存为模板</DialogTitle>

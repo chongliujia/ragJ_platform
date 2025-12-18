@@ -1169,7 +1169,15 @@ class WorkflowExecutionEngine:
                         
                         step.output_data = recovery_data
                         step.status = "recovered"
-                        step.error = f"Recovered using {action}: {recovery_result.get('message', '')}"
+                        # 保留原始错误信息到 step.error；恢复信息写入 metrics，避免“看起来成功但无输出”
+                        try:
+                            step.metrics = step.metrics or {}
+                            step.metrics["recovery"] = {
+                                "action": action,
+                                "message": recovery_result.get("message", ""),
+                            }
+                        except Exception:
+                            pass
                         
                         # 更新执行指标
                         self._update_execution_metrics(node.id, False, step.duration)
@@ -1337,7 +1345,9 @@ class WorkflowExecutionEngine:
                 }
             }
         else:
-            raise RuntimeError(f"LLM调用失败: {response.get('error', 'Unknown error')}")
+            err = response.get("error", "Unknown error")
+            hint = response.get("message") or ""
+            raise RuntimeError(f"LLM调用失败: {err}{(' | ' + hint) if hint else ''}")
     
     async def _execute_rag_retriever_node(
         self,

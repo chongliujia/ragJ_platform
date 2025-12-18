@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import {
   Typography,
   Box,
@@ -11,8 +12,10 @@ import {
   Person as PersonIcon,
   Settings as SystemIcon,
   SmartToy as ModelIcon,
+  Key as KeyIcon,
 } from '@mui/icons-material';
 import ModelConfigManager from '../components/ModelConfigManager';
+import ApiKeysManager from '../components/ApiKeysManager';
 import UserSettings from '../components/UserSettings';
 import SharedModelSettings from '../components/SharedModelSettings';
 import { AuthManager } from '../services/authApi';
@@ -42,6 +45,7 @@ function TabPanel(props: TabPanelProps) {
 const Settings: React.FC = () => {
   const { t } = useTranslation();
   const [tabValue, setTabValue] = useState(0);
+  const location = useLocation();
   const authManager = AuthManager.getInstance();
   const [currentUser, setCurrentUser] = useState(authManager.getCurrentUser());
 
@@ -54,6 +58,25 @@ const Settings: React.FC = () => {
       setCurrentUser(null);
     }
   }, []);
+
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search || '');
+    const tab = (sp.get('tab') || '').toLowerCase();
+    const isAdmin = !!currentUser && (currentUser.role === 'tenant_admin' || currentUser.role === 'super_admin');
+
+    if (tab === 'model') {
+      setTabValue(1);
+      return;
+    }
+    if (isAdmin && (tab === 'api' || tab === 'api-keys' || tab === 'apikeys')) {
+      setTabValue(2);
+      return;
+    }
+    if (isAdmin && (tab === 'system' || tab === 'tenant')) {
+      setTabValue(3);
+      return;
+    }
+  }, [currentUser, location.search]);
 
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
@@ -91,15 +114,24 @@ const Settings: React.FC = () => {
             id="settings-tab-1"
             aria-controls="settings-tabpanel-1"
           />
-          {/* 只有管理员及以上才能看到系统设置 */}
+          {/* 只有管理员及以上才能看到 API Keys / 系统设置 */}
           {currentUser && (currentUser.role === 'tenant_admin' || currentUser.role === 'super_admin') && (
-            <Tab 
-              icon={<SystemIcon />} 
-              iconPosition="start"
-              label={t('settings.tabs.system')} 
-              id="settings-tab-2" 
-              aria-controls="settings-tabpanel-2" 
-            />
+            <>
+              <Tab
+                icon={<KeyIcon />}
+                iconPosition="start"
+                label="API Keys"
+                id="settings-tab-2"
+                aria-controls="settings-tabpanel-2"
+              />
+              <Tab 
+                icon={<SystemIcon />} 
+                iconPosition="start"
+                label={t('settings.tabs.system')} 
+                id="settings-tab-3" 
+                aria-controls="settings-tabpanel-3" 
+              />
+            </>
           )}
         </Tabs>
       </Paper>
@@ -113,10 +145,15 @@ const Settings: React.FC = () => {
       </TabPanel>
       
       {currentUser && (currentUser.role === 'tenant_admin' || currentUser.role === 'super_admin') && (
-        <TabPanel value={tabValue} index={2}>
-          <SharedModelSettings />
-          <ModelConfigManager scope="tenant" />
-        </TabPanel>
+        <>
+          <TabPanel value={tabValue} index={2}>
+            <ApiKeysManager />
+          </TabPanel>
+          <TabPanel value={tabValue} index={3}>
+            <SharedModelSettings />
+            <ModelConfigManager scope="tenant" />
+          </TabPanel>
+        </>
       )}
     </Box>
   );

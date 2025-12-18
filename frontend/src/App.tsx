@@ -6,6 +6,7 @@ import './i18n';
 import TopBar from './components/TopBar';
 import { SnackbarProvider } from './components/SnackbarProvider';
 import AuthGuard from './components/AuthGuard';
+import ModelConfigReminder from './components/ModelConfigReminder';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import KnowledgeBases from './pages/KnowledgeBases';
@@ -463,6 +464,7 @@ function App() {
                 }}>
                   {/* 顶部导航栏 */}
                   <TopBar />
+                  <ModelConfigReminder />
                   
                   {/* 主内容区域 */}
                   <Box
