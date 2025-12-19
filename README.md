@@ -1,10 +1,21 @@
 # RAG Platform (ragJ_platform)
 
-An open-source, high-performance RAG (Retrieval-Augmented Generation) platform built with Python and Rust, designed for enterprise-level document-based AI assistants.
+English | [中文](README.zh-CN.md)
+
+An open-source, high-performance RAG (Retrieval-Augmented Generation) platform built with Python (FastAPI) and TypeScript (React), designed for document-based AI assistants.
+
+## 🖼️ Demo & Screenshots
+
+> Replace the files under `images/` with your latest screenshots before publishing.
+
+![Web UI - Dashboard](images/index.png)
+![Web UI - Document Management](images/upload.png)
+![Web UI - Chat](images/chat.png)
+![Web UI - Workflows](images/workflow.png)
 
 ## 🚀 Project Overview
 
-This project aims to create a powerful RAG platform, inspired by systems like Dify, but with a focus on performance by leveraging Rust for core data processing tasks. The platform uses a microservices architecture, combining Rust's performance for document handling with Python's flexibility for business logic and API services.
+This project aims to create a powerful RAG platform, inspired by systems like Dify, with a clean modular architecture: FastAPI for backend APIs and orchestration, and a modern React web UI for management and workflows.
 
 ### Core Features
 
@@ -19,6 +30,8 @@ This project aims to create a powerful RAG platform, inspired by systems like Di
 -   🌍 **Internationalization**: Support for Chinese and English language switching.
 
 ## 🏗️ System Architecture
+
+![RAG Dataflow](images/rag.png)
 
 ## 🌐 Public API & Embedding
 
@@ -82,7 +95,7 @@ const res = await fetch('https://your-host/api/v1/public/chat/stream', {
 Notes:
 - Public chat supports RAG with `knowledge_base_id` and will route to your tenant’s KB automatically.
 - Public workflow execution supports cross-tenant **public workflows**: an API key from tenant A can run a workflow owned by tenant B if that workflow is marked `is_public=true`.
-- Public workflow execution supports cross-tenant **public workflows**: an API key from tenant A can run a workflow owned by tenant B if that workflow is marked `is_public=true` and the API key is explicitly bound via `allowed_workflow_id`.
+- If you want to restrict cross-tenant workflow execution, bind the API key with `allowed_workflow_id`.
 - Runtime injects execution context (`tenant_id` is set to the workflow owner tenant; `user_id=0`) for isolation.
 
 The system is designed with a clean separation of concerns:
@@ -95,13 +108,38 @@ The system is designed with a clean separation of concerns:
 
 ## 📦 Quick Start
 
-This guide will help you get the Python backend up and running from the source code.
+You can start the whole stack with Docker Compose (recommended), or run backend/frontend locally for development.
 
 ### Prerequisites
 
 -   Python 3.9+
+-   Docker + Docker Compose (recommended for one-command startup)
 -   An available Milvus instance.
 -   A Dashscope API Key for the Qwen models.
+
+### Docker Compose (Recommended)
+
+Bring up backend + frontend + MySQL + Milvus + Elasticsearch:
+
+```bash
+# (Optional but recommended) create root .env for API keys and overrides
+cp backend/.env.example .env
+
+docker compose -f docker-compose.dev.yml up -d --build
+```
+
+Access:
+- Frontend: `http://localhost:5173`
+- Backend API docs: `http://localhost:8000/api/v1/docs`
+
+Useful commands:
+
+```bash
+docker compose -f docker-compose.dev.yml logs -f backend
+docker compose -f docker-compose.dev.yml down
+# reset volumes if you hit init errors (THIS DELETES DB/VECTOR DATA)
+docker compose -f docker-compose.dev.yml down -v
+```
 
 ### Local Setup
 
@@ -298,9 +336,9 @@ To configure your models:
 
 The web interface supports both Chinese and English:
 
-- **Language Switching**: Click the language switcher in the sidebar to change between Chinese (中文) and English
+- **Language Switching**: Click the language icon (top-right) to switch between Chinese (中文) and English
 - **Auto Detection**: The system automatically detects your browser language preference
-- **Persistent Settings**: Your language preference is saved locally and remembered across sessions
+- **Persistent Settings**: Your selection is cached in browser `localStorage` and remembered across sessions
 
 #### Supported Languages
 
@@ -333,16 +371,23 @@ Are fully translated and localized for both languages.
 - **模型支持**: GPT-4、Claude、开源LLM
 - **上下文管理**: 多轮对话支持
 
-### 3. LangGraph智能体系统
+### 4. LangGraph智能体系统
 - **工作流构建**: 基于图的智能体工作流设计
 - **状态管理**: 持久化的对话和任务状态
 - **多智能体协作**: 支持智能体间的协作和通信
 - **条件路由**: 基于条件的智能工作流路由
 
-### 4. 知识库管理
+### 5. 知识库管理
 - **组织结构**: 层级化知识库管理
 - **权限控制**: 细粒度访问权限
 - **版本控制**: 文档版本管理
+
+## ✅ Public Repo Checklist (before making GitHub public)
+
+- Secrets: ensure no API keys/tokens are committed; use `backend/.env.example` as the template.
+- Links: replace placeholder links like `https://github.com/your-org/...` and any non-existent domains/emails.
+- Images: replace/update screenshots under `images/`.
+- License: keep README’s license statement consistent with `LICENSE`.
 
 ## 🔒 安全配置
 
@@ -413,10 +458,10 @@ services:
 
 ## 📈 性能优化
 
-### Rust服务优化
-- 并发文档处理
-- 内存映射文件读取
-- SIMD向量计算优化
+### 后端服务优化
+- 异步/并发处理（FastAPI + 后台任务）
+- 批量向量化与请求合并（降低Embedding调用成本）
+- 合理的chunk策略与检索参数（召回/速度平衡）
 
 ### 数据库优化
 ```sql
@@ -445,14 +490,12 @@ pip install -r requirements-dev.txt
 
 # 代码格式化
 black backend/
-rustfmt rust_services/src/**/*.rs
 
 # 类型检查
 mypy backend/app/
 
 # 测试
 pytest backend/tests/
-cargo test --manifest-path rust_services/Cargo.toml
 ```
 
 ### API文档生成
@@ -478,22 +521,10 @@ http://localhost:8000/openapi.json # OpenAPI规范
 
 ## 🆘 支持与帮助
 
-- 📧 邮箱: support@ragj-platform.com
-- 💬 社区讨论: [GitHub Discussions](https://github.com/your-org/ragJ_platform/discussions)
-- 🐛 问题反馈: [GitHub Issues](https://github.com/your-org/ragJ_platform/issues)
-- 📖 完整文档: [Documentation](https://docs.ragj-platform.com)
+- 💬 社区讨论: [GitHub Discussions](https://github.com/chongliujia/ragJ_platform/discussions)
+- 🐛 问题反馈: [GitHub Issues](https://github.com/chongliujia/ragJ_platform/issues)
+- 📖 文档: `docs/`
 
-## 🗺️ 开发路线图
-
-- [x] 基础RAG功能实现
-- [x] Rust高性能文档处理
-- [x] API接口设计
-- [ ] Web管理界面
-- [ ] 多租户支持
-- [ ] 企业级权限管理
-- [ ] 性能监控与告警
-- [ ] 插件系统
-- [ ] 多语言支持
 
 ---
 
