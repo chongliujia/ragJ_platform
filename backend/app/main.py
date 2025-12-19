@@ -74,7 +74,7 @@ def create_application() -> FastAPI:
 
     app = FastAPI(
         title=settings.PROJECT_NAME,
-        description="基于 Rust + Python + LangGraph 的高性能 RAG 平台",
+        description="基于 FastAPI + LangGraph 的 RAG 平台",
         version="1.0.0",
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
         docs_url=f"{settings.API_V1_STR}/docs",

@@ -1,6 +1,6 @@
 # RAG Platform (ragJ_platform)
 
-English | [中文](README.zh-CN.md)
+English | [Chinese](README.zh-CN.md)
 
 An open-source, high-performance RAG (Retrieval-Augmented Generation) platform built with Python (FastAPI) and TypeScript (React), designed for document-based AI assistants.
 
@@ -293,12 +293,12 @@ The platform supports multiple AI model providers for different use cases:
 - **Models**: `deepseek-chat`, `deepseek-coder`
 - **API**: https://api.deepseek.com/v1
 
-#### Qwen (通义千问)
+#### Qwen (Tongyi Qianwen)
 - **Best for**: Chinese language tasks, comprehensive AI capabilities
 - **Models**: `qwen-turbo`, `qwen-plus`, `qwen-max`
 - **API**: https://dashscope.aliyuncs.com/compatible-mode/v1
 
-#### SiliconFlow (硅基流动)
+#### SiliconFlow
 - **Best for**: Cost-effective embedding and reranking
 - **Models**: Various open-source models including BGE series
 - **API**: https://api.siliconflow.cn/v1
@@ -307,17 +307,17 @@ The platform supports multiple AI model providers for different use cases:
 
 The web interface provides three pre-configured setups:
 
-1. **Economic Configuration** (经济配置)
+1. **Economic Configuration**
    - Chat: DeepSeek
    - Embedding: SiliconFlow BGE
    - Rerank: SiliconFlow BGE
 
-2. **Premium Configuration** (高质量配置)
+2. **Premium Configuration**
    - Chat: Qwen Max
    - Embedding: Qwen Embedding
    - Rerank: Qwen Rerank
 
-3. **Chinese Optimized** (中文优化)
+3. **Chinese-Optimized Configuration**
    - Chat: Qwen Plus
    - Embedding: SiliconFlow BGE Chinese
    - Rerank: SiliconFlow BGE Reranker
@@ -336,13 +336,13 @@ To configure your models:
 
 The web interface supports both Chinese and English:
 
-- **Language Switching**: Click the language icon (top-right) to switch between Chinese (中文) and English
+- **Language Switching**: Click the language icon (top-right) to switch between Chinese and English
 - **Auto Detection**: The system automatically detects your browser language preference
 - **Persistent Settings**: Your selection is cached in browser `localStorage` and remembered across sessions
 
 #### Supported Languages
 
-- **Chinese (中文)**: Full interface translation for Chinese users
+- **Chinese**: Full interface translation for Chinese users
 - **English**: Complete English interface for international users
 
 All interface elements, including:
@@ -354,33 +354,33 @@ All interface elements, including:
 
 Are fully translated and localized for both languages.
 
-## 📚 功能模块
+## 📚 Modules
 
-### 1. 文档处理
-- **支持格式**: PDF、DOCX、TXT、Markdown、HTML
-- **处理能力**: 文本提取、结构化分析、元数据提取
-- **分块策略**: 智能分块、固定长度、语义分割
+### 1. Document Processing
+- **Formats**: PDF, DOCX, TXT, Markdown, HTML
+- **Capabilities**: text extraction, structure parsing, metadata extraction
+- **Chunking**: smart chunking, fixed-length, semantic splitting
 
-### 2. 向量化服务
-- **嵌入模型**: OpenAI、Hugging Face、本地模型
-- **向量存储**: 高效索引和检索优化
-- **相似性搜索**: 混合搜索（语义+关键词）
+### 2. Vectorization
+- **Embedding models**: OpenAI, Hugging Face, local models
+- **Vector store**: indexing and retrieval optimizations
+- **Hybrid retrieval**: semantic + keyword search
 
-### 3. 问答系统
-- **RAG流程**: 检索+生成的完整流程
-- **模型支持**: GPT-4、Claude、开源LLM
-- **上下文管理**: 多轮对话支持
+### 3. Q&A
+- **RAG pipeline**: retrieve + generate
+- **Model options**: GPT-class models, Claude-class models, open-source LLMs
+- **Conversation context**: multi-turn chat support
 
-### 4. LangGraph智能体系统
-- **工作流构建**: 基于图的智能体工作流设计
-- **状态管理**: 持久化的对话和任务状态
-- **多智能体协作**: 支持智能体间的协作和通信
-- **条件路由**: 基于条件的智能工作流路由
+### 4. LangGraph Workflows
+- **Workflow builder**: graph-based agent/workflow design
+- **State management**: persistent execution state and checkpoints
+- **Multi-agent collaboration**: agents can coordinate and communicate
+- **Conditional routing**: route by conditions during execution
 
-### 5. 知识库管理
-- **组织结构**: 层级化知识库管理
-- **权限控制**: 细粒度访问权限
-- **版本控制**: 文档版本管理
+### 5. Knowledge Base Management
+- **Organization**: hierarchical KB management
+- **Access control**: fine-grained permissions
+- **Versioning**: document version tracking
 
 ## ✅ Public Repo Checklist (before making GitHub public)
 
@@ -389,17 +389,17 @@ Are fully translated and localized for both languages.
 - Images: replace/update screenshots under `images/`.
 - License: keep README’s license statement consistent with `LICENSE`.
 
-## 🔒 安全配置
+## 🔒 Security
 
-### API认证
+### API authentication
 ```python
-# 生成API密钥
+# Generate an API key
 from backend.app.core.security import generate_api_key
 
 api_key = generate_api_key(user_id="user_123")
 ```
 
-### 权限配置
+### Permissions
 ```yaml
 # config/permissions.yml
 roles:
@@ -413,9 +413,9 @@ roles:
     - chat:query
 ```
 
-## 🚀 部署配置
+## 🚀 Deployment
 
-### 生产环境变量
+### Production environment variables
 
 ```bash
 # .env.production
@@ -424,22 +424,22 @@ REDIS_URL=redis://redis:6379/0
 QDRANT_URL=http://qdrant:6333
 MINIO_ENDPOINT=minio:9000
 
-# LLM配置
+# LLM configuration
 OPENAI_API_KEY=your_openai_key
 OPENAI_BASE_URL=https://api.openai.com/v1
 
-# 安全配置
+# Security configuration
 SECRET_KEY=your_super_secret_key
 JWT_ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
-# 服务配置
+# Service configuration
 API_V1_STR=/api/v1
 PROJECT_NAME=RAG Platform
 DEBUG=false
 ```
 
-### 监控配置
+### Monitoring
 
 ```yaml
 # docker-compose.monitoring.yml
@@ -456,76 +456,76 @@ services:
       - "3001:3000"
 ```
 
-## 📈 性能优化
+## 📈 Performance
 
-### 后端服务优化
-- 异步/并发处理（FastAPI + 后台任务）
-- 批量向量化与请求合并（降低Embedding调用成本）
-- 合理的chunk策略与检索参数（召回/速度平衡）
+### Backend optimizations
+- Async/concurrent processing (FastAPI + background tasks)
+- Batch embedding and request coalescing (lower embedding cost)
+- Tune chunking and retrieval parameters (quality vs latency)
 
-### 数据库优化
+### Database optimizations
 ```sql
--- 向量检索索引
+-- Vector retrieval index
 CREATE INDEX idx_embeddings_vector ON document_chunks 
 USING ivfflat (embedding vector_cosine_ops) 
 WITH (lists = 100);
 
--- 元数据查询索引
+-- Metadata query indexes
 CREATE INDEX idx_documents_kb_id ON documents(knowledge_base_id);
 CREATE INDEX idx_chunks_doc_id ON document_chunks(document_id);
 ```
 
-### 缓存策略
-- Redis缓存热点查询
-- 嵌入向量缓存
-- 文档处理结果缓存
+### Caching
+- Redis for hot queries
+- Embedding cache
+- Document processing result cache
 
-## 🛠️ 开发指南
+## 🛠️ Development
 
-### 本地开发环境
+### Local development
 
 ```bash
-# 安装开发依赖
+# Install dev dependencies
 pip install -r requirements-dev.txt
 
-# 代码格式化
+# Formatting
 black backend/
 
-# 类型检查
+# Type checking
 mypy backend/app/
 
-# 测试
+# Tests
 pytest backend/tests/
 ```
 
-### API文档生成
+### API docs
 
 ```bash
-# 启动服务后访问
-http://localhost:8000/docs        # Swagger UI
-http://localhost:8000/redoc       # ReDoc
-http://localhost:8000/openapi.json # OpenAPI规范
+# After starting the backend, visit:
+http://localhost:8000/docs         # Swagger UI
+http://localhost:8000/redoc        # ReDoc
+http://localhost:8000/openapi.json # OpenAPI spec
 ```
 
-## 🤝 贡献指南
+## 🤝 Contributing
 
-1. Fork项目
-2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建Pull Request
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-## 📄 许可证
+## 📄 License
 
-本项目采用MIT许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+This project is licensed under the MIT License — see [LICENSE](LICENSE).
 
-## 🆘 支持与帮助
+## 🆘 Support
 
-- 💬 社区讨论: [GitHub Discussions](https://github.com/chongliujia/ragJ_platform/discussions)
-- 🐛 问题反馈: [GitHub Issues](https://github.com/chongliujia/ragJ_platform/issues)
-- 📖 文档: `docs/`
+- Discussions: [GitHub Discussions](https://github.com/chongliujia/ragJ_platform/discussions)
+- Issues: [GitHub Issues](https://github.com/chongliujia/ragJ_platform/issues)
+- Docs: `docs/`
 
 
 ---
 
-**注意**: 这是一个基础版本的实现，适用于学习和小规模部署。生产环境使用请根据实际需求进行安全加固和性能优化。
+**Note**: This is a baseline implementation suitable for learning and small deployments. For production use, harden security and tune performance for your workload.
