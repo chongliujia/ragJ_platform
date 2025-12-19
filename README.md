@@ -6,8 +6,6 @@ An open-source, high-performance RAG (Retrieval-Augmented Generation) platform b
 
 ## 🖼️ Demo & Screenshots
 
-> Replace the files under `images/` with your latest screenshots before publishing.
-
 ![Log in](images/log.png)
 ![Web UI - Dashboard](images/index.png)
 ![Web UI - Document Management](images/upload.png)
