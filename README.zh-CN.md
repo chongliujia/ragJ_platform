@@ -8,14 +8,16 @@
 
 > 仓库公开前，请确认截图中不包含 API Key、内部域名/URL、客户数据等敏感信息。
 
+![登录](images/log.png)
 ![Web UI - Dashboard](images/index.png)
 ![Web UI - 文档管理](images/upload.png)
 ![Web UI - 智能对话](images/chat.png)
 ![Web UI - 工作流](images/workflow.png)
+![RAG](images/rag.png)
 
 ## 🚀 项目概览
 
-本项目参考 Dify 等平台的产品形态，提供可自托管的 RAG 能力与可视化管理界面：后端使用 FastAPI 负责 API、业务编排与权限隔离；前端提供知识库管理、文档上传、对话与工作流编辑等能力。
+本项目提供可自托管的 RAG 能力与可视化管理界面：后端使用 FastAPI 负责 API、业务编排与权限隔离；前端提供知识库管理、文档上传、对话与工作流编辑等能力。
 
 ### 核心特性
 
@@ -27,10 +29,6 @@
 - ⚡ **高性能后端**：FastAPI 异步请求处理。
 - 🎨 **现代 Web UI**：React + Material-UI 管理后台与工作流编辑。
 - 🌍 **中英界面**：前端支持中文/英文切换。
-
-## 🏗️ 系统架构
-
-![RAG Dataflow](images/rag.png)
 
 ## 🌐 Public API & Embedding（对外API与嵌入）
 

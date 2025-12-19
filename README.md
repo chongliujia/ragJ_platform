@@ -8,10 +8,13 @@ An open-source, high-performance RAG (Retrieval-Augmented Generation) platform b
 
 > Replace the files under `images/` with your latest screenshots before publishing.
 
+![Log in](images/log.png)
 ![Web UI - Dashboard](images/index.png)
 ![Web UI - Document Management](images/upload.png)
 ![Web UI - Chat](images/chat.png)
 ![Web UI - Workflows](images/workflow.png)
+![RAG](images/rag.png)
+
 
 ## 🚀 Project Overview
 
@@ -28,10 +31,6 @@ This project aims to create a powerful RAG platform, inspired by systems like Di
 -   🎨 **Modern Web Interface**: React-based frontend with Material-UI for intuitive management.
 -   ⚙️ **Flexible Configuration**: Easy model switching and configuration management.
 -   🌍 **Internationalization**: Support for Chinese and English language switching.
-
-## 🏗️ System Architecture
-
-![RAG Dataflow](images/rag.png)
 
 ## 🌐 Public API & Embedding
 
