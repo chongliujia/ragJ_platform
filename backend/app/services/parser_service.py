@@ -70,6 +70,8 @@ def _parse_document_python(content: bytes, filename: str) -> str:
         return parse_docx(content)
     elif file_ext == "md":
         return parse_md(content)
+    elif file_ext in {"xlsx", "xls"}:
+        return parse_excel(content, filename)
     elif file_ext == "html" or file_ext == "htm":
         return parse_html(content)
     else:
@@ -142,6 +144,59 @@ def parse_html(content: bytes) -> str:
         return ""
 
 
+def parse_excel(content: bytes, filename: str) -> str:
+    """Parses text from an Excel file (.xlsx/.xls)."""
+    file_ext = filename.lower().split(".")[-1] if "." in filename else ""
+    if file_ext == "xlsx":
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(BytesIO(content), data_only=True)
+            lines = []
+            for sheet in wb.worksheets:
+                lines.append(f"Sheet: {sheet.title}")
+                for row in sheet.iter_rows(values_only=True):
+                    values = []
+                    for cell in row:
+                        if cell is None:
+                            continue
+                        if isinstance(cell, float) and cell.is_integer():
+                            values.append(str(int(cell)))
+                        else:
+                            values.append(str(cell))
+                    if values:
+                        lines.append("\t".join(values))
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"Error parsing XLSX file: {e}", exc_info=True)
+            return ""
+    if file_ext == "xls":
+        try:
+            import xlrd
+
+            wb = xlrd.open_workbook(file_contents=content)
+            lines = []
+            for sheet in wb.sheets():
+                lines.append(f"Sheet: {sheet.name}")
+                for row_idx in range(sheet.nrows):
+                    values = []
+                    for cell in sheet.row_values(row_idx):
+                        if cell in ("", None):
+                            continue
+                        if isinstance(cell, float) and cell.is_integer():
+                            values.append(str(int(cell)))
+                        else:
+                            values.append(str(cell))
+                    if values:
+                        lines.append("\t".join(values))
+            return "\n".join(lines)
+        except Exception as e:
+            logger.error(f"Error parsing XLS file: {e}", exc_info=True)
+            return ""
+    logger.warning(f"Unsupported Excel file format: {file_ext}")
+    return ""
+
+
 def get_supported_formats() -> list[str]:
     """Get list of supported document formats."""
     if RUST_AVAILABLE:
@@ -151,7 +206,7 @@ def get_supported_formats() -> list[str]:
             logger.warning(f"Failed to get supported formats from Rust: {e}")
 
     # Fallback to Python-supported formats
-    return ["txt", "pdf", "docx", "md", "html", "htm"]
+    return ["txt", "pdf", "docx", "md", "html", "htm", "xlsx", "xls"]
 
 
 def extract_metadata(content: bytes, filename: str) -> Dict[str, Any]:

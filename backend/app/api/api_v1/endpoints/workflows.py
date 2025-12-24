@@ -415,12 +415,18 @@ async def execute_workflow(
             workflow_definition=workflow_def,
             input_data=input_data,
             debug=request.debug,
-            enable_parallel=request.enable_parallel
+            enable_parallel=request.enable_parallel,
+            config=request.config,
         )
         
         # 保存执行记录
         workflow_persistence_service.save_workflow_execution(
-            execution_context, tenant_id, current_user.id
+            execution_context,
+            tenant_id,
+            current_user.id,
+            execution_config=request.config,
+            debug=request.debug,
+            enable_parallel=request.enable_parallel,
         )
         
         logger.info(
@@ -526,6 +532,7 @@ async def execute_workflow_stream(
                         debug=request.debug,
                         enable_parallel=False,
                         on_step=_on_step,
+                        config=request.config,
                     )
 
                     final_output = execution_context.output_data or {}
@@ -544,7 +551,12 @@ async def execute_workflow_stream(
 
                     try:
                         workflow_persistence_service.save_workflow_execution(
-                            execution_context, tenant_id, current_user.id
+                            execution_context,
+                            tenant_id,
+                            current_user.id,
+                            execution_config=request.config,
+                            debug=request.debug,
+                            enable_parallel=False,
                         )
                     except Exception as save_error:
                         logger.error("保存执行记录失败", error=str(save_error))
@@ -1169,6 +1181,28 @@ def _infer_workflow_io_schema(workflow_def: WorkflowDefinition) -> Dict[str, Any
         "input_schema": input_schema,
         "output_schema": output_schema,
     }
+
+
+def _validate_input_against_schema(input_data: Dict[str, Any], schema: Dict[str, Any]) -> List[str]:
+    """Validate input_data against inferred input schema (required fields only)."""
+    if not isinstance(input_data, dict):
+        return ["input_data must be an object"]
+    if not isinstance(schema, dict):
+        return []
+
+    input_schema = schema.get("input_schema")
+    if not isinstance(input_schema, dict):
+        return []
+
+    required = input_schema.get("required")
+    if not isinstance(required, list):
+        return []
+
+    errors: List[str] = []
+    for key in required:
+        if key not in input_data or input_data.get(key) is None:
+            errors.append(f"Missing required field: {key}")
+    return errors
 
 
 @router.get("/{workflow_id}/io-schema", response_model=Dict[str, Any])

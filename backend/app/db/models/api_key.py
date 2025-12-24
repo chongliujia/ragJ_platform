@@ -18,6 +18,7 @@ class ApiKey(Base):
     name = Column(String(100), nullable=False)
     key = Column(String(128), unique=True, nullable=False, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     scopes = Column(String(200), default="chat,workflow", nullable=False)  # 逗号分隔
     # 可选限制：只允许访问某个知识库或工作流
     allowed_kb = Column(String(200), nullable=True)
@@ -28,8 +29,9 @@ class ApiKey(Base):
     expires_at = Column(DateTime, nullable=True)
 
     tenant = relationship("Tenant")
+    creator = relationship("User")
 
     __table_args__ = (
         Index("idx_api_key_tenant", "tenant_id"),
+        Index("idx_api_key_created_by", "created_by"),
     )
-

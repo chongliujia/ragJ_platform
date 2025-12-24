@@ -201,6 +201,15 @@
         "strategy": "分片策略",
         "parameters": "参数设置"
       },
+      "preview": {
+        "action": "预览分片",
+        "loading": "预览中...",
+        "hint": "使用第一份文件预览，展示前 {{count}} 片",
+        "title": "分片预览",
+        "total": "总分片：{{total}} · 展示 {{count}}",
+        "empty": "未生成分片",
+        "failed": "预览失败"
+      },
       "strategies": {
         "fetchError": "获取分片策略失败"
       },
@@ -1086,6 +1095,7 @@
     "crossTenantHint": "跨租户运行公开工作流时，请将 API Key 绑定 allowed_workflow_id。",
     "table": {
       "name": "名称",
+      "createdBy": "创建人",
       "key": "Key",
       "scopes": "Scopes",
       "allowedWorkflowId": "allowed_workflow_id",

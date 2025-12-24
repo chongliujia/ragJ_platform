@@ -342,6 +342,7 @@ class WorkflowExecutionEngine:
         debug: bool = False,
         enable_parallel: Optional[bool] = None,
         on_step: Optional[Callable[[ExecutionStep, int, int], Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
     ) -> WorkflowExecutionContext:
         """执行工作流"""
         
@@ -349,12 +350,21 @@ class WorkflowExecutionEngine:
             execution_id = f"exec_{uuid.uuid4().hex[:8]}"
         
         # 创建执行上下文
+        global_context = workflow_definition.global_config.copy()
+        if config:
+            global_context.update(config)
+        # Enforce tenant/user identity from input_data (avoid override via config).
+        if "tenant_id" in input_data:
+            global_context["tenant_id"] = input_data["tenant_id"]
+        if "user_id" in input_data:
+            global_context["user_id"] = input_data["user_id"]
+
         context = WorkflowExecutionContext(
             execution_id=execution_id,
             workflow_id=workflow_definition.id,
             start_time=time.time(),
             input_data=input_data,
-            global_context=workflow_definition.global_config.copy()
+            global_context=global_context
         )
         
         self.active_executions[execution_id] = context

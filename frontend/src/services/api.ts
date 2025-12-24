@@ -172,6 +172,13 @@ export const documentApi = {
     params?: { offset?: number; limit?: number }
   ) => api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks`, { params }),
 
+  // 预览分片（不落库）
+  previewChunks: (knowledgeBaseId: string, formData: FormData, signal?: AbortSignal) =>
+    api.post(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/preview-chunks`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      signal,
+    }),
+
   // 获取文档处理状态（全局路由，无需KB）
   getStatus: (documentId: string | number) =>
     api.get(`/api/v1/documents/${documentId}/status`),

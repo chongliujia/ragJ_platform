@@ -42,6 +42,8 @@ PyMuPDF
 python-docx
 markdown
 beautifulsoup4
+openpyxl
+xlrd
 
 # 嵌入和模型
 openai

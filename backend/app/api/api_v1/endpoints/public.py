@@ -25,7 +25,7 @@ from app.services.langgraph_chat_service import langgraph_chat_service
 from app.services.workflow_execution_engine import workflow_execution_engine
 from app.services.workflow_persistence_service import workflow_persistence_service
 from app.schemas.workflow import ExecutionStep
-from app.api.api_v1.endpoints.workflows import _infer_workflow_io_schema
+from app.api.api_v1.endpoints.workflows import _infer_workflow_io_schema, _validate_input_against_schema
 
 
 router = APIRouter()
@@ -125,6 +125,16 @@ def _build_public_input_data(
     return input_data
 
 
+def _validate_public_input(workflow_def, raw_input: Dict[str, Any]) -> None:
+    schema = _infer_workflow_io_schema(workflow_def)
+    errors = _validate_input_against_schema(raw_input or {}, schema)
+    if errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": "Input validation failed", "errors": errors},
+        )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def public_chat(
     request: ChatRequest,
@@ -191,11 +201,24 @@ async def public_execute_workflow(
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     raw_input = payload.get("input_data") or payload.get("input") or {}
+    _validate_public_input(wf, raw_input)
     input_data = _build_public_input_data(raw_input, record.tenant_id, ctx.tenant_id)
+    raw_config = payload.get("config")
+    run_config = raw_config if isinstance(raw_config, dict) else {}
 
     context = await workflow_execution_engine.execute_workflow(
         workflow_definition=wf,
         input_data=input_data,
+        debug=bool(payload.get("debug")),
+        enable_parallel=payload.get("enable_parallel"),
+        config=run_config,
+    )
+
+    workflow_persistence_service.save_workflow_execution(
+        context,
+        record.tenant_id,
+        record.owner_id,
+        execution_config=run_config,
         debug=bool(payload.get("debug")),
         enable_parallel=payload.get("enable_parallel"),
     )
@@ -225,13 +248,25 @@ async def public_run_workflow(
     if not wf:
         raise HTTPException(status_code=404, detail="Workflow not found")
 
+    _validate_public_input(wf, request.input_data or {})
     input_data = _build_public_input_data(request.input_data or {}, record.tenant_id, ctx.tenant_id)
     execution_context = await workflow_execution_engine.execute_workflow(
         workflow_definition=wf,
         input_data=input_data,
         debug=bool(request.debug),
         enable_parallel=request.enable_parallel,
+        config=request.config,
     )
+
+    workflow_persistence_service.save_workflow_execution(
+        execution_context,
+        record.tenant_id,
+        record.owner_id,
+        execution_config=request.config,
+        debug=bool(request.debug),
+        enable_parallel=request.enable_parallel,
+    )
+
     return {
         "execution_id": execution_context.execution_id,
         "status": execution_context.status,
@@ -289,6 +324,7 @@ async def public_run_workflow_stream(
 
         async def _runner() -> None:
             try:
+                _validate_public_input(wf, request.input_data or {})
                 input_data = _build_public_input_data(request.input_data or {}, record.tenant_id, ctx.tenant_id)
                 # For real-time progress, run serially for now.
                 execution_context = await workflow_execution_engine.execute_workflow(
@@ -297,6 +333,15 @@ async def public_run_workflow_stream(
                     debug=bool(request.debug),
                     enable_parallel=False,
                     on_step=_on_step,
+                    config=request.config,
+                )
+                workflow_persistence_service.save_workflow_execution(
+                    execution_context,
+                    record.tenant_id,
+                    record.owner_id,
+                    execution_config=request.config,
+                    debug=bool(request.debug),
+                    enable_parallel=False,
                 )
                 await q.put(
                     {

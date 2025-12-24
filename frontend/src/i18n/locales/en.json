@@ -201,6 +201,15 @@
         "strategy": "Chunking Strategy",
         "parameters": "Parameter Settings"
       },
+      "preview": {
+        "action": "Preview chunks",
+        "loading": "Previewing...",
+        "hint": "Uses the first selected file; showing first {{count}} chunks",
+        "title": "Chunk Preview",
+        "total": "Total chunks: {{total}} · showing {{count}}",
+        "empty": "No chunks generated",
+        "failed": "Failed to preview chunks"
+      },
       "strategies": {
         "fetchError": "Failed to fetch chunking strategies"
       },
@@ -1086,6 +1095,7 @@
     "crossTenantHint": "For cross-tenant public workflows, bind allowed_workflow_id on the key.",
     "table": {
       "name": "Name",
+      "createdBy": "Created By",
       "key": "Key",
       "scopes": "Scopes",
       "allowedWorkflowId": "allowed_workflow_id",

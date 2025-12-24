@@ -126,6 +126,20 @@ class DocumentChunk(BaseModel):
     text: str
 
 
+class DocumentChunkPreview(BaseModel):
+    """Preview chunk response model."""
+
+    chunk_index: int
+    text: str
+
+
+class DocumentChunkPreviewResponse(BaseModel):
+    """Preview chunks response model."""
+
+    total_chunks: int
+    chunks: List[DocumentChunkPreview]
+
+
 class BatchDeleteRequest(BaseModel):
     """Batch delete request payload."""
 
@@ -224,6 +238,14 @@ async def upload_document(
             "text/x-markdown",
             "application/markdown",
             "application/x-markdown",
+        },
+        "xlsx": {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/octet-stream",
+        },
+        "xls": {
+            "application/vnd.ms-excel",
+            "application/octet-stream",
         },
         "html": {"text/html", "application/xhtml+xml"},
     }
@@ -340,6 +362,129 @@ async def upload_document(
         "content_type": file.content_type,
         "message": "File accepted and is being processed in the background.",
     }
+
+
+@router.post("/preview-chunks", response_model=DocumentChunkPreviewResponse)
+async def preview_document_chunks(
+    kb_name: str,
+    file: UploadFile = File(...),
+    chunking_strategy: Optional[str] = Form(ChunkingStrategy.RECURSIVE.value),
+    chunking_params: Optional[str] = Form(None),
+    limit: int = Form(5),
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_UPLOAD.value)),
+    db: Session = Depends(get_db),
+):
+    """
+    Preview chunks for a document without persisting it.
+    """
+    kb_row = (
+        db.query(KBModel)
+        .filter(
+            KBModel.name == kb_name,
+            KBModel.tenant_id == tenant_id,
+            KBModel.is_active == True,
+        )
+        .first()
+    )
+    if kb_row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Knowledge base '{kb_name}' not found",
+        )
+    if not _can_write_kb(kb_row, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not allowed to upload to this knowledge base",
+        )
+
+    original_filename = file.filename or "uploaded_file"
+    safe_filename = os.path.basename(original_filename) or "uploaded_file"
+    ext = safe_filename.rsplit(".", 1)[-1].lower() if "." in safe_filename else ""
+    allowed_exts = set(ext.strip().lower() for ext in settings.get_supported_file_types())
+    if ext not in allowed_exts:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported file type: .{ext}. Allowed: {', '.join(sorted(allowed_exts))}",
+        )
+
+    try:
+        content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    except Exception:
+        content_type = ""
+
+    allowed_mimes_by_ext = {
+        "pdf": {"application/pdf"},
+        "docx": {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/zip",
+        },
+        "txt": {"text/plain"},
+        "md": {
+            "text/markdown",
+            "text/plain",
+            "text/x-markdown",
+            "application/markdown",
+            "application/x-markdown",
+        },
+        "xlsx": {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/octet-stream",
+        },
+        "xls": {
+            "application/vnd.ms-excel",
+            "application/octet-stream",
+        },
+        "html": {"text/html", "application/xhtml+xml"},
+    }
+    if content_type and content_type not in {"application/octet-stream"}:
+        allowed_mimes = allowed_mimes_by_ext.get(ext)
+        if allowed_mimes and content_type not in allowed_mimes:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=f"Unsupported content-type '{content_type}' for .{ext}",
+            )
+
+    content = await file.read()
+    if len(content) > settings.MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Max size: {settings.MAX_FILE_SIZE} bytes",
+        )
+
+    try:
+        strategy = ChunkingStrategy(chunking_strategy)
+    except ValueError:
+        strategy = ChunkingStrategy.RECURSIVE
+
+    params = {}
+    if chunking_params:
+        try:
+            import json
+
+            params = json.loads(chunking_params)
+        except Exception:
+            params = {}
+
+    from app.services import parser_service
+
+    text = parser_service.parse_document(content, safe_filename)
+    if not text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to parse document text",
+        )
+
+    chunks = await chunking_service.chunk_document(
+        text=text, strategy=strategy, **params
+    )
+    total = len(chunks)
+    safe_limit = max(1, min(int(limit or 5), 20))
+    preview = [
+        DocumentChunkPreview(chunk_index=i, text=str(c or ""))
+        for i, c in enumerate(chunks[:safe_limit])
+    ]
+    return DocumentChunkPreviewResponse(total_chunks=total, chunks=preview)
 
 
 @router.post("/{document_id}/retry", status_code=status.HTTP_202_ACCEPTED)

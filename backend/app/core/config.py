@@ -112,7 +112,7 @@ class Settings(BaseSettings):
 
     # 文档处理配置
     MAX_FILE_SIZE: int = 104857600  # 100MB
-    SUPPORTED_FILE_TYPES: str = "pdf,docx,txt,md,html"  # 改为字符串类型
+    SUPPORTED_FILE_TYPES: str = "pdf,docx,txt,md,html,xlsx,xls"  # 改为字符串类型
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
 

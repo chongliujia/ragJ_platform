@@ -22,7 +22,8 @@ import {
   Typography,
 } from '@mui/material';
 import { Add as AddIcon, ContentCopy as CopyIcon, Delete as DeleteIcon, Refresh as RefreshIcon, Visibility as ShowIcon, VisibilityOff as HideIcon } from '@mui/icons-material';
-import { apiKeyApi } from '../services/api';
+import { apiKeyApi, teamApi } from '../services/api';
+import type { TeamMember } from '../types/team';
 import { resolvePublicApiBaseUrl } from '../utils/publicApi';
 
 type ApiKeyRow = {
@@ -30,6 +31,7 @@ type ApiKeyRow = {
   name: string;
   key: string;
   tenant_id: number;
+  created_by?: number | null;
   scopes: string;
   allowed_kb?: string | null;
   allowed_workflow_id?: string | null;
@@ -53,11 +55,12 @@ function maskKey(key: string) {
   return `${s.slice(0, 4)}••••••••••${s.slice(-4)}`;
 }
 
-const ApiKeysManager: React.FC = () => {
+const ApiKeysManager: React.FC<{ isAdmin?: boolean }> = ({ isAdmin = false }) => {
   const { t } = useTranslation();
   const [rows, setRows] = useState<ApiKeyRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [snack, setSnack] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [memberMap, setMemberMap] = useState<Record<number, string>>({});
 
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -87,6 +90,35 @@ const ApiKeysManager: React.FC = () => {
   useEffect(() => {
     fetchList();
   }, [fetchList]);
+
+  useEffect(() => {
+    let active = true;
+    const loadMembers = async () => {
+      if (!isAdmin) {
+        setMemberMap({});
+        return;
+      }
+      try {
+        const teamRes = await teamApi.getCurrentTeam();
+        const teamId = teamRes?.data?.id;
+        if (!teamId) return;
+        const membersRes = await teamApi.getTeamMembers(teamId);
+        const members = (membersRes?.data || []) as TeamMember[];
+        const map: Record<number, string> = {};
+        for (const m of members) {
+          const label = m.full_name || m.username || m.email || String(m.user_id);
+          map[m.user_id] = label;
+        }
+        if (active) setMemberMap(map);
+      } catch {
+        if (active) setMemberMap({});
+      }
+    };
+    loadMembers();
+    return () => {
+      active = false;
+    };
+  }, [isAdmin]);
 
   const publicApiHint = useMemo(() => {
     const base = resolvePublicApiBaseUrl();
@@ -185,6 +217,7 @@ const ApiKeysManager: React.FC = () => {
           <TableHead>
             <TableRow>
               <TableCell>{t('apiKeys.table.name')}</TableCell>
+              {isAdmin && <TableCell>{t('apiKeys.table.createdBy')}</TableCell>}
               <TableCell>{t('apiKeys.table.key')}</TableCell>
               <TableCell>{t('apiKeys.table.scopes')}</TableCell>
               <TableCell>{t('apiKeys.table.allowedWorkflowId')}</TableCell>
@@ -198,6 +231,11 @@ const ApiKeysManager: React.FC = () => {
             {rows.map((r) => (
               <TableRow key={r.id} hover>
                 <TableCell>{r.name}</TableCell>
+                {isAdmin && (
+                  <TableCell sx={{ fontFamily: 'monospace' }}>
+                    {r.created_by ? (memberMap[r.created_by] || `#${r.created_by}`) : '-'}
+                  </TableCell>
+                )}
                 <TableCell sx={{ fontFamily: 'monospace' }}>
                   <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                     <Box component="span">{reveal[r.id] ? r.key : maskKey(r.key)}</Box>
@@ -233,7 +271,7 @@ const ApiKeysManager: React.FC = () => {
             ))}
             {rows.length === 0 && (
               <TableRow>
-                <TableCell colSpan={8}>
+                <TableCell colSpan={isAdmin ? 9 : 8}>
                   <Typography variant="caption" color="text.secondary">
                     {loading ? t('common.loading') : t('apiKeys.empty')}
                   </Typography>

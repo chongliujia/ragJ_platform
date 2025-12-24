@@ -55,9 +55,10 @@ interface FileUploadStatus {
   error?: string;
 }
 
-const ALLOWED_EXTS = ['pdf','docx','txt','md','html'];
+const ALLOWED_EXTS = ['pdf', 'docx', 'txt', 'md', 'html', 'xlsx', 'xls'];
 const MAX_SIZE_MB = Number((import.meta as any).env?.VITE_MAX_UPLOAD_MB || 100);
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+const PREVIEW_LIMIT = 5;
 const PARAM_LABEL_KEYS: Record<string, string> = {
   chunk_size: 'document.upload.params.chunk_size',
   chunk_overlap: 'document.upload.params.chunk_overlap',
@@ -89,6 +90,11 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   const [selectedStrategy, setSelectedStrategy] = useState<ChunkingStrategy>('recursive');
   const [strategyParams, setStrategyParams] = useState<Record<string, any>>({});
   const [loadingStrategies, setLoadingStrategies] = useState(true);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewChunks, setPreviewChunks] = useState<Array<{ chunk_index: number; text: string }>>([]);
+  const [previewTotal, setPreviewTotal] = useState<number | null>(null);
   const { enqueueSnackbar } = useSnackbar();
 
   // 获取分片策略列表
@@ -294,6 +300,38 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     setUploading(false);
     setUploadProgress(0);
     onClose();
+  };
+
+  const handlePreview = async () => {
+    if (files.length === 0) {
+      setError(t('document.upload.file.required'));
+      return;
+    }
+    const target = files[0];
+    if (!target?.file) {
+      setError(t('document.upload.file.required'));
+      return;
+    }
+    try {
+      setPreviewLoading(true);
+      setPreviewError(null);
+      const formData = new FormData();
+      formData.append('file', target.file);
+      formData.append('chunking_strategy', selectedStrategy);
+      formData.append('chunking_params', JSON.stringify(strategyParams));
+      formData.append('limit', String(PREVIEW_LIMIT));
+      const res = await documentApi.previewChunks(knowledgeBaseId, formData);
+      const items = Array.isArray(res.data?.chunks) ? res.data.chunks : [];
+      setPreviewChunks(items);
+      const total = Number.isFinite(Number(res.data?.total_chunks)) ? Number(res.data?.total_chunks) : items.length;
+      setPreviewTotal(total);
+      setPreviewOpen(true);
+    } catch (err: any) {
+      setPreviewError(err?.response?.data?.detail || t('document.upload.preview.failed'));
+      setPreviewOpen(true);
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   // 获取当前策略配置
@@ -629,6 +667,19 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
                       renderParamControl(paramName, paramConfig)
                     )}
                   </Box>
+                  <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={handlePreview}
+                      disabled={files.length === 0 || previewLoading}
+                    >
+                      {previewLoading ? t('document.upload.preview.loading') : t('document.upload.preview.action')}
+                    </Button>
+                    <Typography variant="caption" color="text.secondary">
+                      {t('document.upload.preview.hint', { count: PREVIEW_LIMIT })}
+                    </Typography>
+                  </Box>
                 </Box>
               )}
             </AccordionDetails>
@@ -651,6 +702,56 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
             : t('document.upload.uploadFiles', { count: files.length })}
         </Button>
       </DialogActions>
+
+      <Dialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>{t('document.upload.preview.title')}</DialogTitle>
+        <DialogContent>
+          {previewError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {previewError}
+            </Alert>
+          )}
+          {!previewError && (
+            <>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                {t('document.upload.preview.total', {
+                  total: previewTotal ?? previewChunks.length,
+                  count: previewChunks.length,
+                })}
+              </Typography>
+              {previewChunks.length === 0 ? (
+                <Typography variant="body2" color="text.secondary">
+                  {t('document.upload.preview.empty')}
+                </Typography>
+              ) : (
+                <List dense>
+                  {previewChunks.map((chunk) => (
+                    <ListItem key={`preview-${chunk.chunk_index}`} alignItems="flex-start" divider>
+                      <ListItemText
+                        primary={`#${chunk.chunk_index + 1}`}
+                        secondary={
+                          <Box sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                            {chunk.text}
+                          </Box>
+                        }
+                        secondaryTypographyProps={{ component: 'div' }}
+                      />
+                    </ListItem>
+                  ))}
+                </List>
+              )}
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPreviewOpen(false)}>{t('common.close')}</Button>
+        </DialogActions>
+      </Dialog>
     </Dialog>
   );
 };

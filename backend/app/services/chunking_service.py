@@ -4,6 +4,7 @@
 """
 
 import logging
+import re
 from typing import List, Dict, Any
 from enum import Enum
 from abc import ABC, abstractmethod
@@ -35,6 +36,22 @@ except ImportError:
     RUST_TEXT_PROCESSOR_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+_SENTENCE_SPLIT_RE = re.compile(r"[。！？!?；;\n]+")
+_TOKEN_RE = re.compile(r"[A-Za-z0-9]+|[\u4e00-\u9fff]")
+
+
+def _split_sentences(text: str) -> List[str]:
+    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    parts = _SENTENCE_SPLIT_RE.split(normalized)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _tokenize_text(text: str) -> List[str]:
+    tokens = _TOKEN_RE.findall(text or "")
+    if tokens:
+        return tokens
+    return (text or "").split()
 
 
 class ChunkingStrategy(Enum):
@@ -201,11 +218,8 @@ class SemanticChunker(BaseChunker):
 
     def _split_into_sentences(self, text: str) -> List[str]:
         """将文本分割成句子"""
-        import re
-
-        # 简单的句子分割（可以改进为使用更复杂的NLP库）
-        sentences = re.split(r"[.!?]+", text)
-        return [s.strip() for s in sentences if s.strip()]
+        # 简单的句子分割（支持中英文标点）
+        return _split_sentences(text)
 
     def _group_sentences_semantically(
         self, sentences: List[str], target_chunk_size: int = 1000, **kwargs
@@ -284,11 +298,8 @@ class SentenceChunker(BaseChunker):
             text: 输入文本
             sentences_per_chunk: 每个块包含的句子数
         """
-        import re
-
-        # 分割句子
-        sentences = re.split(r"[.!?]+", text)
-        sentences = [s.strip() for s in sentences if s.strip()]
+        # 分割句子（支持中英文标点）
+        sentences = _split_sentences(text)
 
         chunks = []
         for i in range(0, len(sentences), sentences_per_chunk):
@@ -314,8 +325,8 @@ class TokenBasedChunker(BaseChunker):
             overlap_tokens: 重叠的token数
         """
         try:
-            # 使用简单的空格分词作为token（可以改进为使用tokenizer）
-            tokens = text.split()
+            # 使用简单的中英文混合分词作为token（尽量保证中文可切分）
+            tokens = _tokenize_text(text)
             chunks = []
 
             start = 0

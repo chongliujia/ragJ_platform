@@ -245,7 +245,10 @@ class WorkflowPersistenceService:
         self, 
         execution_context: WorkflowExecutionContext,
         tenant_id: int,
-        executed_by: int
+        executed_by: int,
+        execution_config: Optional[Dict[str, Any]] = None,
+        debug: Optional[bool] = None,
+        enable_parallel: Optional[bool] = None,
     ) -> str:
         """保存工作流执行记录"""
         db = self._get_db()
@@ -258,7 +261,17 @@ class WorkflowPersistenceService:
             
             if not workflow_def:
                 raise ValueError(f"Workflow definition not found: {execution_context.workflow_id}")
-            
+
+            node_type_map = {}
+            try:
+                node_type_map = {
+                    str(n.get("id")): str(n.get("type") or "unknown")
+                    for n in (workflow_def.nodes or [])
+                    if isinstance(n, dict)
+                }
+            except Exception:
+                node_type_map = {}
+
             db_execution = DBWorkflowExecution(
                 execution_id=execution_context.execution_id,
                 workflow_id=workflow_def.id,
@@ -269,6 +282,9 @@ class WorkflowPersistenceService:
                 input_data=execution_context.input_data,
                 output_data=execution_context.output_data,
                 global_context=execution_context.global_context,
+                config=execution_config or {},
+                debug=bool(debug) if debug is not None else False,
+                enable_parallel=bool(enable_parallel) if enable_parallel is not None else True,
                 start_time=datetime.fromtimestamp(execution_context.start_time) if execution_context.start_time else None,
                 end_time=datetime.fromtimestamp(execution_context.end_time) if execution_context.end_time else None,
                 duration=(execution_context.end_time - execution_context.start_time) if execution_context.end_time else None,
@@ -291,7 +307,7 @@ class WorkflowPersistenceService:
                     execution_uuid=execution_context.execution_id,
                     node_id=step.node_id,
                     node_name=step.node_name,
-                    node_type="unknown",  # TODO: 从node配置中获取
+                    node_type=node_type_map.get(step.node_id, "unknown"),
                     status=step.status,
                     error_message=step.error,
                     input_data=step.input_data,
