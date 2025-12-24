@@ -7,12 +7,32 @@ import logging
 from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum
 from abc import ABC, abstractmethod
-import requests
 import json
+import httpx
 from app.core.config import settings
 from app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
+
+async def _post_json(
+    url: str,
+    *,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout_s: float = 30.0,
+) -> tuple[int, str, Optional[Dict[str, Any]]]:
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+        text = resp.text
+        data: Optional[Dict[str, Any]]
+        try:
+            data = resp.json()
+        except Exception:
+            data = None
+        return int(resp.status_code), text, data
+    except Exception as e:
+        return 0, str(e), None
 
 
 class RerankingProvider(Enum):
@@ -160,16 +180,15 @@ class BGEReranker(BaseReranker):
                 
             logger.info(f"Sending rerank request to: {rerank_url}")
             logger.info(f"Request payload: {payload}")
-            
-            response = requests.post(
-                rerank_url, headers=headers, json=payload, timeout=30
+
+            status_code, response_text, result = await _post_json(
+                rerank_url, headers=headers, payload=payload, timeout_s=30.0
             )
 
-            logger.info(f"Response status code: {response.status_code}")
-            logger.info(f"Response text: {response.text}")
+            logger.info(f"Response status code: {status_code}")
+            logger.info(f"Response text: {response_text}")
 
-            if response.status_code == 200:
-                result = response.json()
+            if status_code == 200 and isinstance(result, dict):
                 logger.info(f"Parsed response: {result}")
                 reranked_docs = []
 
@@ -206,7 +225,7 @@ class BGEReranker(BaseReranker):
                 return reranked_docs[:top_k]
             else:
                 logger.error(
-                    f"BGE reranking failed: {response.status_code} - {response.text}"
+                    f"BGE reranking failed: {status_code} - {response_text}"
                 )
                 # 回退到原始排序
                 return await NoReranker().rerank(query, documents, top_k)
@@ -298,10 +317,11 @@ class CohereReranker(BaseReranker):
             }
 
             rerank_url = f"{api_base.rstrip('/')}/rerank"
-            response = requests.post(rerank_url, headers=headers, json=payload, timeout=30)
+            status_code, response_text, result = await _post_json(
+                rerank_url, headers=headers, payload=payload, timeout_s=30.0
+            )
 
-            if response.status_code == 200:
-                result = response.json()
+            if status_code == 200 and isinstance(result, dict):
                 reranked_docs = []
 
                 for item in result.get("results", []):
@@ -318,7 +338,7 @@ class CohereReranker(BaseReranker):
                 return reranked_docs
             else:
                 logger.error(
-                    f"Cohere reranking failed: {response.status_code} - {response.text}"
+                    f"Cohere reranking failed: {status_code} - {response_text}"
                 )
                 return await NoReranker().rerank(query, documents, top_k)
 

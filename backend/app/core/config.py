@@ -116,6 +116,17 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
 
+    # 分片回填（启动时可选）
+    BACKFILL_ON_STARTUP: bool = False
+    BACKFILL_TENANT_ID: Optional[int] = None
+    BACKFILL_KB_NAME: Optional[str] = None
+    BACKFILL_DOCUMENT_ID: Optional[int] = None
+    BACKFILL_FORCE: bool = False
+    BACKFILL_DRY_RUN: bool = False
+    BACKFILL_RECOMPUTE_KB_TOTALS: bool = False
+    BACKFILL_RETRY_COUNT: int = 6
+    BACKFILL_RETRY_DELAY_SECONDS: int = 5
+
     # 嵌入模型配置
     DEFAULT_EMBEDDING_MODEL: str = "BAAI/bge-m3"  # BGE-M3嵌入模型
     EMBEDDING_DIMENSION: int = 1024  # BGE-M3的维度

@@ -35,6 +35,8 @@ services:
       # Use in-cluster MySQL for dev (overrides root .env mysql@localhost)
       - DATABASE_URL=mysql+pymysql://root:12345678@mysql:3306/ragj_platform
       - DEBUG=true
+      - BACKFILL_ON_STARTUP=true
+      - BACKFILL_RECOMPUTE_KB_TOTALS=true
     volumes:
       - ./backend:/app/backend
       # Mount project root .env so pydantic Settings(env_file='../../../.env') can load it as /app/.env

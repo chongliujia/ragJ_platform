@@ -7,6 +7,15 @@ import sys
 import os
 from pathlib import Path
 
+# This file is a standalone diagnostic script; skip it during pytest collection.
+if __name__ != "__main__":  # pragma: no cover
+    try:
+        import pytest  # type: ignore
+
+        pytest.skip("diagnostic script (not a pytest test)", allow_module_level=True)
+    except Exception:
+        pass
+
 # Add the backend directory to the Python path
 backend_dir = Path(__file__).parent
 sys.path.insert(0, str(backend_dir))

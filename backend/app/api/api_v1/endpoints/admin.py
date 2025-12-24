@@ -20,6 +20,27 @@ from app.services.milvus_service import milvus_service
 
 router = APIRouter()
 
+_BYTES_PER_MB = 1024 * 1024
+
+
+def _bytes_to_mb(value: Optional[int]) -> int:
+    try:
+        return int((int(value or 0)) // _BYTES_PER_MB)
+    except Exception:
+        return 0
+
+
+def _get_storage_bytes_by_tenant(db: Session, tenant_ids: List[int]) -> dict:
+    if not tenant_ids:
+        return {}
+    rows = (
+        db.query(Document.tenant_id, func.coalesce(func.sum(Document.file_size), 0))
+        .filter(Document.tenant_id.in_(tenant_ids))
+        .group_by(Document.tenant_id)
+        .all()
+    )
+    return {int(tid): int(total or 0) for tid, total in rows}
+
 
 class TenantStats(BaseModel):
     total_tenants: int
@@ -156,6 +177,10 @@ async def list_all_tenants(
     total = base_query.count()
     tenants = base_query.offset(skip).limit(limit).all()
 
+    storage_bytes_by_tenant = _get_storage_bytes_by_tenant(
+        db, [int(t.id) for t in tenants if t and t.id is not None]
+    )
+
     result = []
     for tenant in tenants:
         current_users = db.query(User).filter(User.tenant_id == tenant.id).count()
@@ -183,7 +208,7 @@ async def list_all_tenants(
                 current_users=current_users,
                 current_knowledge_bases=current_knowledge_bases,
                 current_documents=current_documents,
-                current_storage_mb=0,  # TODO: 实现存储计算
+                current_storage_mb=_bytes_to_mb(storage_bytes_by_tenant.get(int(tenant.id))),
                 created_at=tenant.created_at.isoformat() if tenant.created_at else "",
                 updated_at=tenant.updated_at.isoformat() if tenant.updated_at else "",
             )
@@ -643,6 +668,12 @@ async def update_tenant(
         .filter(KnowledgeBase.tenant_id == tenant.id)
         .count()
     )
+    current_storage_bytes = (
+        db.query(func.coalesce(func.sum(Document.file_size), 0))
+        .filter(Document.tenant_id == tenant.id)
+        .scalar()
+        or 0
+    )
 
     return TenantResponse(
         id=tenant.id,
@@ -657,7 +688,7 @@ async def update_tenant(
         current_users=current_users,
         current_knowledge_bases=current_knowledge_bases,
         current_documents=current_documents,
-        current_storage_mb=0,  # TODO: 实现存储计算
+        current_storage_mb=_bytes_to_mb(int(current_storage_bytes)),
         created_at=tenant.created_at.isoformat(),
         updated_at=tenant.updated_at.isoformat(),
     )
@@ -732,7 +763,10 @@ async def get_tenant_stats(
     total_tenants = db.query(Tenant).count()
     active_tenants = db.query(Tenant).filter(Tenant.is_active == True).count()
     total_users = db.query(User).count()
-    total_storage_mb = 0  # TODO: 实现存储计算
+    total_storage_bytes = (
+        db.query(func.coalesce(func.sum(Document.file_size), 0)).scalar() or 0
+    )
+    total_storage_mb = _bytes_to_mb(int(total_storage_bytes))
 
     return {
         "total_tenants": total_tenants,
@@ -750,7 +784,7 @@ async def recreate_milvus_collection(
 ):
     """重新创建Milvus集合以适应新的向量维度"""
     try:
-        success = milvus_service.recreate_collection_with_new_dimension(
+        success = await milvus_service.async_recreate_collection_with_new_dimension(
             collection_name, new_dimension
         )
         if success:

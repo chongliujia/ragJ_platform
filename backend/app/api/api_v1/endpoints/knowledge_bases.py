@@ -99,6 +99,12 @@ async def create_knowledge_base(
                     detail="Knowledge base quota exceeded for this tenant",
                 )
 
+    if not milvus_service.ensure_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Milvus service not available",
+        )
+
     try:
         # Check for existence in Milvus and (optionally) Elasticsearch
         es_exists = False
@@ -117,7 +123,7 @@ async def create_knowledge_base(
             )
 
         # Create in Milvus with tenant-specific name
-        milvus_service.create_collection(collection_name=tenant_collection_name)
+        await milvus_service.async_create_collection(collection_name=tenant_collection_name)
 
         # Create in Elasticsearch with tenant-specific name (optional)
         es_created = False
@@ -135,7 +141,7 @@ async def create_knowledge_base(
                     logger.error(
                         f"Failed to create Elasticsearch index for '{kb_name}', rolling back Milvus collection. Error: {es_err}"
                     )
-                    milvus_service.drop_collection(tenant_collection_name)
+                    await milvus_service.async_drop_collection(tenant_collection_name)
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=f"Failed to create Elasticsearch index: {es_err}",
@@ -520,9 +526,9 @@ async def clear_kb_vectors(
     try:
         # Drop and recreate Milvus collection
         if milvus_service.has_collection(tenant_collection_name):
-            milvus_service.drop_collection(tenant_collection_name)
+            await milvus_service.async_drop_collection(tenant_collection_name)
         # Recreate with default dimension from settings
-        milvus_service.create_collection(tenant_collection_name)
+        await milvus_service.async_create_collection(tenant_collection_name)
 
         # Reset document vector metadata
         from app.db.models.document import Document
@@ -607,7 +613,7 @@ async def clear_all_kb_vectors(
             kb_name = coll[len(tenant_prefix):]
             if kb_name not in kb_names_in_db:
                 try:
-                    milvus_service.drop_collection(coll)
+                    await milvus_service.async_drop_collection(coll)
                 except Exception as e:
                     logger.warning(f"Failed to drop stray collection '{coll}': {e}")
 
@@ -616,12 +622,12 @@ async def clear_all_kb_vectors(
             coll_name = f"{tenant_prefix}{kb_name}"
             if milvus_service.has_collection(coll_name):
                 try:
-                    milvus_service.drop_collection(coll_name)
+                    await milvus_service.async_drop_collection(coll_name)
                 except Exception as e:
                     logger.warning(f"Failed to drop collection '{coll_name}': {e}")
             # Recreate with default dimension
             try:
-                milvus_service.create_collection(coll_name)
+                await milvus_service.async_create_collection(coll_name)
             except Exception as e:
                 logger.warning(f"Failed to recreate collection '{coll_name}': {e}")
 
@@ -704,7 +710,7 @@ async def delete_knowledge_base(
 
         # It's safer to attempt deletion from both services even if one check fails
         if milvus_exists:
-            milvus_service.drop_collection(tenant_collection_name)
+            await milvus_service.async_drop_collection(tenant_collection_name)
 
         if es_exists and es_service is not None:
             await es_service.delete_index(tenant_collection_name)

@@ -25,6 +25,50 @@ from app.core.config import settings
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+def _normalize_vector_ids(value) -> list[int]:
+    """Normalize vector id storage across DB backends (JSON/list vs TEXT/JSON-string)."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        out: list[int] = []
+        for v in value:
+            try:
+                out.append(int(v))
+            except Exception:
+                continue
+        return out
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return []
+        try:
+            import json
+
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return _normalize_vector_ids(parsed)
+        except Exception:
+            pass
+        try:
+            import ast
+
+            parsed = ast.literal_eval(raw)
+            if isinstance(parsed, list):
+                return _normalize_vector_ids(parsed)
+        except Exception:
+            pass
+        # Best-effort: comma-separated ids like "1,2,3" or "[1, 2, 3]"
+        cleaned = raw.strip("[](){}")
+        parts = [p.strip() for p in cleaned.split(",") if p.strip()]
+        out: list[int] = []
+        for p in parts:
+            try:
+                out.append(int(p))
+            except Exception:
+                continue
+        return out
+    return []
+
 def _can_read_kb(kb_row: KBModel, user: User) -> bool:
     if user.role in ("super_admin", "tenant_admin"):
         return True
@@ -160,6 +204,38 @@ async def upload_document(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Unsupported file type: .{ext}. Allowed: {', '.join(sorted(allowed_exts))}",
         )
+
+    # Validate MIME type when provided (best-effort; some clients send octet-stream)
+    try:
+        content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    except Exception:
+        content_type = ""
+
+    allowed_mimes_by_ext = {
+        "pdf": {"application/pdf"},
+        "docx": {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/zip",  # some clients mislabel docx
+        },
+        "txt": {"text/plain"},
+        "md": {
+            "text/markdown",
+            "text/plain",
+            "text/x-markdown",
+            "application/markdown",
+            "application/x-markdown",
+        },
+        "html": {"text/html", "application/xhtml+xml"},
+    }
+
+    if content_type and content_type not in {"application/octet-stream"}:
+        allowed_mimes = allowed_mimes_by_ext.get(ext)
+        # If we don't recognize the ext in the mapping, fall back to extension-only.
+        if allowed_mimes and content_type not in allowed_mimes:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=f"Unsupported content-type '{content_type}' for .{ext}",
+            )
 
     # Read content and validate size
     content = await file.read()
@@ -454,13 +530,13 @@ async def delete_document(
                     ids = []
             deleted = 0
             if ids:
-                deleted = milvus_service.delete_vectors(tenant_collection_name, ids)
+                deleted = await milvus_service.async_delete_vectors(tenant_collection_name, ids)
                 if deleted == 0:
                     logger.warning(
                         f"Delete by ids returned 0 for document {document_id}. Falling back to filter deletion."
                     )
             if not ids or deleted == 0:
-                milvus_service.delete_by_filters(
+                await milvus_service.async_delete_by_filters(
                     tenant_collection_name,
                     {
                         "tenant_id": tenant_id,
@@ -596,17 +672,11 @@ async def get_document_chunks(
         try:
             import os
             from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
-            from app.db.models.knowledge_base import KnowledgeBase as KBModel
             from app.services import parser_service
             from app.services.chunking_service import chunking_service, ChunkingStrategy
             from app.core.config import settings
 
             if document.file_path and os.path.exists(document.file_path):
-                kb_row = (
-                    db.query(KBModel)
-                    .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id)
-                    .first()
-                )
                 chunk_size = int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE)
                 chunk_overlap = int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP)
 
@@ -667,9 +737,7 @@ async def get_document_chunks(
             except Exception:
                 pass
 
-        vector_ids = document.vector_ids or []
-        if not isinstance(vector_ids, list):
-            vector_ids = []
+        vector_ids = _normalize_vector_ids(document.vector_ids)
 
         # Pagination over stored ids to preserve order
         total = len(vector_ids)
@@ -683,11 +751,34 @@ async def get_document_chunks(
 
         slice_ids = [int(i) for i in vector_ids[offset:end]]
 
-        # Fetch from Milvus by IDs
+        # Fetch from Milvus by IDs (or fallback by filters)
         from app.services.milvus_service import milvus_service
-        tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+        tenant_collection_name = (
+            kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+        )
 
-        results = milvus_service.get_texts_by_ids(tenant_collection_name, slice_ids)
+        # If ids are empty (legacy docs), try query by filters first.
+        if not slice_ids:
+            try:
+                all_rows = await milvus_service.async_query_texts_by_filters(
+                    tenant_collection_name,
+                    {"tenant_id": tenant_id, "document_name": document.filename, "knowledge_base": kb_name},
+                    limit=min(max(int(offset + limit), 2000), 16384),
+                )
+                page = all_rows[offset : offset + limit] if all_rows else []
+                if page:
+                    return [
+                        DocumentChunk(
+                            id=int(r.get("id", 0)),
+                            chunk_index=offset + i,
+                            text=str(r.get("text", "") or ""),
+                        )
+                        for i, r in enumerate(page)
+                    ]
+            except Exception:
+                pass
+
+        results = await milvus_service.async_get_texts_by_ids(tenant_collection_name, slice_ids)
 
         # Build map and preserve order
         text_by_id = {int(r["id"]): r.get("text", "") for r in results}
@@ -697,7 +788,26 @@ async def get_document_chunks(
                 DocumentChunk(id=int(pk), chunk_index=offset + idx, text=text_by_id.get(int(pk), ""))
             )
 
-        return chunks
+        if any(c.text for c in chunks):
+            return chunks
+
+        # Legacy fallback: vector_ids might be empty/incorrect; query Milvus by filters
+        try:
+            wanted = max(int(offset + limit), 2000)
+            all_rows = await milvus_service.async_query_texts_by_filters(
+                tenant_collection_name,
+                {"tenant_id": tenant_id, "document_name": document.filename, "knowledge_base": kb_name},
+                limit=min(wanted, 16384),
+            )
+            if all_rows:
+                page = all_rows[offset : offset + limit]
+                return [
+                    DocumentChunk(id=int(r.get("id", 0)), chunk_index=offset + i, text=str(r.get("text", "") or ""))
+                    for i, r in enumerate(page)
+                ]
+        except Exception:
+            pass
+        return []
     except HTTPException:
         raise
     except Exception as e:
@@ -765,9 +875,9 @@ async def batch_delete_documents(
 
                 did = 0
                 if vec_ids:
-                    did = milvus_service.delete_vectors(tenant_collection_name, vec_ids)
+                    did = await milvus_service.async_delete_vectors(tenant_collection_name, vec_ids)
                 if not vec_ids or did == 0:
-                    milvus_service.delete_by_filters(
+                    await milvus_service.async_delete_by_filters(
                         tenant_collection_name,
                         {
                             "tenant_id": tenant_id,
@@ -862,11 +972,13 @@ async def get_document_status(
         if kb_row is None or not _can_read_kb(kb_row, current_user):
             raise HTTPException(status_code=404, detail="Document not found")
         
-        # TODO: Add progress information from processing service
+        # Best-effort progress from doc_metadata (written by document_service)
         progress_info = None
-        if document.status == DocumentStatusEnum.PROCESSING.value:
-            # In a full implementation, you might query a task queue or cache for progress
-            progress_info = {"stage": "chunking", "percentage": 50}
+        try:
+            meta = document.doc_metadata or {}
+            progress_info = meta.get("processing_progress")
+        except Exception:
+            progress_info = None
         
         return DocumentStatus(
             id=document.id,

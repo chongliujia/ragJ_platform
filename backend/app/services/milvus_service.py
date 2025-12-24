@@ -3,6 +3,8 @@ This module provides a service for interacting with the Milvus vector database.
 """
 
 import logging
+import asyncio
+import json
 from pymilvus import (
     utility,
     connections,
@@ -36,65 +38,111 @@ class MilvusService:
             self.alias = "default"
             self.db_name = settings.MILVUS_DATABASE
             self.tenant_collections = {}  # 缓存租户集合
+            self.initialized = False
+            self._connect()
+
+    def _connect(self) -> None:
+        self.alias = getattr(self, "alias", "default")
+        self.db_name = getattr(self, "db_name", settings.MILVUS_DATABASE)
+        if not hasattr(self, "tenant_collections"):
+            self.tenant_collections = {}
+        self.initialized = False
+        try:
+            # First, try multi-database workflow (Milvus 2.3+)
             try:
-                # First, try multi-database workflow (Milvus 2.3+)
-                try:
-                    logger.info(
-                        "Connecting to Milvus default database to ensure target DB exists..."
-                    )
-                    connections.connect(
-                        alias="db_check",
-                        host=settings.MILVUS_HOST,
-                        port=settings.MILVUS_PORT,
-                        user=settings.MILVUS_USER,
-                        password=settings.MILVUS_PASSWORD,
-                    )
+                logger.info(
+                    "Connecting to Milvus default database to ensure target DB exists..."
+                )
+                connections.connect(
+                    alias="db_check",
+                    host=settings.MILVUS_HOST,
+                    port=settings.MILVUS_PORT,
+                    user=settings.MILVUS_USER,
+                    password=settings.MILVUS_PASSWORD,
+                )
 
-                    existing_databases = db.list_database(using="db_check")
-                    if self.db_name not in existing_databases:
-                        logger.warning(
-                            f"Database '{self.db_name}' not found. Creating it now..."
-                        )
-                        db.create_database(self.db_name, using="db_check")
-                        logger.info(f"Database '{self.db_name}' created successfully.")
-
-                    connections.disconnect("db_check")
-                    logger.info("Disconnected from default database.")
-
-                    # Now, connect to the target database
-                    logger.info(
-                        f"Connecting to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}, DB: '{self.db_name}'"
-                    )
-                    connections.connect(
-                        alias=self.alias,
-                        host=settings.MILVUS_HOST,
-                        port=settings.MILVUS_PORT,
-                        user=settings.MILVUS_USER,
-                        password=settings.MILVUS_PASSWORD,
-                        db_name=self.db_name,
-                    )
-                    logger.info("Successfully connected to Milvus target database.")
-                    self.initialized = True
-                except Exception as db_err:
-                    # Fallback: Milvus without database feature (e.g., Milvus < 2.3)
+                existing_databases = db.list_database(using="db_check")
+                if self.db_name not in existing_databases:
                     logger.warning(
-                        f"Milvus multi-database ops failed ({db_err}). Trying single-DB connection without db_name..."
+                        f"Database '{self.db_name}' not found. Creating it now..."
                     )
-                    connections.connect(
-                        alias=self.alias,
-                        host=settings.MILVUS_HOST,
-                        port=settings.MILVUS_PORT,
-                        user=settings.MILVUS_USER,
-                        password=settings.MILVUS_PASSWORD,
-                    )
-                    logger.info("Connected to Milvus without specifying database (single-DB mode).")
-                    self.initialized = True
-            except Exception as e:
-                logger.error(f"Failed to connect to Milvus: {e}", exc_info=True)
-                self.initialized = False
-                # Do not raise here to allow the app to run without Milvus.
-                # All operations will be no-op or return empty results when not initialized.
-                # This keeps non-RAG features usable even if vector DB is down.
+                    db.create_database(self.db_name, using="db_check")
+                    logger.info(f"Database '{self.db_name}' created successfully.")
+
+                connections.disconnect("db_check")
+                logger.info("Disconnected from default database.")
+
+                # Now, connect to the target database
+                logger.info(
+                    f"Connecting to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}, DB: '{self.db_name}'"
+                )
+                connections.connect(
+                    alias=self.alias,
+                    host=settings.MILVUS_HOST,
+                    port=settings.MILVUS_PORT,
+                    user=settings.MILVUS_USER,
+                    password=settings.MILVUS_PASSWORD,
+                    db_name=self.db_name,
+                )
+                logger.info("Successfully connected to Milvus target database.")
+                self.initialized = True
+            except Exception as db_err:
+                # Fallback: Milvus without database feature (e.g., Milvus < 2.3)
+                logger.warning(
+                    f"Milvus multi-database ops failed ({db_err}). Trying single-DB connection without db_name..."
+                )
+                connections.connect(
+                    alias=self.alias,
+                    host=settings.MILVUS_HOST,
+                    port=settings.MILVUS_PORT,
+                    user=settings.MILVUS_USER,
+                    password=settings.MILVUS_PASSWORD,
+                )
+                logger.info("Connected to Milvus without specifying database (single-DB mode).")
+                self.initialized = True
+        except Exception as e:
+            logger.error(f"Failed to connect to Milvus: {e}", exc_info=True)
+            self.initialized = False
+            # Do not raise here to allow the app to run without Milvus.
+            # All operations will be no-op or return empty results when not initialized.
+            # This keeps non-RAG features usable even if vector DB is down.
+
+    def ensure_connected(self) -> bool:
+        """Best-effort reconnect when Milvus becomes ready after startup."""
+        if getattr(self, "initialized", False):
+            return True
+        self._connect()
+        return bool(getattr(self, "initialized", False))
+
+    async def async_create_collection(self, collection_name: str, dim=None) -> None:
+        if dim is None:
+            dim = settings.EMBEDDING_DIMENSION
+        await asyncio.to_thread(self.create_collection, collection_name, dim)
+
+    async def async_drop_collection(self, collection_name: str) -> None:
+        await asyncio.to_thread(self.drop_collection, collection_name)
+
+    async def async_recreate_collection_with_new_dimension(self, collection_name: str, new_dimension: int = 1024):
+        return await asyncio.to_thread(
+            self.recreate_collection_with_new_dimension, collection_name, new_dimension
+        )
+
+    async def async_insert(self, collection_name: str, entities: list[dict]) -> list:
+        return await asyncio.to_thread(self.insert, collection_name, entities)
+
+    async def async_delete_vectors(self, collection_name: str, ids: list[int]) -> int:
+        return await asyncio.to_thread(self.delete_vectors, collection_name, ids)
+
+    async def async_delete_by_filters(self, collection_name: str, filters: dict) -> int:
+        return await asyncio.to_thread(self.delete_by_filters, collection_name, filters)
+
+    async def async_get_texts_by_ids(self, collection_name: str, ids: list[int]) -> list[dict]:
+        return await asyncio.to_thread(self.get_texts_by_ids, collection_name, ids)
+
+    async def async_query_texts_by_filters(self, collection_name: str, filters: dict, limit: int = 16384) -> list[dict]:
+        return await asyncio.to_thread(
+            self.query_texts_by_filters, collection_name, filters, limit
+        )
 
     def list_collections(self) -> list[str]:
         """
@@ -152,6 +200,8 @@ class MilvusService:
             return
 
         try:
+            if dim is None:
+                dim = settings.EMBEDDING_DIMENSION
             # Define fields for the collection
             # Primary key
             pk_field = FieldSchema(
@@ -188,7 +238,10 @@ class MilvusService:
             )
 
             collection = Collection(
-                name=collection_name, schema=schema, using=self.alias
+                name=collection_name,
+                schema=schema,
+                using=self.alias,
+                shards_num=1,
             )
             logger.info(f"Successfully created collection: {collection_name}")
 
@@ -426,6 +479,22 @@ class MilvusService:
         if not ids:
             return 0
 
+        filtered_ids: list[int] = []
+        for i in ids:
+            try:
+                if i is None:
+                    continue
+                filtered_ids.append(int(i))
+            except Exception:
+                continue
+        if not filtered_ids:
+            logger.warning("No valid vector ids to delete; skipping.")
+            return 0
+        if len(filtered_ids) != len(ids):
+            logger.warning(
+                "Filtered invalid vector ids: kept %s of %s", len(filtered_ids), len(ids)
+            )
+
         if not self.has_collection(collection_name):
             logger.warning(
                 f"Collection '{collection_name}' does not exist. Skip deleting vectors."
@@ -434,7 +503,7 @@ class MilvusService:
 
         try:
             collection = Collection(name=collection_name, using=self.alias)
-            expr_ids = ",".join(str(i) for i in ids)
+            expr_ids = ",".join(str(i) for i in filtered_ids)
             expr = f"pk in [{expr_ids}]"
             res = collection.delete(expr)
             collection.flush()
@@ -510,7 +579,7 @@ class MilvusService:
 
         Returns list of {"id": int, "text": str}. Order is not guaranteed; caller may reorder.
         """
-        if not self.initialized:
+        if not self.initialized and not self.ensure_connected():
             logger.error("Milvus connection not initialized. Cannot fetch texts.")
             return []
 
@@ -523,6 +592,11 @@ class MilvusService:
 
         try:
             collection = Collection(name=collection_name, using=self.alias)
+            try:
+                collection.load()
+            except Exception:
+                # If load fails, query may still work in some deployments; continue best-effort.
+                pass
             expr_ids = ",".join(str(int(i)) for i in ids)
 
             # Primary key field name may differ across legacy collections ("pk" vs "id").
@@ -600,9 +674,121 @@ class MilvusService:
                     else (int(row.get("pk")) if row.get("pk") is not None else int(row.get("id", 0)))
                 )
                 results.append({"id": rid, "text": row.get(content_field, "")})
+            try:
+                collection.release()
+            except Exception:
+                pass
             return results
         except Exception as e:
             logger.error(f"Failed to query texts by ids from '{collection_name}': {e}", exc_info=True)
+            return []
+
+    def query_texts_by_filters(
+        self, collection_name: str, filters: dict, limit: int = 16384
+    ) -> list[dict]:
+        """Best-effort: query texts by metadata filters (for legacy docs without stored vector_ids).
+
+        Notes:
+        - Results are sorted by primary key to approximate insertion order.
+        - `limit` guards against huge scans; increase if you expect very large docs.
+        """
+        if not self.initialized and not self.ensure_connected():
+            logger.error("Milvus connection not initialized. Cannot query.")
+            return []
+
+        if not self.has_collection(collection_name):
+            logger.warning(f"Collection '{collection_name}' does not exist.")
+            return []
+
+        try:
+            collection = Collection(name=collection_name, using=self.alias)
+            collection.load()
+
+            pk_field = "pk"
+            content_field = "text"
+            try:
+                for f in collection.schema.fields:
+                    try:
+                        if getattr(f, "is_primary", False):
+                            pk_field = f.name
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                pk_field = "pk"
+
+            # Detect best-effort content field
+            try:
+                if not any(getattr(f, "name", "") == "text" for f in collection.schema.fields):
+                    best = None
+                    for f in collection.schema.fields:
+                        try:
+                            if getattr(f, "dtype", None) != DataType.VARCHAR:
+                                continue
+                            ml = int(getattr(f, "max_length", 0) or 0)
+                            if best is None or ml > best[0]:
+                                best = (ml, f.name)
+                        except Exception:
+                            continue
+                    if best:
+                        content_field = best[1]
+            except Exception:
+                content_field = "text"
+
+            expr_parts: list[str] = []
+            for k, v in (filters or {}).items():
+                if v is None:
+                    continue
+                if isinstance(v, bool):
+                    expr_parts.append(f"{k} == {str(v).lower()}")
+                elif isinstance(v, (int, float)):
+                    expr_parts.append(f"{k} == {int(v)}")
+                else:
+                    expr_parts.append(f"{k} == {json.dumps(str(v))}")
+
+            expr = " && ".join(expr_parts) if expr_parts else ""
+            if not expr:
+                logger.warning("Empty filter expr; refusing to query entire collection")
+                try:
+                    collection.release()
+                except Exception:
+                    pass
+                return []
+
+            try:
+                rows = collection.query(
+                    expr=expr,
+                    output_fields=[pk_field, content_field],
+                    limit=int(limit),
+                )
+            except TypeError:
+                # Older client may not support limit argument
+                rows = collection.query(expr=expr, output_fields=[pk_field, content_field])
+
+            try:
+                collection.release()
+            except Exception:
+                pass
+
+            results: list[dict] = []
+            for row in rows or []:
+                try:
+                    rid = (
+                        int(row.get(pk_field))
+                        if row.get(pk_field) is not None
+                        else (int(row.get("pk")) if row.get("pk") is not None else int(row.get("id", 0)))
+                    )
+                except Exception:
+                    rid = 0
+                results.append({"id": rid, "text": row.get(content_field, "")})
+
+            results.sort(key=lambda x: int(x.get("id", 0)))
+            return results
+        except Exception as e:
+            logger.error(
+                f"Failed to query texts by filters from '{collection_name}': {e}",
+                exc_info=True,
+            )
             return []
 
     async def search(
@@ -624,85 +810,104 @@ class MilvusService:
             A list of search results, where each result is a dictionary
             containing the hit's ID, distance, and entity fields (e.g., text).
         """
-        if not self.initialized:
-            logger.error("Milvus connection not initialized. Cannot perform search.")
-            return []
+        def _search_sync() -> list[dict]:
+            if not self.initialized:
+                logger.error("Milvus connection not initialized. Cannot perform search.")
+                return []
 
-        if not self.has_collection(collection_name):
-            logger.error(
-                f"Collection '{collection_name}' does not exist. Cannot perform search."
-            )
-            return []
-
-        try:
-            collection = Collection(name=collection_name, using=self.alias)
-            collection.load()  # Load collection into memory for searching
-
-            search_params = {
-                "metric_type": "L2",
-                "params": {"nprobe": 10},
-            }
-
-            results = collection.search(
-                data=[query_vector],
-                anns_field="vector",
-                param=search_params,
-                limit=top_k,
-                expr=filter_expr,
-                output_fields=["text", "tenant_id", "user_id", "document_name", "knowledge_base"],  # Retrieve metadata fields
-            )
-
-            # Unload collection after search to free up memory
-            collection.release()
-
-            # Process results
-            hits = results[0]  # Results for the first query vector
-            search_results = []
-            for hit in hits:
-                search_results.append(
-                    {
-                        "id": hit.id,
-                        "distance": hit.distance,
-                        "text": hit.entity.get("text"),
-                        "tenant_id": hit.entity.get("tenant_id"),
-                        "user_id": hit.entity.get("user_id"),
-                        "document_name": hit.entity.get("document_name"),
-                        "knowledge_base": hit.entity.get("knowledge_base"),
-                    }
-                )
-
-            logger.info(
-                f"Search in '{collection_name}' found {len(search_results)} results."
-            )
-            return search_results
-
-        except Exception as e:
-            # 检查是否是维度不匹配错误
-            if ("dimension mismatch" in str(e).lower() or 
-                "vector dimension" in str(e).lower() or 
-                "should divide the dim" in str(e).lower() or
-                ("length(" in str(e).lower() and "dim(" in str(e).lower())):
-                logger.warning(f"Vector dimension mismatch during search: {e}")
-                try:
-                    # 获取查询向量的实际维度
-                    query_vector_dim = len(query_vector)
-                    logger.info(f"Attempting to recreate collection with dimension {query_vector_dim}")
-                    
-                    # 重新创建集合
-                    self.recreate_collection_with_new_dimension(collection_name, query_vector_dim)
-                    
-                    # 重新尝试搜索（但由于集合为空，返回空结果）
-                    logger.warning(f"Collection '{collection_name}' was recreated but is now empty. Please re-upload documents.")
-                    return []
-                except Exception as recreate_error:
-                    logger.error(f"Failed to recreate collection for search: {recreate_error}")
-                    raise recreate_error
-            else:
+            if not self.has_collection(collection_name):
                 logger.error(
-                    f"Failed to search in collection '{collection_name}': {e}",
-                    exc_info=True,
+                    f"Collection '{collection_name}' does not exist. Cannot perform search."
                 )
-                raise
+                return []
+
+            try:
+                collection = Collection(name=collection_name, using=self.alias)
+                collection.load()  # Load collection into memory for searching
+
+                search_params = {
+                    "metric_type": "L2",
+                    "params": {"nprobe": 10},
+                }
+
+                results = collection.search(
+                    data=[query_vector],
+                    anns_field="vector",
+                    param=search_params,
+                    limit=top_k,
+                    expr=filter_expr,
+                    output_fields=[
+                        "text",
+                        "tenant_id",
+                        "user_id",
+                        "document_name",
+                        "knowledge_base",
+                    ],  # Retrieve metadata fields
+                )
+
+                # Unload collection after search to free up memory
+                collection.release()
+
+                # Process results
+                hits = results[0]  # Results for the first query vector
+                search_results = []
+                for hit in hits:
+                    search_results.append(
+                        {
+                            "id": hit.id,
+                            "distance": hit.distance,
+                            "text": hit.entity.get("text"),
+                            "tenant_id": hit.entity.get("tenant_id"),
+                            "user_id": hit.entity.get("user_id"),
+                            "document_name": hit.entity.get("document_name"),
+                            "knowledge_base": hit.entity.get("knowledge_base"),
+                        }
+                    )
+
+                logger.info(
+                    f"Search in '{collection_name}' found {len(search_results)} results."
+                )
+                return search_results
+
+            except Exception as e:
+                # 检查是否是维度不匹配错误
+                if (
+                    "dimension mismatch" in str(e).lower()
+                    or "vector dimension" in str(e).lower()
+                    or "should divide the dim" in str(e).lower()
+                    or ("length(" in str(e).lower() and "dim(" in str(e).lower())
+                ):
+                    logger.warning(f"Vector dimension mismatch during search: {e}")
+                    try:
+                        # 获取查询向量的实际维度
+                        query_vector_dim = len(query_vector)
+                        logger.info(
+                            f"Attempting to recreate collection with dimension {query_vector_dim}"
+                        )
+
+                        # 重新创建集合
+                        self.recreate_collection_with_new_dimension(
+                            collection_name, query_vector_dim
+                        )
+
+                        # 重新尝试搜索（但由于集合为空，返回空结果）
+                        logger.warning(
+                            f"Collection '{collection_name}' was recreated but is now empty. Please re-upload documents."
+                        )
+                        return []
+                    except Exception as recreate_error:
+                        logger.error(
+                            f"Failed to recreate collection for search: {recreate_error}"
+                        )
+                        raise recreate_error
+                else:
+                    logger.error(
+                        f"Failed to search in collection '{collection_name}': {e}",
+                        exc_info=True,
+                    )
+                    raise
+
+        return await asyncio.to_thread(_search_sync)
 
     def get_collection_count(self, collection_name: str) -> int:
         """

@@ -4,6 +4,7 @@ RAG Platform - FastAPI 应用入口
 """
 
 from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +15,7 @@ from app.core.logging import configure_logging
 from app.api.api_v1.api import api_router
 from app.db.init_db import init_db
 from app.services.elasticsearch_service import startup_es_service, shutdown_es_service
+from app.services.milvus_service import milvus_service
 
 # 配置日志
 configure_logging()
@@ -51,6 +53,35 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("数据库初始化失败", error=str(e))
         raise
+
+    # 启动时可选回填分片（从 Milvus 写回 document_chunks）
+    if settings.BACKFILL_ON_STARTUP:
+        async def _run_backfill_with_retry() -> None:
+            delay = max(1, int(settings.BACKFILL_RETRY_DELAY_SECONDS or 0))
+            attempts = max(1, int(settings.BACKFILL_RETRY_COUNT or 0))
+            for attempt in range(1, attempts + 1):
+                if milvus_service.ensure_connected():
+                    try:
+                        logger.info("启动回填分片任务")
+                        from app.services.backfill_service import run_backfill
+
+                        updated = await run_backfill(
+                            tenant_id=settings.BACKFILL_TENANT_ID,
+                            kb_name=settings.BACKFILL_KB_NAME,
+                            document_id=settings.BACKFILL_DOCUMENT_ID,
+                            force=settings.BACKFILL_FORCE,
+                            dry_run=settings.BACKFILL_DRY_RUN,
+                            recompute_kb_totals=settings.BACKFILL_RECOMPUTE_KB_TOTALS,
+                        )
+                        logger.info("回填完成", updated=updated)
+                    except Exception as e:
+                        logger.warning("回填失败，已跳过", error=str(e))
+                    return
+                logger.warning("Milvus 未就绪，回填等待重试", attempt=attempt)
+                await asyncio.sleep(delay)
+            logger.warning("Milvus 长时间未就绪，回填已跳过")
+
+        asyncio.create_task(_run_backfill_with_retry())
 
     # 启动 Elasticsearch 服务（可禁用）
     try:

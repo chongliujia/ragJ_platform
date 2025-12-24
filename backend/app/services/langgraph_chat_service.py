@@ -20,6 +20,8 @@ from app.services.llm_service import llm_service
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import get_elasticsearch_service
 from app.services.reranking_service import reranking_service, RerankingProvider
+from app.db.database import SessionLocal
+from app.db.models.document import Document
 
 logger = structlog.get_logger(__name__)
 
@@ -107,12 +109,20 @@ class LangGraphChatService:
             # Execute the workflow
             logger.info("Starting LangGraph RAG workflow", chat_id=chat_id)
             final_state = await self.graph.ainvoke(initial_state)
+
+            sources = self._build_sources_payload(
+                reranked_docs=final_state.get("reranked_docs") or [],
+                tenant_id=tenant_id,
+                knowledge_base_id=request.knowledge_base_id,
+                limit=3,
+            )
             
             return ChatResponse(
                 message=final_state["final_response"],
                 chat_id=chat_id,
                 model=final_state["step_info"].get("model_used") or request.model or settings.CHAT_MODEL_NAME,
                 usage=final_state["step_info"].get("usage", {}),
+                sources=sources or None,
                 timestamp=datetime.now(),
             )
             
@@ -194,14 +204,12 @@ class LangGraphChatService:
                 yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
             # Send sources as a separate event for frontend rendering
-            sources: list[str] = []
-            seen: set[str] = set()
-            for doc in (state.get("reranked_docs") or [])[:3]:
-                meta = doc.get("metadata") or {}
-                name = meta.get("document_name") or ""
-                if name and name not in seen:
-                    seen.add(name)
-                    sources.append(name)
+            sources = self._build_sources_payload(
+                reranked_docs=(state.get("reranked_docs") or []),
+                tenant_id=tenant_id,
+                knowledge_base_id=request.knowledge_base_id,
+                limit=3,
+            )
             if sources:
                 yield f"data: {json.dumps({'success': True, 'sources': sources, 'type': 'sources'}, ensure_ascii=False)}\n\n"
 
@@ -211,6 +219,79 @@ class LangGraphChatService:
             yield f"data: {json.dumps(error_chunk, ensure_ascii=False)}\n\n"
 
         yield "data: [DONE]\n\n"
+
+    def _build_sources_payload(
+        self,
+        *,
+        reranked_docs: List[Dict[str, Any]],
+        tenant_id: int,
+        knowledge_base_id: Optional[str],
+        limit: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """Build structured sources payload for the UI.
+
+        Each item tries to include `document_id` (DB) so the frontend can open the chunks dialog.
+        """
+        kb_name = str(knowledge_base_id or "")
+        if not kb_name or not reranked_docs:
+            return []
+
+        # De-dup by document name, keep best (first) occurrences
+        chosen: list[dict] = []
+        seen: set[str] = set()
+        for doc in reranked_docs:
+            meta = doc.get("metadata") or {}
+            name = str(meta.get("document_name") or "").strip()
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            snippet = str(doc.get("text") or "")
+            if len(snippet) > 240:
+                snippet = snippet[:240] + "…"
+            chosen.append(
+                {
+                    "document_name": name,
+                    "knowledge_base_id": kb_name,
+                    "source": doc.get("source"),
+                    "score": doc.get("score"),
+                    "rerank_score": doc.get("rerank_score"),
+                    "snippet": snippet,
+                }
+            )
+            if len(chosen) >= max(1, int(limit)):
+                break
+
+        if not chosen:
+            return []
+
+        # Resolve document ids in one DB query
+        try:
+            names = [c["document_name"] for c in chosen if c.get("document_name")]
+            if names:
+                db = SessionLocal()
+                try:
+                    rows = (
+                        db.query(Document.id, Document.filename, Document.total_chunks)
+                        .filter(
+                            Document.tenant_id == tenant_id,
+                            Document.knowledge_base_name == kb_name,
+                            Document.filename.in_(names),
+                        )
+                        .all()
+                    )
+                finally:
+                    db.close()
+                by_name = {str(fn): {"id": int(did), "total_chunks": int(tc or 0)} for did, fn, tc in rows}
+                for c in chosen:
+                    info = by_name.get(c.get("document_name") or "")
+                    if info:
+                        c["document_id"] = info["id"]
+                        c["total_chunks"] = info["total_chunks"]
+        except Exception:
+            # Best-effort: sources still work without doc id
+            pass
+
+        return chosen
     
     async def _analyze_query(self, state: ChatState) -> ChatState:
         """Analyze the user query for intent and complexity"""
@@ -282,7 +363,7 @@ class LangGraphChatService:
                         logger.warning(f"Vector dimension mismatch detected, recreating collection with new dimension")
                         try:
                             # 重新创建集合
-                            milvus_service.recreate_collection_with_new_dimension(
+                            await milvus_service.async_recreate_collection_with_new_dimension(
                                 tenant_collection_name, len(query_vector)
                             )
                             logger.info(f"Collection recreated, retrying search...")

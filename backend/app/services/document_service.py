@@ -29,7 +29,45 @@ class DocumentService:
     """
     Orchestrates the document processing workflow.
     """
-    
+
+    def _update_document_progress(
+        self,
+        db: Session,
+        document_id: int,
+        *,
+        stage: str,
+        percentage: int,
+        message: Optional[str] = None,
+        extra: Optional[dict] = None,
+    ) -> None:
+        """Best-effort progress reporting stored in Document.doc_metadata.
+
+        This avoids schema migrations while enabling UI polling via `/documents/{id}/status`.
+        """
+        try:
+            document = db.query(Document).filter(Document.id == document_id).first()
+            if not document:
+                return
+            meta = dict(document.doc_metadata or {})
+            payload: dict = {
+                "stage": str(stage),
+                "percentage": max(0, min(int(percentage), 100)),
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            if message:
+                payload["message"] = str(message)
+            if isinstance(extra, dict) and extra:
+                payload["extra"] = extra
+            meta["processing_progress"] = payload
+            document.doc_metadata = meta
+            db.add(document)
+            db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+
     def _save_document_record(
         self,
         db: Session,
@@ -171,6 +209,13 @@ class DocumentService:
                 content_preview=content_preview,
                 title=title
             )
+            self._update_document_progress(
+                db,
+                document_record.id,
+                stage="queued",
+                percentage=0,
+                message="Document accepted",
+            )
             # Store chunking config for future retries/debugging
             try:
                 meta = dict(document_record.doc_metadata or {})
@@ -187,6 +232,13 @@ class DocumentService:
             
             # Update status to PROCESSING
             self._update_document_status(db, document_record.id, DocumentStatus.PROCESSING)
+            self._update_document_progress(
+                db,
+                document_record.id,
+                stage="processing",
+                percentage=5,
+                message="Starting processing",
+            )
             
             es_service = await get_elasticsearch_service()
             
@@ -196,6 +248,14 @@ class DocumentService:
 
             chunks = await chunking_service.chunk_document(
                 text=document_text, strategy=chunking_strategy, **chunking_params
+            )
+            self._update_document_progress(
+                db,
+                document_record.id,
+                stage="chunking",
+                percentage=30,
+                message="Chunking completed",
+                extra={"chunks": len(chunks)},
             )
 
             # Get embeddings for chunks
@@ -210,6 +270,13 @@ class DocumentService:
                     # Provider may return useful JSON/text with reasons like invalid key/quota/model not allowed
                     error_msg = f"{error_msg}; details: {details}"
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
+                self._update_document_progress(
+                    db,
+                    document_record.id,
+                    stage="failed",
+                    percentage=30,
+                    message=error_msg,
+                )
                 logger.error(error_msg)
                 return
 
@@ -224,8 +291,23 @@ class DocumentService:
             if len(embeddings) != len(chunks):
                 error_msg = f"Number of embeddings ({len(embeddings)}) does not match chunks ({len(chunks)})"
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
+                self._update_document_progress(
+                    db,
+                    document_record.id,
+                    stage="failed",
+                    percentage=60,
+                    message=error_msg,
+                )
                 logger.error(error_msg)
                 return
+            self._update_document_progress(
+                db,
+                document_record.id,
+                stage="embedding",
+                percentage=60,
+                message="Embeddings generated",
+                extra={"chunks": len(chunks), "vectors": len(embeddings)},
+            )
 
             # Prepare entities for Milvus insertion with tenant/user metadata
             entities = [
@@ -245,14 +327,29 @@ class DocumentService:
 
             # Insert into Milvus (synchronous call)
             try:
-                vector_ids = milvus_service.insert(
+                vector_ids = await milvus_service.async_insert(
                     collection_name=tenant_collection_name, entities=entities
                 )
             except Exception as milvus_err:
                 error_msg = f"Milvus insert failed: {milvus_err}"
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
+                self._update_document_progress(
+                    db,
+                    document_record.id,
+                    stage="failed",
+                    percentage=70,
+                    message=error_msg,
+                )
                 logger.error(error_msg)
                 return
+            self._update_document_progress(
+                db,
+                document_record.id,
+                stage="vector_index",
+                percentage=80,
+                message="Vectors stored",
+                extra={"vector_ids": len(vector_ids) if isinstance(vector_ids, list) else 0},
+            )
 
             # Persist chunks for UI display / pagination (source-of-truth for "查看分片").
             # Keep it best-effort; failures should not invalidate a successful vector insert.
@@ -312,6 +409,14 @@ class DocumentService:
                     logger.warning(
                         f"Failed to persist document chunks for doc {document_record.id}: {e2}"
                     )
+            else:
+                self._update_document_progress(
+                    db,
+                    document_record.id,
+                    stage="persist_chunks",
+                    percentage=88,
+                    message="Chunk texts persisted",
+                )
 
             # Index documents in Elasticsearch with tenant isolation
             tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
@@ -336,6 +441,14 @@ class DocumentService:
             except Exception as es_err:
                 # Log but do not fail the whole pipeline after vectors are stored
                 logger.error(f"Elasticsearch indexing failed: {es_err}")
+            else:
+                self._update_document_progress(
+                    db,
+                    document_record.id,
+                    stage="keyword_index",
+                    percentage=95,
+                    message="Keyword index updated",
+                )
 
             # Update status to COMPLETED (use actual inserted vector count)
             try:
@@ -346,6 +459,13 @@ class DocumentService:
                     total_chunks=len(vector_ids) if isinstance(vector_ids, list) else 0,
                     vector_ids=vector_ids,
                 )
+                self._update_document_progress(
+                    db,
+                    document_record.id,
+                    stage="completed",
+                    percentage=100,
+                    message="Processing completed",
+                )
             except Exception as db_err:
                 # Attempt rollback and mark failed with reason
                 logger.error(f"Failed to finalize document status: {db_err}")
@@ -355,6 +475,13 @@ class DocumentService:
                     pass
                 error_msg = f"Finalize status failed: {db_err}"
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
+                self._update_document_progress(
+                    db,
+                    document_record.id,
+                    stage="failed",
+                    percentage=95,
+                    message=error_msg,
+                )
             
             logger.info(f"Successfully processed and indexed document {filename}")
 
@@ -368,6 +495,13 @@ class DocumentService:
                 except Exception:
                     pass
                 self._update_document_status(db, document_record.id, DocumentStatus.FAILED, error_msg)
+                self._update_document_progress(
+                    db,
+                    document_record.id,
+                    stage="failed",
+                    percentage=0,
+                    message=error_msg,
+                )
         finally:
             db.close()
 
@@ -407,9 +541,9 @@ class DocumentService:
                     except Exception:
                         ids = []
                 if ids:
-                    milvus_service.delete_vectors(tenant_collection_name, ids)
+                    await milvus_service.async_delete_vectors(tenant_collection_name, ids)
                 else:
-                    milvus_service.delete_by_filters(
+                    await milvus_service.async_delete_by_filters(
                         tenant_collection_name,
                         {
                             "tenant_id": tenant_id,
@@ -456,6 +590,13 @@ class DocumentService:
             document.processed_at = None
             db.add(document)
             db.commit()
+            self._update_document_progress(
+                db,
+                document.id,
+                stage="processing",
+                percentage=5,
+                message="Retry started",
+            )
 
             if chunking_params is None:
                 chunking_params = {}
@@ -471,6 +612,14 @@ class DocumentService:
             chunks = await chunking_service.chunk_document(
                 text=document_text, strategy=chunking_strategy, **chunking_params
             )
+            self._update_document_progress(
+                db,
+                document.id,
+                stage="chunking",
+                percentage=30,
+                message="Chunking completed",
+                extra={"chunks": len(chunks)},
+            )
 
             embedding_response = await llm_service.get_embeddings(
                 texts=chunks, tenant_id=tenant_id, user_id=user_id
@@ -484,6 +633,13 @@ class DocumentService:
                 document.error_message = error_msg
                 db.add(document)
                 db.commit()
+                self._update_document_progress(
+                    db,
+                    document.id,
+                    stage="failed",
+                    percentage=30,
+                    message=error_msg,
+                )
                 return
 
             adjusted_inputs = embedding_response.get("input_texts")
@@ -497,7 +653,22 @@ class DocumentService:
                 document.error_message = error_msg
                 db.add(document)
                 db.commit()
+                self._update_document_progress(
+                    db,
+                    document.id,
+                    stage="failed",
+                    percentage=60,
+                    message=error_msg,
+                )
                 return
+            self._update_document_progress(
+                db,
+                document.id,
+                stage="embedding",
+                percentage=60,
+                message="Embeddings generated",
+                extra={"chunks": len(chunks), "vectors": len(embeddings)},
+            )
 
             kb_name = document.knowledge_base_name
             tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
@@ -513,8 +684,16 @@ class DocumentService:
                 for chunk, vector in zip(chunks, embeddings)
             ]
 
-            vector_ids = milvus_service.insert(
+            vector_ids = await milvus_service.async_insert(
                 collection_name=tenant_collection_name, entities=entities
+            )
+            self._update_document_progress(
+                db,
+                document.id,
+                stage="vector_index",
+                percentage=80,
+                message="Vectors stored",
+                extra={"vector_ids": len(vector_ids) if isinstance(vector_ids, list) else 0},
             )
 
             # Persist chunks (best-effort)
@@ -551,6 +730,14 @@ class DocumentService:
             except Exception as e:
                 db.rollback()
                 logger.warning(f"Retry persist document_chunks failed: {e}")
+            else:
+                self._update_document_progress(
+                    db,
+                    document.id,
+                    stage="persist_chunks",
+                    percentage=88,
+                    message="Chunk texts persisted",
+                )
 
             # Update final fields
             document.status = DocumentStatus.COMPLETED.value
@@ -560,6 +747,13 @@ class DocumentService:
             document.processed_at = datetime.utcnow()
             db.add(document)
             db.commit()
+            self._update_document_progress(
+                db,
+                document.id,
+                stage="completed",
+                percentage=100,
+                message="Processing completed",
+            )
         except Exception as e:
             try:
                 db.rollback()
@@ -576,6 +770,13 @@ class DocumentService:
                     document.error_message = f"Retry failed: {e}"
                     db.add(document)
                     db.commit()
+                    self._update_document_progress(
+                        db,
+                        document.id,
+                        stage="failed",
+                        percentage=0,
+                        message=str(e),
+                    )
             except Exception:
                 pass
             logger.error(f"Retry processing failed for document {document_id}: {e}", exc_info=True)

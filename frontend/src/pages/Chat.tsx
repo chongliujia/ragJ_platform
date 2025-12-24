@@ -34,13 +34,26 @@ import {
 } from '@mui/icons-material';
 import { knowledgeBaseApi, chatApi, api } from '../services/api';
 import { modelConfigApi } from '../services/modelConfigApi';
+import DocumentChunksDialog from '../components/DocumentChunksDialog';
+
+interface ChatSource {
+  document_id?: number;
+  document_name: string;
+  knowledge_base_id?: string;
+  snippet?: string;
+  source?: string;
+  score?: number;
+  rerank_score?: number;
+  total_chunks?: number;
+}
 
 interface Message {
   id: string;
   content: string;
   sender: 'user' | 'bot';
   timestamp: Date;
-  sources?: string[];
+  sources?: ChatSource[];
+  isThinking?: boolean;
 }
 
 interface KnowledgeBase {
@@ -68,6 +81,48 @@ const Chat: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<null | (() => void)>(null);
   const lastUserMessageRef = useRef<string>('');
+  const [chunksOpen, setChunksOpen] = useState(false);
+  const [chunksKb, setChunksKb] = useState<string>('');
+  const [chunksDocId, setChunksDocId] = useState<string>('');
+  const [chunksFilename, setChunksFilename] = useState<string>('');
+  const [chunksTotal, setChunksTotal] = useState<number | undefined>(undefined);
+
+  const normalizeSources = (input: any[]): ChatSource[] => {
+    return input
+      .map((s) => {
+        if (typeof s === 'string') {
+          const name = s.trim();
+          return name ? ({ document_name: name } as ChatSource) : null;
+        }
+        if (s && typeof s === 'object') {
+          const name = String((s as any).document_name || (s as any).name || '').trim();
+          if (!name) return null;
+          return {
+            document_id: Number.isFinite(Number((s as any).document_id)) ? Number((s as any).document_id) : undefined,
+            document_name: name,
+            knowledge_base_id: (s as any).knowledge_base_id ? String((s as any).knowledge_base_id) : undefined,
+            snippet: (s as any).snippet ? String((s as any).snippet) : undefined,
+            source: (s as any).source ? String((s as any).source) : undefined,
+            score: Number.isFinite(Number((s as any).score)) ? Number((s as any).score) : undefined,
+            rerank_score: Number.isFinite(Number((s as any).rerank_score)) ? Number((s as any).rerank_score) : undefined,
+            total_chunks: Number.isFinite(Number((s as any).total_chunks)) ? Number((s as any).total_chunks) : undefined,
+          } as ChatSource;
+        }
+        return null;
+      })
+      .filter(Boolean) as ChatSource[];
+  };
+
+  const openChunks = (src: ChatSource) => {
+    const kb = src.knowledge_base_id || selectedKb;
+    const docId = src.document_id;
+    if (!kb || !docId) return;
+    setChunksKb(kb);
+    setChunksDocId(String(docId));
+    setChunksFilename(src.document_name);
+    setChunksTotal(typeof src.total_chunks === 'number' ? src.total_chunks : undefined);
+    setChunksOpen(true);
+  };
 
   // 滚动到底部
   const scrollToBottom = () => {
@@ -150,6 +205,7 @@ const Chat: React.FC = () => {
       content: '',
       sender: 'bot',
       timestamp: new Date(),
+      isThinking: true,
     };
 
     setMessages(prev => [...prev, botMessage]);
@@ -172,12 +228,13 @@ const Chat: React.FC = () => {
         requestData,
         (chunk) => {
           if (chunk?.success && chunk?.content) {
-            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: m.content + chunk.content } : m));
+            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: (m.isThinking ? '' : m.content) + chunk.content, isThinking: false } : m));
           } else if (chunk?.type === 'sources' && Array.isArray(chunk.sources)) {
-            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, sources: chunk.sources } : m));
+            const sources = normalizeSources(chunk.sources);
+            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, sources } : m));
           } else if (chunk?.success === false) {
             const errorContent = chunk.error || t('chat.errorResponse');
-            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: errorContent } : m));
+            setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: errorContent, isThinking: false } : m));
           }
         },
         (err) => {
@@ -186,10 +243,13 @@ const Chat: React.FC = () => {
           const errorContent = isTimeout
             ? (selectedKb ? t('chat.timeoutWithKnowledgeBase') : t('chat.timeout'))
             : t('chat.errorResponse');
-          setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: errorContent } : m));
+          setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: errorContent, isThinking: false } : m));
           setLoading(false);
         },
-        () => setLoading(false)
+        () => {
+          setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, isThinking: false } : m));
+          setLoading(false);
+        }
       );
       cancelRef.current = cancel;
       await promise;
@@ -208,7 +268,7 @@ const Chat: React.FC = () => {
       setMessages(prev => 
         prev.map(msg => 
           msg.id === botMessageId 
-            ? { ...msg, content: errorContent }
+            ? { ...msg, content: errorContent, isThinking: false }
             : msg
         )
       );
@@ -222,6 +282,7 @@ const Chat: React.FC = () => {
     if (cancel) {
       try { cancel(); } catch {}
       cancelRef.current = null;
+      setMessages(prev => prev.map(m => m.sender === 'bot' && m.isThinking ? { ...m, isThinking: false } : m));
       setLoading(false);
     }
   };
@@ -264,7 +325,8 @@ const Chat: React.FC = () => {
           background: 'linear-gradient(45deg, #00d4ff, #0099cc)',
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent',
-          fontFamily: 'Inter, sans-serif'
+          fontFamily: 'Inter, sans-serif',
+          fontSize: { xs: '1.2rem', sm: '1.4rem' }
         }}>
           {t('chat.title')}
         </Typography>
@@ -337,11 +399,11 @@ const Chat: React.FC = () => {
         borderRadius: 3,
         boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)'
       }}>
-        <List sx={{ p: 2 }}>
+        <List sx={{ p: 1.5 }}>
           {messages.map((message) => (
             <ListItem key={message.id} sx={{ 
               alignItems: 'flex-start',
-              mb: 2,
+              mb: 1.5,
               flexDirection: message.sender === 'user' ? 'row-reverse' : 'row'
             }}>
               <ListItemAvatar sx={{ 
@@ -350,8 +412,8 @@ const Chat: React.FC = () => {
               }}>
                 <Avatar sx={{ 
                   bgcolor: message.sender === 'user' ? 'primary.main' : 'secondary.main',
-                  width: 40,
-                  height: 40,
+                  width: 36,
+                  height: 36,
                   boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
                 }}>
                   {message.sender === 'user' ? <PersonIcon /> : <BotIcon />}
@@ -360,15 +422,15 @@ const Chat: React.FC = () => {
               <ListItemText
                 sx={{ margin: 0 }}
                 primary={
-                  <Box sx={{ 
-                    background: message.sender === 'user' 
-                      ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)'
-                      : 'linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%)',
-                    p: 2.5,
-                    borderRadius: 2,
-                    maxWidth: '85%',
-                    ml: message.sender === 'user' ? 'auto' : 0,
-                    mr: message.sender === 'user' ? 0 : 'auto',
+	                  <Box sx={{ 
+	                    background: message.sender === 'user' 
+	                      ? 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)'
+	                      : 'linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%)',
+	                    p: 2,
+	                    borderRadius: 2,
+	                    maxWidth: '78%',
+	                    ml: message.sender === 'user' ? 'auto' : 0,
+	                    mr: message.sender === 'user' ? 0 : 'auto',
                     border: message.sender === 'user' 
                       ? '1px solid rgba(255, 255, 255, 0.1)'
                       : '1px solid rgba(0, 212, 255, 0.2)',
@@ -393,168 +455,153 @@ const Chat: React.FC = () => {
                         : 'transparent #2a2a2a transparent transparent'
                     }
                   }}>
-                    {message.sender === 'bot' ? (
-                      <Box sx={{ 
-                        fontFamily: 'Inter, sans-serif',
-                        fontSize: '0.875rem',
-                        lineHeight: 1.6,
-                        color: 'text.primary',
-                        fontWeight: 400,
-                        '& p': { margin: '0.5em 0' },
-                        '& h1': { 
-                          margin: '1em 0 0.5em 0',
-                          fontWeight: 600,
-                          fontSize: '1.1rem'
-                        },
-                        '& h2': { 
-                          margin: '0.8em 0 0.4em 0',
-                          fontWeight: 600,
-                          fontSize: '1.05rem'
-                        },
-                        '& h3': { 
-                          margin: '0.6em 0 0.3em 0',
-                          fontWeight: 600,
-                          fontSize: '1rem'
-                        },
+	                    {message.sender === 'bot' ? (
+	                      <Box sx={{ 
+	                        fontFamily: 'Inter, sans-serif',
+	                        fontSize: '0.82rem',
+	                        lineHeight: 1.55,
+	                        color: 'text.primary',
+	                        fontWeight: 400,
+	                        '& p': { margin: '0.5em 0' },
+	                        '& h1': { 
+	                          margin: '1em 0 0.5em 0',
+	                          fontWeight: 600,
+	                          fontSize: '1.05rem'
+	                        },
+	                        '& h2': { 
+	                          margin: '0.8em 0 0.4em 0',
+	                          fontWeight: 600,
+	                          fontSize: '1rem'
+	                        },
+	                        '& h3': { 
+	                          margin: '0.6em 0 0.3em 0',
+	                          fontWeight: 600,
+	                          fontSize: '0.95rem'
+	                        },
                         '& ul, & ol': { 
                           margin: '0.5em 0',
                           paddingLeft: '1.5em'
                         },
                         '& li': { margin: '0.25em 0' },
                         '& strong': { fontWeight: 600 },
-                        '& code': { 
-                          backgroundColor: 'rgba(0, 0, 0, 0.1)',
-                          padding: '0.2em 0.4em',
-                          borderRadius: '3px',
-                          fontFamily: 'monospace',
-                          fontSize: '0.9em'
-                        },
-                        '& pre': {
-                          backgroundColor: 'rgba(0, 0, 0, 0.05)',
-                          padding: '1em',
-                          borderRadius: '5px',
-                          overflow: 'auto',
-                          fontFamily: 'monospace',
-                          fontSize: '0.9em'
-                        }
-                      }}>
-                        <ReactMarkdown
-                          components={{
-                            code({ node, className, children, ...props }) {
-                              const match = /language-(\w+)/.exec(className || '');
-                              const codeString = String(children || '').replace(/\n$/, '');
-                              const lang = match ? match[1] : 'plaintext';
-                              const onCopy = () => navigator.clipboard.writeText(codeString).catch(()=>{});
-                              const isInline = !match;
-                              if (isInline) {
-                                return <code className={className} {...props}>{children}</code>;
-                              }
-                              return (
-                                <Box sx={{ position: 'relative' }}>
-                                  <IconButton size="small" onClick={onCopy} sx={{ position: 'absolute', right: 6, top: 6, zIndex: 1 }}>
-                                    <CopyIcon fontSize="small" />
-                                  </IconButton>
-                                  <SyntaxHighlighter language={lang} style={oneDark} PreTag="div" customStyle={{ borderRadius: 8, paddingTop: 28 }}>
-                                    {codeString}
-                                  </SyntaxHighlighter>
-                                </Box>
-                              );
-                            }
-                          }}
-                        >
-                          {message.content}
-                        </ReactMarkdown>
+	                        '& code': { 
+	                          backgroundColor: 'rgba(0, 0, 0, 0.1)',
+	                          padding: '0.2em 0.4em',
+	                          borderRadius: '3px',
+	                          fontFamily: 'monospace',
+	                          fontSize: '0.92em'
+	                        },
+	                        '& pre': {
+	                          backgroundColor: 'rgba(0, 0, 0, 0.05)',
+	                          padding: '1em',
+	                          borderRadius: '5px',
+	                          overflow: 'auto',
+	                          fontFamily: 'monospace',
+	                          fontSize: '0.92em'
+	                        }
+	                      }}>
+	                        {message.isThinking && !message.content ? (
+	                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+	                            <CircularProgress size={14} sx={{ color: '#00d4ff' }} />
+	                            <Typography variant="body2" sx={{ fontSize: '0.78rem', opacity: 0.85 }}>
+	                              {t('chat.thinking')}
+	                            </Typography>
+	                          </Box>
+	                        ) : (
+	                          <ReactMarkdown
+	                            components={{
+	                              code({ node, className, children, ...props }) {
+	                                const match = /language-(\w+)/.exec(className || '');
+	                                const codeString = String(children || '').replace(/\n$/, '');
+	                                const lang = match ? match[1] : 'plaintext';
+	                                const onCopy = () => navigator.clipboard.writeText(codeString).catch(()=>{});
+	                                const isInline = !match;
+	                                if (isInline) {
+	                                  return <code className={className} {...props}>{children}</code>;
+	                                }
+	                                return (
+	                                  <Box sx={{ position: 'relative' }}>
+	                                    <IconButton size="small" onClick={onCopy} sx={{ position: 'absolute', right: 6, top: 6, zIndex: 1 }}>
+	                                      <CopyIcon fontSize="small" />
+	                                    </IconButton>
+	                                    <SyntaxHighlighter language={lang} style={oneDark} PreTag="div" customStyle={{ borderRadius: 8, paddingTop: 28 }}>
+	                                      {codeString}
+	                                    </SyntaxHighlighter>
+	                                  </Box>
+	                                );
+	                              }
+	                            }}
+	                          >
+	                            {message.content}
+	                          </ReactMarkdown>
+	                        )}
                         {message.sources && message.sources.length > 0 && (
                           <Stack direction="row" spacing={1} sx={{ mt: 1, flexWrap: 'wrap' }}>
-                            {message.sources.map((s, idx) => (
-                              <Chip key={idx} label={s} size="small" variant="outlined" color="info" />
-                            ))}
-                          </Stack>
-                        )}
-                      </Box>
-                    ) : (
-                      <Typography variant="body1" sx={{ 
-                        whiteSpace: 'pre-wrap',
-                        fontFamily: 'Inter, sans-serif',
-                        fontSize: '0.875rem',
-                        lineHeight: 1.6,
-                        color: 'white',
-                        fontWeight: 400
-                      }}>
-                        {message.content}
-                      </Typography>
+                            {message.sources.map((s, idx) => {
+                              const clickable = Boolean(s.document_id && (s.knowledge_base_id || selectedKb));
+                              const titleParts: string[] = [];
+                              if (s.source) titleParts.push(String(s.source));
+                              if (typeof s.score === 'number') titleParts.push(`score=${s.score.toFixed(3)}`);
+                              const title = s.snippet ? `${titleParts.join(' · ')}\n${s.snippet}` : titleParts.join(' · ');
+	                              return (
+	                                <Chip
+	                                  key={`${s.document_name}-${idx}`}
+	                                  label={s.document_name}
+	                                  size="small"
+	                                  variant="outlined"
+	                                  color="info"
+	                                  clickable={clickable}
+	                                  onClick={clickable ? () => openChunks(s) : undefined}
+	                                  title={title}
+	                                  sx={{ height: 22, '& .MuiChip-label': { fontSize: '0.72rem', px: 0.75 } }}
+	                                />
+	                              );
+	                            })}
+	                          </Stack>
+	                        )}
+	                      </Box>
+	                    ) : (
+	                      <Typography variant="body1" sx={{ 
+	                        whiteSpace: 'pre-wrap',
+	                        fontFamily: 'Inter, sans-serif',
+	                        fontSize: '0.82rem',
+	                        lineHeight: 1.55,
+	                        color: 'white',
+	                        fontWeight: 400
+	                      }}>
+	                        {message.content}
+	                      </Typography>
                     )}
-                    <Typography variant="caption" sx={{ 
-                      color: message.sender === 'user' ? 'rgba(255, 255, 255, 0.7)' : 'text.secondary',
-                      fontFamily: 'Inter, sans-serif',
-                      fontSize: '0.75rem',
-                      mt: 1,
-                      display: 'block'
-                    }}>
-                      {message.timestamp.toLocaleTimeString()}
-                    </Typography>
+	                    <Typography variant="caption" sx={{ 
+	                      color: message.sender === 'user' ? 'rgba(255, 255, 255, 0.7)' : 'text.secondary',
+	                      fontFamily: 'Inter, sans-serif',
+	                      fontSize: '0.7rem',
+	                      mt: 1,
+	                      display: 'block'
+	                    }}>
+	                      {message.timestamp.toLocaleTimeString()}
+	                    </Typography>
                   </Box>
                 }
               />
             </ListItem>
           ))}
-          {loading && (
-            <ListItem sx={{ mb: 2 }}>
-              <ListItemAvatar sx={{ mr: 1 }}>
-                <Avatar sx={{ 
-                  bgcolor: 'secondary.main',
-                  width: 40,
-                  height: 40,
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
-                }}>
-                  <BotIcon />
-                </Avatar>
-              </ListItemAvatar>
-              <ListItemText
-                sx={{ margin: 0 }}
-                primary={
-                  <Box sx={{ 
-                    background: 'linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%)',
-                    p: 2.5,
-                    borderRadius: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.5,
-                    border: '1px solid rgba(0, 212, 255, 0.2)',
-                    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
-                    position: 'relative',
-                    '&::before': {
-                      content: '""',
-                      position: 'absolute',
-                      top: 15,
-                      left: -8,
-                      width: 0,
-                      height: 0,
-                      borderStyle: 'solid',
-                      borderWidth: '8px 8px 8px 0',
-                      borderColor: 'transparent #2a2a2a transparent transparent'
-                    }
-                  }}>
-                    <CircularProgress size={18} sx={{ color: '#00d4ff' }} />
-                    <Typography variant="body1" sx={{
-                      fontFamily: 'Inter, sans-serif',
-                      fontSize: '0.95rem',
-                      color: 'text.primary'
-                    }}>
-                      {t('chat.thinking')}
-                    </Typography>
-                  </Box>
-                }
-              />
-            </ListItem>
-          )}
           <div ref={messagesEndRef} />
-        </List>
-      </Paper>
+	        </List>
+	      </Paper>
 
-      {/* 输入框 */}
-      <Box sx={{ 
-        display: 'flex', 
+	      <DocumentChunksDialog
+	        open={chunksOpen}
+	        onClose={() => setChunksOpen(false)}
+	        knowledgeBaseId={chunksKb}
+	        documentId={chunksDocId}
+	        filename={chunksFilename}
+	        totalChunks={chunksTotal}
+	      />
+
+	      {/* 输入框 */}
+	      <Box sx={{ 
+	        display: 'flex', 
         gap: 1.5,
         alignItems: 'flex-end',
         background: 'rgba(26, 31, 46, 0.8)',
@@ -567,22 +614,22 @@ const Chat: React.FC = () => {
         <IconButton onClick={regenerate} disabled={loading || !lastUserMessageRef.current} title={t('chat.regenerate') as string}>
           <ReplayIcon />
         </IconButton>
-        <TextField
-          fullWidth
-          multiline
-          maxRows={4}
+	        <TextField
+	          fullWidth
+	          multiline
+	          maxRows={4}
           value={inputMessage}
           onChange={(e) => setInputMessage(e.target.value)}
           onKeyPress={handleKeyPress}
           placeholder={t('chat.inputPlaceholder')}
           disabled={loading}
-          sx={{
-            '& .MuiInputBase-root': {
-              fontFamily: 'Inter, sans-serif',
-              fontSize: '0.95rem',
-              backgroundColor: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: 1.5,
+	          sx={{
+	            '& .MuiInputBase-root': {
+	              fontFamily: 'Inter, sans-serif',
+	              fontSize: '0.88rem',
+	              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+	              border: '1px solid rgba(255, 255, 255, 0.1)',
+	              borderRadius: 1.5,
               '&:hover': {
                 backgroundColor: 'rgba(255, 255, 255, 0.08)',
                 borderColor: 'rgba(0, 212, 255, 0.3)'
@@ -593,37 +640,37 @@ const Chat: React.FC = () => {
                 boxShadow: '0 0 0 2px rgba(0, 212, 255, 0.2)'
               }
             },
-            '& .MuiInputBase-input': {
-              '&::placeholder': {
-                color: 'rgba(255, 255, 255, 0.5)',
-                fontSize: '0.95rem',
-                fontFamily: 'Inter, sans-serif'
-              }
-            }
-          }}
-        />
+	            '& .MuiInputBase-input': {
+	              '&::placeholder': {
+	                color: 'rgba(255, 255, 255, 0.5)',
+	                fontSize: '0.88rem',
+	                fontFamily: 'Inter, sans-serif'
+	              }
+	            }
+	          }}
+	        />
         <Button
           variant="outlined"
           onClick={stopGenerating}
           disabled={!loading}
           startIcon={<StopIcon />}
-          sx={{ 
-            minWidth: 64,
-            height: 54,
-            borderRadius: 1.5,
-          }}
-        >
-          {t('chat.stop')}
-        </Button>
+	          sx={{ 
+	            minWidth: 64,
+	            height: 48,
+	            borderRadius: 1.5,
+	          }}
+	        >
+	          {t('chat.stop')}
+	        </Button>
         <Button
           variant="contained"
           onClick={sendMessage}
           disabled={loading || !inputMessage.trim()}
-          sx={{ 
-            minWidth: 64,
-            height: 54,
-            borderRadius: 1.5,
-            background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)',
+	          sx={{ 
+	            minWidth: 64,
+	            height: 48,
+	            borderRadius: 1.5,
+	            background: 'linear-gradient(135deg, #00d4ff 0%, #0099cc 100%)',
             boxShadow: '0 4px 16px rgba(0, 212, 255, 0.3)',
             '&:hover': {
               background: 'linear-gradient(135deg, #1ae1ff 0%, #00b3e6 100%)',

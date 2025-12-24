@@ -1541,7 +1541,7 @@ class WorkflowExecutionEngine:
                     or 'should divide the dim' in str(e).lower()
                 ):
                     try:
-                        milvus_service.recreate_collection_with_new_dimension(
+                        await milvus_service.async_recreate_collection_with_new_dimension(
                             tenant_collection_name, len(query_vector)
                         )
                         return await milvus_service.search(
