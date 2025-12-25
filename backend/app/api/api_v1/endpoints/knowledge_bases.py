@@ -27,6 +27,7 @@ from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.models.permission import PermissionType
 from app.services import parser_service
+from app.services.storage_service import storage_service
 from app.services.chunking_service import chunking_service, ChunkingStrategy
 
 router = APIRouter()
@@ -429,13 +430,9 @@ async def rebuild_es_index(
                     # Read file
                     if not doc.file_path:
                         continue
-                    # Safety: only read existing files
-                    import os
-
-                    if not os.path.exists(doc.file_path):
+                    if not storage_service.exists(doc.file_path):
                         continue
-                    with open(doc.file_path, "rb") as f:
-                        content = f.read()
+                    content = storage_service.read_bytes(doc.file_path)
                     # Parse and chunk with default recursive strategy
                     text = parser_service.parse_document(content, doc.filename)
                     if not text:
@@ -961,29 +958,55 @@ async def delete_knowledge_base(
                 f"Elasticsearch enabled but unavailable; could not delete index '{tenant_collection_name}'."
             )
 
-        # Delete documents rows in DB (best-effort)
+        # Delete document chunks first to satisfy FK constraints
+        try:
+            from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
+            db.query(DocumentChunkModel).filter(
+                DocumentChunkModel.knowledge_base_name == kb_name,
+                DocumentChunkModel.tenant_id == tenant_id,
+            ).delete(synchronize_session=False)
+            db.commit()
+        except Exception as dbe:
+            db.rollback()
+            logger.error(f"Failed to delete KB document chunks from DB: {dbe}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete knowledge base chunks",
+            )
+
+        # Delete document rows in DB
         try:
             from app.db.models.document import Document
             db.query(Document).filter(
                 Document.knowledge_base_name == kb_name,
                 Document.tenant_id == tenant_id,
-            ).delete()
+            ).delete(synchronize_session=False)
             db.commit()
         except Exception as dbe:
-            logger.warning(f"Failed to delete KB documents from DB: {dbe}")
+            db.rollback()
+            logger.error(f"Failed to delete KB documents from DB: {dbe}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete knowledge base documents",
+            )
 
-        # Delete from DB if exists (by name + tenant)
+        # Delete KB rows in DB (by name + tenant)
         try:
-            kb_row = (
+            kb_rows = (
                 db.query(KBModel)
                 .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id)
-                .first()
+                .all()
             )
-            if kb_row:
-                db.delete(kb_row)
-                db.commit()
+            for row in kb_rows:
+                db.delete(row)
+            db.commit()
         except Exception as dbe:
-            logger.warning(f"Failed to delete KB row from DB: {dbe}")
+            db.rollback()
+            logger.error(f"Failed to delete KB row from DB: {dbe}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete knowledge base record",
+            )
 
         return
     except HTTPException:

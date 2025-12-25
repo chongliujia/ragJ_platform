@@ -46,20 +46,18 @@ class Settings(BaseSettings):
     MILVUS_PASSWORD: Optional[str] = None
     MILVUS_DATABASE: str = "ragj_platform"
 
-    # 备用Qdrant配置
-    QDRANT_URL: str = "http://localhost:6333"
-    QDRANT_API_KEY: Optional[str] = None
-
     # Elasticsearch配置
     ELASTICSEARCH_HOSTS: list[str] = ["http://localhost:9200"]
     ENABLE_ELASTICSEARCH: bool = False
 
-    # 对象存储配置
-    MINIO_ENDPOINT: str = "localhost:9000"
-    MINIO_ACCESS_KEY: str = "minioadmin"
-    MINIO_SECRET_KEY: str = "minioadmin"
-    MINIO_BUCKET_NAME: str = "ragj-documents"
-    MINIO_SECURE: bool = False
+    # 对象存储配置（S3 兼容，如 SeaweedFS）
+    STORAGE_BACKEND: str = "local"  # local / s3 / seaweedfs
+    S3_ENDPOINT: Optional[str] = None
+    S3_ACCESS_KEY: Optional[str] = None
+    S3_SECRET_KEY: Optional[str] = None
+    S3_BUCKET_NAME: Optional[str] = None
+    S3_SECURE: Optional[bool] = None
+    S3_REGION: Optional[str] = None
 
     # 上传目录（本地开发默认 /tmp/uploads）
     UPLOAD_DIR: str = "/tmp/uploads"

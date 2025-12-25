@@ -1,10 +1,9 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
     platform: linux/arm64/v8
     container_name: ragj_mysql
+    restart: unless-stopped
     environment:
       - MYSQL_ROOT_PASSWORD=12345678
       - MYSQL_DATABASE=ragj_platform
@@ -27,6 +26,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     container_name: ragj_backend
+    restart: unless-stopped
     environment:
       # Override hosts for in-cluster services
       - ELASTICSEARCH_HOSTS=["http://elasticsearch:9200"]
@@ -37,6 +37,13 @@ services:
       - DEBUG=true
       - BACKFILL_ON_STARTUP=true
       - BACKFILL_RECOMPUTE_KB_TOTALS=true
+      - STORAGE_BACKEND=seaweedfs
+      - S3_ENDPOINT=http://seaweedfs:8333
+      - S3_ACCESS_KEY=seaweedfs
+      - S3_SECRET_KEY=seaweedfs_secret
+      - S3_BUCKET_NAME=ragj-documents
+      - S3_SECURE=false
+      - S3_REGION=us-east-1
     volumes:
       - ./backend:/app/backend
       # Mount project root .env so pydantic Settings(env_file='../../../.env') can load it as /app/.env
@@ -47,6 +54,7 @@ services:
       - elasticsearch
       - milvus
       - mysql
+      - seaweedfs
     networks:
       - rag_network
 
@@ -54,6 +62,7 @@ services:
     image: node:20-alpine
     working_dir: /app/frontend
     container_name: ragj_frontend
+    restart: unless-stopped
     # Avoid re-running `npm ci` on every restart (it requires network and can fail),
     # only install deps when node_modules is missing/empty.
     command: sh -c "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 5173"
@@ -73,6 +82,7 @@ services:
   elasticsearch:
     image: elasticsearch:8.11.3
     container_name: elasticsearch_for_rag
+    restart: unless-stopped
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -87,15 +97,31 @@ services:
   milvus:
     image: milvusdb/milvus:v2.4.12
     container_name: milvus_standalone
+    restart: unless-stopped
     command: ["milvus", "run", "standalone"]
     environment:
       - ETCD_USE_EMBED=true
-      - MINIO_USE_EMBED=true
       - COMMON_STORAGETYPE=local
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
       - "19530:19530"
+    networks:
+      - rag_network
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: ragj_seaweedfs
+    restart: unless-stopped
+    command: ["server", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-dir=/data"]
+    volumes:
+      - seaweedfs_data:/data
+      - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    ports:
+      - "8333:8333"
+      - "9333:9333"
+      - "8888:8888"
+      - "8080:8080"
     networks:
       - rag_network
 
@@ -105,6 +131,8 @@ volumes:
   milvus_data:
     driver: local
   mysql_data:
+    driver: local
+  seaweedfs_data:
     driver: local
 
 networks:

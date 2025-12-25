@@ -418,8 +418,11 @@ roles:
 # .env.production
 DATABASE_URL=postgresql://user:pass@db:5432/ragj_platform
 REDIS_URL=redis://redis:6379/0
-QDRANT_URL=http://qdrant:6333
-MINIO_ENDPOINT=minio:9000
+STORAGE_BACKEND=seaweedfs
+S3_ENDPOINT=http://seaweedfs:8333
+S3_ACCESS_KEY=your_access_key
+S3_SECRET_KEY=your_secret_key
+S3_BUCKET_NAME=ragj-documents
 
 # LLM configuration
 OPENAI_API_KEY=your_openai_key

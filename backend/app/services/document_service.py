@@ -16,6 +16,7 @@ from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import get_elasticsearch_service
 from app.services.chunking_service import chunking_service, ChunkingStrategy
 from app.services import parser_service
+from app.services.storage_service import storage_service
 from app.core.config import settings
 from app.db.database import SessionLocal
 from app.db.models.document import Document, DocumentStatus
@@ -80,7 +81,9 @@ class DocumentService:
         tenant_id: int,
         user_id: int,
         content_preview: Optional[str] = None,
-        title: Optional[str] = None
+        title: Optional[str] = None,
+        original_filename: Optional[str] = None,
+        doc_metadata: Optional[dict] = None,
     ) -> Document:
         """Create and save document record to database."""
         # Ensure KB record exists, get its id
@@ -95,7 +98,7 @@ class DocumentService:
             )
         document = Document(
             filename=filename,
-            original_filename=filename,
+            original_filename=original_filename or filename,
             file_type=file_type,
             file_size=file_size,
             file_path=file_path,
@@ -107,7 +110,8 @@ class DocumentService:
             title=title,
             content_preview=content_preview,
             total_chunks=0,
-            vector_ids=[]
+            vector_ids=[],
+            doc_metadata=doc_metadata or {},
         )
         db.add(document)
         db.commit()
@@ -155,7 +159,7 @@ class DocumentService:
 
     async def process_document(
         self,
-        content: bytes,
+        content: Optional[bytes],
         filename: str,
         kb_name: str,
         tenant_id: int,
@@ -163,6 +167,8 @@ class DocumentService:
         chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE,
         chunking_params: dict = None,
         file_system_path: Optional[str] = None,
+        doc_metadata: Optional[dict] = None,
+        original_filename: Optional[str] = None,
     ):
         """
         Process an uploaded document with proper status tracking.
@@ -172,6 +178,11 @@ class DocumentService:
         es_service = None
         
         try:
+            if content is None:
+                if not file_system_path:
+                    raise Exception("File content missing and storage path not provided")
+                content = storage_service.read_bytes(file_system_path)
+
             # Save initial document record
             file_type = filename.split('.')[-1].lower() if '.' in filename else 'unknown'
             file_size = len(content)
@@ -208,7 +219,9 @@ class DocumentService:
                 tenant_id=tenant_id,
                 user_id=user_id,
                 content_preview=content_preview,
-                title=title
+                title=title,
+                original_filename=original_filename,
+                doc_metadata=doc_metadata,
             )
             self._update_document_progress(
                 db,
@@ -567,8 +580,8 @@ class DocumentService:
                 raise ValueError("Only failed documents can be retried")
             if not require_failed and document.status == DocumentStatus.PROCESSING.value:
                 raise ValueError("Document is currently processing")
-            if not document.file_path or not os.path.exists(document.file_path):
-                raise ValueError("Document file not found on disk")
+            if not document.file_path or not storage_service.exists(document.file_path):
+                raise ValueError("Document file not found in storage")
 
             old_total_chunks = int(document.total_chunks or 0)
             kb_name = document.knowledge_base_name
@@ -656,8 +669,7 @@ class DocumentService:
             if chunking_params is None:
                 chunking_params = {}
 
-            with open(document.file_path, "rb") as f:
-                content = f.read()
+            content = storage_service.read_bytes(document.file_path)
 
             # Parse content
             document_text = parser_service.parse_document(content, document.filename)

@@ -3,10 +3,14 @@ Document Management API Endpoints
 Handles document uploads and processing within a knowledge base.
 """
 
+import hashlib
 import logging
 from typing import Optional, List
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, status, Form, HTTPException, Depends, Path
 import os
+import uuid
+
+import aiofiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sa_func
@@ -21,9 +25,11 @@ from app.db.models.user import User
 from app.db.models.permission import PermissionType
 from app.core.dependencies import get_current_user, get_tenant_id, require_permission
 from app.core.config import settings
+from app.services.storage_service import storage_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 def _normalize_vector_ids(value) -> list[int]:
     """Normalize vector id storage across DB backends (JSON/list vs TEXT/JSON-string)."""
@@ -81,6 +87,41 @@ def _can_write_kb(kb_row: KBModel, user: User) -> bool:
     if user.role in ("super_admin", "tenant_admin"):
         return True
     return kb_row.owner_id == user.id
+
+
+async def _stream_upload_to_disk(
+    file: UploadFile,
+    file_path: str,
+    max_size: int,
+) -> tuple[int, str]:
+    """Save upload to disk in chunks while computing size/hash."""
+    size = 0
+    hasher = hashlib.sha256()
+    too_large = False
+
+    async with aiofiles.open(file_path, "wb") as out:
+        while True:
+            chunk = await file.read(UPLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            size += len(chunk)
+            if max_size and size > max_size:
+                too_large = True
+                break
+            hasher.update(chunk)
+            await out.write(chunk)
+
+    if too_large:
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Max size: {max_size} bytes",
+        )
+
+    return size, hasher.hexdigest()
 
 
 class DocumentUploadResponse(BaseModel):
@@ -205,10 +246,9 @@ async def upload_document(
         )
 
     # Sanitize filename to prevent path traversal
-    original_filename = file.filename or "uploaded_file"
-    safe_filename = os.path.basename(original_filename)
-    if not safe_filename:
-        safe_filename = "uploaded_file"
+    raw_filename = file.filename or "uploaded_file"
+    original_filename = os.path.basename(raw_filename) or "uploaded_file"
+    safe_filename = original_filename
 
     # Validate extension against allowed list
     ext = safe_filename.rsplit('.', 1)[-1].lower() if '.' in safe_filename else ''
@@ -259,15 +299,7 @@ async def upload_document(
                 detail=f"Unsupported content-type '{content_type}' for .{ext}",
             )
 
-    # Read content and validate size
-    content = await file.read()
-    if len(content) > settings.MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File too large. Max size: {settings.MAX_FILE_SIZE} bytes",
-        )
-
-    # Enforce tenant quotas
+    # Enforce tenant quotas (count limit before reading file)
     tenant_row = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if tenant_row is not None:
         max_docs = int(tenant_row.max_documents or 0)
@@ -281,6 +313,31 @@ async def upload_document(
                     detail="Document quota exceeded for this tenant",
                 )
 
+    # Persist upload to disk to avoid loading large files into memory
+    upload_root = settings.UPLOAD_DIR or "/tmp/uploads"
+    upload_dir = os.path.join(upload_root, str(tenant_id))
+    os.makedirs(upload_dir, exist_ok=True)
+    stored_filename = f"{uuid.uuid4().hex}_{safe_filename}"
+    file_path = os.path.join(upload_dir, stored_filename)
+
+    try:
+        file_size, file_hash = await _stream_upload_to_disk(
+            file=file,
+            file_path=file_path,
+            max_size=settings.MAX_FILE_SIZE,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        logger.error(f"Failed to save upload: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save file")
+
+    # Enforce tenant storage quota after size is known
+    if tenant_row is not None:
         quota_bytes = int(tenant_row.storage_quota_mb or 0) * 1024 * 1024
         if quota_bytes > 0:
             used_bytes = (
@@ -289,11 +346,40 @@ async def upload_document(
                 .scalar()
                 or 0
             )
-            if used_bytes + len(content) > quota_bytes:
+            if used_bytes + file_size > quota_bytes:
+                try:
+                    os.remove(file_path)
+                except Exception:
+                    pass
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Storage quota exceeded for this tenant",
                 )
+
+    storage_path = file_path
+    if storage_service.is_object_storage():
+        storage_key = f"tenant_{tenant_id}/{stored_filename}"
+        try:
+            storage_service.upload_file(file_path, storage_key, content_type=content_type or None)
+            storage_path = storage_key
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+        except Exception as e:
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+            logger.error(f"Failed to upload to object storage: {e}")
+            raise HTTPException(status_code=500, detail="Failed to store file")
+
+    doc_metadata = {
+        "file_hash": file_hash,
+        "storage_backend": storage_service.backend,
+    }
+    if storage_service.bucket:
+        doc_metadata["storage_bucket"] = storage_service.bucket
 
     # Parse chunking strategy (fallback to KB settings)
     kb_settings = kb_row.settings or {}
@@ -330,46 +416,42 @@ async def upload_document(
     params.setdefault("chunk_size", int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE))
     params.setdefault("chunk_overlap", int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP))
 
-    # TODO: Add validation for file type based on settings.SUPPORTED_FILE_TYPES
-    # For example, check file.content_type or filename extension
-
     # Dispatch processing: Celery (if enabled) or local background task
     if settings.USE_CELERY:
-        # Save file to disk first; Celery task will read from path
-        upload_dir = os.path.join(settings.UPLOAD_DIR or "/tmp/uploads", str(tenant_id))
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, safe_filename)
-        try:
-            with open(file_path, 'wb') as f:
-                f.write(content)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
-
         try:
             from app.tasks.document_tasks import process_document_task
             process_document_task.delay(
-                file_path,
+                storage_path,
                 safe_filename,
                 kb_name,
                 tenant_id,
                 current_user.id,
                 strategy.value,
                 params,
+                doc_metadata,
+                original_filename,
             )
         except Exception as e:
+            try:
+                storage_service.delete(storage_path)
+            except Exception:
+                pass
             logger.error(f"Failed to enqueue Celery task: {e}")
             raise HTTPException(status_code=500, detail="Failed to enqueue processing task")
     else:
         # Add the processing task to the background
         background_tasks.add_task(
             document_service.process_document,
-            content,
+            None,
             safe_filename,
             kb_name,
             tenant_id,
             current_user.id,
             strategy,
             params,
+            storage_path,
+            doc_metadata,
+            original_filename,
         )
 
     return {
@@ -755,12 +837,10 @@ async def delete_document(
         except Exception as e:
             logger.warning(f"Failed to delete Elasticsearch docs for document {document_id}: {e}")
         
-        # Remove file if it exists
+        # Remove file/object if it exists
         if document.file_path:
             try:
-                import os
-                if os.path.exists(document.file_path):
-                    os.remove(document.file_path)
+                storage_service.delete(document.file_path)
             except Exception as e:
                 logger.warning(f"Failed to delete file {document.file_path}: {e}")
         
@@ -855,12 +935,10 @@ async def get_document_chunks(
             from app.services.chunking_service import chunking_service, ChunkingStrategy
             from app.core.config import settings
 
-            if document.file_path and os.path.exists(document.file_path):
+            if document.file_path and storage_service.exists(document.file_path):
                 chunk_size = int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE)
                 chunk_overlap = int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP)
-
-                with open(document.file_path, "rb") as f:
-                    raw = f.read()
+                raw = storage_service.read_bytes(document.file_path)
                 text = parser_service.parse_document(raw, document.filename)
                 chunks_all = await chunking_service.chunk_document(
                     text=text,
@@ -1095,12 +1173,10 @@ async def batch_delete_documents(
             except Exception as e:
                 logger.warning(f"Failed to delete ES docs for document {doc.id}: {e}")
 
-            # Delete file
+            # Delete file/object
             try:
                 if doc.file_path:
-                    import os
-                    if os.path.exists(doc.file_path):
-                        os.remove(doc.file_path)
+                    storage_service.delete(doc.file_path)
             except Exception as e:
                 logger.warning(f"Failed to delete file {doc.file_path}: {e}")
 

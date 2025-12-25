@@ -34,6 +34,11 @@
 docker compose -f docker-compose.dev.yml up -d
 ```
 
+#### SeaweedFS（对象存储）
+
+默认使用 SeaweedFS 的 S3 兼容接口（端口 8333）。如需自定义访问凭据，请修改：
+`deploy/seaweedfs/s3.json` 与 `.env` 中的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 保持一致。
+
 访问：
 - 前端：http://localhost:5173
 - 后端：http://localhost:8000/api/v1/docs
