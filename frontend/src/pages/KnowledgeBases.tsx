@@ -16,6 +16,8 @@ import {
   Chip,
   Alert,
   CircularProgress,
+  FormControlLabel,
+  Switch,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -23,6 +25,7 @@ import {
   Storage as StorageIcon,
   Description as DocumentIcon,
   CloudUpload as UploadIcon,
+  Tune as TuneIcon,
 } from '@mui/icons-material';
 import { knowledgeBaseApi } from '../services/api';
 import type { KnowledgeBase } from '../types/models';
@@ -47,6 +50,16 @@ const KnowledgeBases: React.FC = () => {
   
   // 文档管理相关状态
   const [manageDialogOpen, setManageDialogOpen] = useState(false);
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsKbId, setSettingsKbId] = useState<string>('');
+  const [settingsForm, setSettingsForm] = useState({
+    retrieval_top_k: 3,
+    rerank_enabled: true,
+    rerank_top_k: 2,
+  });
 
   // 获取知识库列表
   const fetchKnowledgeBases = async (silent: boolean = false) => {
@@ -135,6 +148,45 @@ const KnowledgeBases: React.FC = () => {
   const handleManageDocuments = (kbId: string) => {
     setSelectedKbId(kbId);
     setManageDialogOpen(true);
+  };
+
+  const openSettingsDialog = async (kbId: string) => {
+    setSettingsDialogOpen(true);
+    setSettingsKbId(kbId);
+    setSettingsLoading(true);
+    setSettingsError(null);
+    try {
+      const response = await knowledgeBaseApi.getSettings(kbId);
+      const data = response.data || {};
+      setSettingsForm({
+        retrieval_top_k: Number(data.retrieval_top_k || 3),
+        rerank_enabled: Boolean(data.rerank_enabled !== false),
+        rerank_top_k: Number(data.rerank_top_k || 2),
+      });
+    } catch (error: any) {
+      console.error('Failed to fetch knowledge base settings:', error);
+      setSettingsError(error?.response?.data?.detail || t('knowledgeBase.settings.fetchError'));
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const saveSettings = async () => {
+    setSettingsSaving(true);
+    setSettingsError(null);
+    try {
+      await knowledgeBaseApi.updateSettings(settingsKbId, {
+        retrieval_top_k: Math.max(1, Math.round(Number(settingsForm.retrieval_top_k || 1))),
+        rerank_enabled: Boolean(settingsForm.rerank_enabled),
+        rerank_top_k: Math.max(1, Math.round(Number(settingsForm.rerank_top_k || 1))),
+      });
+      setSettingsDialogOpen(false);
+    } catch (error: any) {
+      console.error('Failed to update knowledge base settings:', error);
+      setSettingsError(error?.response?.data?.detail || t('knowledgeBase.settings.updateError'));
+    } finally {
+      setSettingsSaving(false);
+    }
   };
 
   // 上传成功后刷新知识库列表
@@ -319,6 +371,14 @@ const KnowledgeBases: React.FC = () => {
                   >
                     {t('knowledgeBase.card.manageDocuments')}
                   </Button>
+                  <Button
+                    size="small"
+                    color="primary"
+                    onClick={() => openSettingsDialog(kb.id)}
+                    startIcon={<TuneIcon />}
+                  >
+                    {t('knowledgeBase.card.settings')}
+                  </Button>
                   <IconButton
                     size="small"
                     color="error"
@@ -385,6 +445,76 @@ const KnowledgeBases: React.FC = () => {
             disabled={creating}
           >
             {creating ? t('common.loading') : t('common.create')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={settingsDialogOpen} onClose={() => setSettingsDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>{t('knowledgeBase.settings.title')}</DialogTitle>
+        <DialogContent>
+          {settingsError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {settingsError}
+            </Alert>
+          )}
+          {settingsLoading ? (
+            <Box sx={{ display: 'flex', justifyContent: 'center', py: 3 }}>
+              <CircularProgress />
+            </Box>
+          ) : (
+            <>
+              <TextField
+                label={t('knowledgeBase.settings.retrievalTopK')}
+                type="number"
+                fullWidth
+                margin="dense"
+                value={settingsForm.retrieval_top_k}
+                onChange={(e) =>
+                  setSettingsForm((prev) => ({
+                    ...prev,
+                    retrieval_top_k: Math.max(1, Number(e.target.value || 1)),
+                  }))
+                }
+                helperText={t('knowledgeBase.settings.retrievalTopKHelp')}
+              />
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={settingsForm.rerank_enabled}
+                    onChange={(e) =>
+                      setSettingsForm((prev) => ({
+                        ...prev,
+                        rerank_enabled: e.target.checked,
+                      }))
+                    }
+                  />
+                }
+                label={t('knowledgeBase.settings.rerankEnabled')}
+              />
+              <TextField
+                label={t('knowledgeBase.settings.rerankTopK')}
+                type="number"
+                fullWidth
+                margin="dense"
+                value={settingsForm.rerank_top_k}
+                onChange={(e) =>
+                  setSettingsForm((prev) => ({
+                    ...prev,
+                    rerank_top_k: Math.max(1, Number(e.target.value || 1)),
+                  }))
+                }
+                helperText={t('knowledgeBase.settings.rerankTopKHelp')}
+                disabled={!settingsForm.rerank_enabled}
+              />
+            </>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSettingsDialogOpen(false)} disabled={settingsSaving}>
+            {t('common.cancel')}
+          </Button>
+          <Button onClick={saveSettings} variant="contained" disabled={settingsSaving || settingsLoading}>
+            {settingsSaving ? t('common.saving') : t('common.save')}
           </Button>
         </DialogActions>
       </Dialog>

@@ -139,6 +139,10 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
         chunks_count: d.total_chunks || 0,
         error_message: d.error_message || undefined,
         content_type: d.file_type || undefined,
+        progress: d.progress ? {
+          percentage: typeof d.progress?.percentage === 'number' ? d.progress.percentage : undefined,
+          stage: d.progress?.stage,
+        } : undefined,
       }));
       setDocuments(mapped);
     } catch (error: any) {

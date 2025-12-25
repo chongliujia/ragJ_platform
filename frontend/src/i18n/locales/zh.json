@@ -25,6 +25,7 @@
     "import": "导入",
     "upload": "上传",
     "download": "下载",
+    "saving": "保存中...",
     "rowsPerPage": "每页行数:",
     "of": "共",
     "moreThan": "超过"
@@ -115,7 +116,18 @@
       "createdAt": "创建时间",
       "manageDocuments": "管理文档",
       "uploadDocuments": "上传文档",
+      "settings": "设置",
       "noDescription": "暂无描述"
+    },
+    "settings": {
+      "title": "知识库设置",
+      "retrievalTopK": "检索数量",
+      "retrievalTopKHelp": "每次检索返回的片段数",
+      "rerankEnabled": "开启重排",
+      "rerankTopK": "重排数量",
+      "rerankTopKHelp": "参与重排的片段数",
+      "fetchError": "获取知识库设置失败",
+      "updateError": "更新知识库设置失败"
     },
     "status": {
       "active": "正常",
@@ -194,7 +206,8 @@
         "supportedFormats": "支持 PDF、DOCX、TXT、MD、HTML、CSV、JSON、XML、RTF、EPUB、ODT、Excel、PowerPoint 等格式",
         "invalidType": "不支持的文件类型 {{ext}}",
         "sizeExceeded": "文件超过大小限制（≤ {{size}} MB）",
-        "supportedHint": "支持：{{types}} · 最大 {{size}} MB"
+        "supportedHint": "支持：{{types}} · 最大 {{size}} MB",
+        "duplicate": "检测到重复文件，已跳过上传"
       },
       "status": {
         "pending": "待上传",
@@ -210,6 +223,14 @@
         "title": "分片策略配置",
         "strategy": "分片策略",
         "parameters": "参数设置"
+      },
+      "duplicatePolicy": {
+        "label": "重复处理",
+        "skip": "内容重复则跳过",
+        "replace": "同名覆盖",
+        "version": "保留为新版本",
+        "allow": "始终保留（不去重）",
+        "help": "控制上传同名或同内容文件时的处理方式。"
       },
       "preview": {
         "action": "预览分片",

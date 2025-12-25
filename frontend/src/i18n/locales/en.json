@@ -25,6 +25,7 @@
     "import": "Import",
     "upload": "Upload",
     "download": "Download",
+    "saving": "Saving...",
     "rowsPerPage": "Rows per page:",
     "of": "of",
     "moreThan": "more than"
@@ -115,7 +116,18 @@
       "createdAt": "Created",
       "manageDocuments": "Manage Documents",
       "uploadDocuments": "Upload Documents",
+      "settings": "Settings",
       "noDescription": "No description"
+    },
+    "settings": {
+      "title": "Knowledge Base Settings",
+      "retrievalTopK": "Retrieval top-k",
+      "retrievalTopKHelp": "Number of chunks returned per retrieval",
+      "rerankEnabled": "Enable rerank",
+      "rerankTopK": "Rerank top-k",
+      "rerankTopKHelp": "Number of chunks to rerank",
+      "fetchError": "Failed to load knowledge base settings",
+      "updateError": "Failed to update knowledge base settings"
     },
     "status": {
       "active": "Active",
@@ -194,7 +206,8 @@
         "supportedFormats": "Supports PDF, DOCX, TXT, MD, HTML, CSV, JSON, XML, RTF, EPUB, ODT, Excel, PowerPoint and more",
         "invalidType": "Unsupported file type {{ext}}",
         "sizeExceeded": "File exceeds size limit (≤ {{size}} MB)",
-        "supportedHint": "Supports: {{types}} · Max {{size}} MB"
+        "supportedHint": "Supports: {{types}} · Max {{size}} MB",
+        "duplicate": "Duplicate file detected; upload skipped"
       },
       "status": {
         "pending": "Pending",
@@ -210,6 +223,14 @@
         "title": "Chunking Strategy Configuration",
         "strategy": "Chunking Strategy",
         "parameters": "Parameter Settings"
+      },
+      "duplicatePolicy": {
+        "label": "Duplicate Handling",
+        "skip": "Skip if duplicate content",
+        "replace": "Replace same filename",
+        "version": "Keep as new version",
+        "allow": "Always keep (no dedup)",
+        "help": "Controls what happens when uploading files with the same name or content."
       },
       "preview": {
         "action": "Preview chunks",

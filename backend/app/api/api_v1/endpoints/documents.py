@@ -26,10 +26,13 @@ from app.db.models.permission import PermissionType
 from app.core.dependencies import get_current_user, get_tenant_id, require_permission
 from app.core.config import settings
 from app.services.storage_service import storage_service
+from app.services.elasticsearch_service import get_elasticsearch_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+ALLOWED_DUPLICATE_POLICIES = {"allow", "skip", "replace", "version"}
 
 def _normalize_vector_ids(value) -> list[int]:
     """Normalize vector id storage across DB backends (JSON/list vs TEXT/JSON-string)."""
@@ -87,6 +90,102 @@ def _can_write_kb(kb_row: KBModel, user: User) -> bool:
     if user.role in ("super_admin", "tenant_admin"):
         return True
     return kb_row.owner_id == user.id
+
+
+def _get_file_hash(doc: Document) -> Optional[str]:
+    try:
+        meta = doc.doc_metadata or {}
+        value = meta.get("file_hash")
+        return str(value) if value else None
+    except Exception:
+        return None
+
+
+async def _purge_documents(
+    *,
+    db: Session,
+    docs: list[Document],
+    kb_row: KBModel,
+    tenant_id: int,
+    es_service: Optional["ElasticsearchService"],
+) -> None:
+    if not docs:
+        return
+    from app.services.milvus_service import milvus_service
+    from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
+
+    tenant_collection_name = (
+        kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_row.name}"
+    )
+
+    for doc in docs:
+        try:
+            ids = []
+            if doc.vector_ids:
+                try:
+                    ids = [int(i) for i in doc.vector_ids]
+                except Exception:
+                    ids = []
+            if ids:
+                deleted = await milvus_service.async_delete_vectors(tenant_collection_name, ids)
+                if deleted == 0:
+                    await milvus_service.async_delete_by_filters(
+                        tenant_collection_name,
+                        {
+                            "tenant_id": tenant_id,
+                            "document_name": doc.filename,
+                            "knowledge_base": kb_row.name,
+                        },
+                    )
+            else:
+                await milvus_service.async_delete_by_filters(
+                    tenant_collection_name,
+                    {
+                        "tenant_id": tenant_id,
+                        "document_name": doc.filename,
+                        "knowledge_base": kb_row.name,
+                    },
+                )
+        except Exception as e:
+            logger.warning(f"Failed to delete vectors for document {doc.id}: {e}")
+
+        try:
+            db.query(DocumentChunkModel).filter(
+                DocumentChunkModel.document_id == doc.id,
+                DocumentChunkModel.tenant_id == tenant_id,
+            ).delete(synchronize_session=False)
+        except Exception as e:
+            logger.warning(f"Failed to delete persisted chunks for document {doc.id}: {e}")
+
+        try:
+            if es_service is not None:
+                await es_service.delete_by_query(
+                    index_name=tenant_collection_name,
+                    term_filters={
+                        "tenant_id": tenant_id,
+                        "document_name": doc.filename,
+                        "knowledge_base": kb_row.name,
+                    },
+                )
+        except Exception as e:
+            logger.warning(f"Failed to delete ES docs for document {doc.id}: {e}")
+
+        try:
+            if doc.file_path:
+                storage_service.delete(doc.file_path)
+        except Exception as e:
+            logger.warning(f"Failed to delete storage file {doc.file_path}: {e}")
+
+        try:
+            db.delete(doc)
+        except Exception as e:
+            logger.warning(f"Failed to delete DB row for document {doc.id}: {e}")
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 
 async def _stream_upload_to_disk(
@@ -147,6 +246,7 @@ class DocumentInfo(BaseModel):
     total_chunks: int
     created_at: Optional[str]
     processed_at: Optional[str]
+    progress: Optional[dict] = None
 
 
 class DocumentStatus(BaseModel):
@@ -205,6 +305,7 @@ async def upload_document(
     file: UploadFile = File(...),
     chunking_strategy: Optional[str] = Form(None),
     chunking_params: Optional[str] = Form(None),
+    duplicate_policy: Optional[str] = Form(None),
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(require_permission(PermissionType.DOCUMENT_UPLOAD.value)),
     db: Session = Depends(get_db),
@@ -356,6 +457,63 @@ async def upload_document(
                     detail="Storage quota exceeded for this tenant",
                 )
 
+    policy = (duplicate_policy or "allow").strip().lower()
+    if policy not in ALLOWED_DUPLICATE_POLICIES:
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported duplicate_policy '{duplicate_policy}'",
+        )
+
+    # Check duplicates before uploading to object storage
+    existing_docs = (
+        db.query(Document)
+        .filter(
+            Document.knowledge_base_name == kb_name,
+            Document.tenant_id == tenant_id,
+        )
+        .all()
+    )
+    existing_by_hash = [
+        d for d in existing_docs if _get_file_hash(d) == file_hash
+    ]
+    existing_by_name = [
+        d for d in existing_docs if d.original_filename == original_filename
+    ]
+
+    if policy == "skip" and existing_by_hash:
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Duplicate file detected; upload skipped.",
+        )
+
+    if policy == "replace" and existing_by_name:
+        es_service = await get_elasticsearch_service()
+        try:
+            await _purge_documents(
+                db=db,
+                docs=existing_by_name,
+                kb_row=kb_row,
+                tenant_id=tenant_id,
+                es_service=es_service,
+            )
+        except Exception as e:
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to replace existing documents: {e}",
+            )
+
     storage_path = file_path
     if storage_service.is_object_storage():
         storage_key = f"tenant_{tenant_id}/{stored_filename}"
@@ -377,9 +535,15 @@ async def upload_document(
     doc_metadata = {
         "file_hash": file_hash,
         "storage_backend": storage_service.backend,
+        "duplicate_policy": policy,
     }
     if storage_service.bucket:
         doc_metadata["storage_bucket"] = storage_service.bucket
+    if policy == "replace" and existing_by_name:
+        doc_metadata["replaces_document_ids"] = [d.id for d in existing_by_name]
+    if policy == "version" and existing_by_name:
+        doc_metadata["version_of"] = existing_by_name[0].id
+        doc_metadata["version_index"] = len(existing_by_name) + 1
 
     # Parse chunking strategy (fallback to KB settings)
     kb_settings = kb_row.settings or {}
@@ -712,6 +876,12 @@ async def list_knowledge_base_documents(
         
         result = []
         for doc in documents:
+            progress_info = None
+            try:
+                meta = doc.doc_metadata or {}
+                progress_info = meta.get("processing_progress")
+            except Exception:
+                progress_info = None
             result.append(DocumentInfo(
                 id=doc.id,
                 filename=doc.filename,
@@ -725,6 +895,7 @@ async def list_knowledge_base_documents(
                 total_chunks=doc.total_chunks,
                 created_at=doc.created_at.isoformat() if doc.created_at else None,
                 processed_at=doc.processed_at.isoformat() if doc.processed_at else None,
+                progress=progress_info,
             ))
         
         return result

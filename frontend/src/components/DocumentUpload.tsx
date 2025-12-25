@@ -95,6 +95,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewChunks, setPreviewChunks] = useState<Array<{ chunk_index: number; text: string }>>([]);
   const [previewTotal, setPreviewTotal] = useState<number | null>(null);
+  const [duplicatePolicy, setDuplicatePolicy] = useState<'allow' | 'skip' | 'replace' | 'version'>('skip');
   const { enqueueSnackbar } = useSnackbar();
 
   // 获取分片策略列表
@@ -240,6 +241,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
           formData.append('file', fileStatus.file);
           formData.append('chunking_strategy', selectedStrategy);
           formData.append('chunking_params', JSON.stringify(strategyParams));
+          formData.append('duplicate_policy', duplicatePolicy);
           const controller = new AbortController();
           uploadControllersRef.current.set(i, controller);
           await documentApi.upload(knowledgeBaseId, formData, controller.signal);
@@ -264,7 +266,9 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
 	              progress: 0,
 	              error: (error?.name === 'CanceledError' || error?.message === 'canceled' || error?.message?.includes('aborted')) 
 	                ? t('document.upload.status.cancelled')
-	                : (error?.response?.data?.detail || t('document.upload.error'))
+	                : (error?.response?.status === 409
+	                  ? t('document.upload.file.duplicate')
+	                  : (error?.response?.data?.detail || t('document.upload.error')))
 	            } : f
 	          ));
 	          uploadControllersRef.current.delete(i);
@@ -299,6 +303,7 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
     setError(null);
     setUploading(false);
     setUploadProgress(0);
+    setDuplicatePolicy('skip');
     onClose();
   };
 
@@ -682,6 +687,23 @@ const DocumentUpload: React.FC<DocumentUploadProps> = ({
                   </Box>
                 </Box>
               )}
+
+              <FormControl fullWidth sx={{ mt: 3 }}>
+                <InputLabel>{t('document.upload.duplicatePolicy.label')}</InputLabel>
+                <Select
+                  value={duplicatePolicy}
+                  onChange={(e) => setDuplicatePolicy(e.target.value as any)}
+                  label={t('document.upload.duplicatePolicy.label')}
+                >
+                  <MenuItem value="skip">{t('document.upload.duplicatePolicy.skip')}</MenuItem>
+                  <MenuItem value="replace">{t('document.upload.duplicatePolicy.replace')}</MenuItem>
+                  <MenuItem value="version">{t('document.upload.duplicatePolicy.version')}</MenuItem>
+                  <MenuItem value="allow">{t('document.upload.duplicatePolicy.allow')}</MenuItem>
+                </Select>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1 }}>
+                  {t('document.upload.duplicatePolicy.help')}
+                </Typography>
+              </FormControl>
             </AccordionDetails>
           </Accordion>
         )}

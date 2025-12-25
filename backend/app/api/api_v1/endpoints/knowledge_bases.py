@@ -26,6 +26,7 @@ from app.db.models.knowledge_base import KnowledgeBase as KBModel
 from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.models.permission import PermissionType
+from app.db.models.document import Document
 from app.services import parser_service
 from app.services.storage_service import storage_service
 from app.services.chunking_service import chunking_service, ChunkingStrategy
@@ -61,6 +62,20 @@ class KnowledgeBaseReindexRequest(BaseModel):
     chunking_strategy: Optional[str] = None
     chunking_params: Optional[Dict[str, Any]] = None
     use_kb_config: bool = True
+
+
+class KnowledgeBaseConsistencyRequest(BaseModel):
+    delete_missing: bool = False
+
+
+class KnowledgeBaseConsistencyResponse(BaseModel):
+    scanned_documents: int
+    missing_files: int
+    updated_documents: int
+    deleted_documents: int
+    document_count: int
+    total_chunks: int
+    total_size_bytes: int
 
 def _can_read_kb(kb_row: KBModel, user: User) -> bool:
     if user.role in ("super_admin", "tenant_admin"):
@@ -903,6 +918,189 @@ async def clear_all_kb_vectors(
     except Exception as e:
         logger.error(f"Failed to clear all vectors: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to clear all vectors: {e}")
+
+
+@router.post(
+    "/{kb_name}/maintenance/consistency",
+    response_model=KnowledgeBaseConsistencyResponse,
+)
+async def reconcile_knowledge_base(
+    kb_name: str,
+    payload: KnowledgeBaseConsistencyRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    es_service: Optional[ElasticsearchService] = Depends(get_elasticsearch_service),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_UPDATE.value)
+    ),
+):
+    """Reconcile storage/doc metadata consistency and recompute KB counters."""
+    kb_row = (
+        db.query(KBModel)
+        .filter(
+            KBModel.name == kb_name,
+            KBModel.tenant_id == tenant_id,
+            KBModel.is_active == True,
+        )
+        .first()
+    )
+    if kb_row is None or not _can_write_kb(kb_row, current_user):
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    docs = (
+        db.query(Document)
+        .filter(
+            Document.knowledge_base_name == kb_name,
+            Document.tenant_id == tenant_id,
+        )
+        .all()
+    )
+
+    missing_files = 0
+    updated_docs = 0
+    deleted_docs = 0
+
+    try:
+        from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
+        from sqlalchemy import func as sa_func
+
+        chunk_counts = dict(
+            db.query(
+                DocumentChunkModel.document_id,
+                sa_func.count(DocumentChunkModel.id),
+            )
+            .filter(
+                DocumentChunkModel.tenant_id == tenant_id,
+                DocumentChunkModel.knowledge_base_name == kb_name,
+            )
+            .group_by(DocumentChunkModel.document_id)
+            .all()
+        )
+    except Exception:
+        chunk_counts = {}
+
+    for doc in docs:
+        storage_ok = bool(doc.file_path) and storage_service.exists(doc.file_path)
+        if not storage_ok:
+            missing_files += 1
+            if payload.delete_missing:
+                try:
+                    tenant_collection_name = (
+                        kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+                    )
+                    ids = []
+                    if doc.vector_ids:
+                        try:
+                            ids = [int(i) for i in doc.vector_ids]
+                        except Exception:
+                            ids = []
+                    if ids:
+                        await milvus_service.async_delete_vectors(tenant_collection_name, ids)
+                    else:
+                        await milvus_service.async_delete_by_filters(
+                            tenant_collection_name,
+                            {
+                                "tenant_id": tenant_id,
+                                "document_name": doc.filename,
+                                "knowledge_base": kb_name,
+                            },
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to delete vectors for document {doc.id}: {e}")
+
+                try:
+                    from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel
+                    db.query(DocumentChunkModel).filter(
+                        DocumentChunkModel.document_id == doc.id,
+                        DocumentChunkModel.tenant_id == tenant_id,
+                    ).delete(synchronize_session=False)
+                except Exception as e:
+                    logger.warning(f"Failed to delete chunks for document {doc.id}: {e}")
+
+                try:
+                    if es_service is not None:
+                        tenant_collection_name = (
+                            kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+                        )
+                        await es_service.delete_by_query(
+                            index_name=tenant_collection_name,
+                            term_filters={
+                                "tenant_id": tenant_id,
+                                "document_name": doc.filename,
+                                "knowledge_base": kb_name,
+                            },
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to delete ES docs for document {doc.id}: {e}")
+
+                try:
+                    db.delete(doc)
+                    deleted_docs += 1
+                except Exception as e:
+                    logger.warning(f"Failed to delete DB row for document {doc.id}: {e}")
+            else:
+                doc.status = "failed"
+                doc.error_message = "Source file missing in storage"
+                try:
+                    meta = dict(doc.doc_metadata or {})
+                    meta["processing_progress"] = {
+                        "stage": "failed",
+                        "percentage": 0,
+                        "message": "Source file missing in storage",
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }
+                    doc.doc_metadata = meta
+                except Exception:
+                    pass
+                db.add(doc)
+                updated_docs += 1
+            continue
+
+        expected_chunks = int(chunk_counts.get(doc.id) or 0)
+        if expected_chunks and int(doc.total_chunks or 0) != expected_chunks:
+            doc.total_chunks = expected_chunks
+            db.add(doc)
+            updated_docs += 1
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    try:
+        from sqlalchemy import func as sa_func
+
+        totals = (
+            db.query(
+                sa_func.count(Document.id),
+                sa_func.coalesce(sa_func.sum(Document.total_chunks), 0),
+                sa_func.coalesce(sa_func.sum(Document.file_size), 0),
+            )
+            .filter(
+                Document.knowledge_base_name == kb_name,
+                Document.tenant_id == tenant_id,
+            )
+            .first()
+        )
+        kb_row.document_count = int(totals[0] or 0)
+        kb_row.total_chunks = int(totals[1] or 0)
+        kb_row.total_size_bytes = int(totals[2] or 0)
+        db.add(kb_row)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Failed to recompute KB counters for '{kb_name}': {e}")
+
+    return KnowledgeBaseConsistencyResponse(
+        scanned_documents=len(docs),
+        missing_files=missing_files,
+        updated_documents=updated_docs,
+        deleted_documents=deleted_docs,
+        document_count=int(kb_row.document_count or 0),
+        total_chunks=int(kb_row.total_chunks or 0),
+        total_size_bytes=int(kb_row.total_size_bytes or 0),
+    )
 
 @router.delete("/{kb_name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_knowledge_base(

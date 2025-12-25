@@ -74,11 +74,30 @@ export const knowledgeBaseApi = {
   // 获取知识库详情
   getDetail: (id: string) => api.get(`/api/v1/knowledge-bases/${id}`),
 
+  // 获取知识库设置
+  getSettings: (id: string) => api.get(`/api/v1/knowledge-bases/${id}/settings`),
+
+  // 更新知识库设置
+  updateSettings: (
+    id: string,
+    data: {
+      retrieval_top_k?: number;
+      rerank_enabled?: boolean;
+      rerank_top_k?: number;
+    }
+  ) => api.patch(`/api/v1/knowledge-bases/${id}/settings`, data),
+
   // 清空向量（可选清理ES）
   clearVectors: (
     kbName: string,
     data?: { include_es?: boolean }
   ) => api.post(`/api/v1/knowledge-bases/${kbName}/maintenance/clear-vectors`, data || {}),
+
+  // 一致性校验与计数修复（可选删除缺失源文件的文档）
+  reconcile: (
+    kbName: string,
+    data?: { delete_missing?: boolean }
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/maintenance/consistency`, data || {}),
 };
 
 // 聊天相关 API
