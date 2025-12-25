@@ -4,13 +4,13 @@ Admin API for managing public API keys (x-api-key)
 
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-
 from app.db.database import get_db
 from app.db.models.api_key import ApiKey
+from app.db.models.api_key_usage import ApiKeyUsage
 from app.core.dependencies import get_current_active_user
 
 
@@ -44,6 +44,21 @@ class ApiKeyResponse(BaseModel):
     revoked: bool
     created_at: datetime
     expires_at: Optional[datetime]
+
+
+class ApiKeyUsageBucket(BaseModel):
+    date: str
+    requests: int
+    tokens: int
+
+
+class ApiKeyUsageSummary(BaseModel):
+    api_key_id: int
+    from_date: str
+    to_date: str
+    total_requests: int
+    total_tokens: int
+    by_day: List[ApiKeyUsageBucket]
 
 
 @router.post("/api-keys", response_model=ApiKeyResponse)
@@ -120,3 +135,63 @@ async def revoke_api_key(api_key_id: int, db: Session = Depends(get_db), current
     db.add(record)
     db.commit()
     return {"message": "API key revoked"}
+
+
+@router.get("/api-keys/{api_key_id}/usage", response_model=ApiKeyUsageSummary)
+async def get_api_key_usage(
+    api_key_id: int,
+    days: int = 7,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_active_user),
+):
+    record = (
+        db.query(ApiKey)
+        .filter(ApiKey.id == api_key_id, ApiKey.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="API key not found")
+    if not _is_admin(current_user) and record.created_by != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed to view this API key usage")
+
+    if days <= 0:
+        days = 7
+    from datetime import datetime, timedelta
+
+    end_time = datetime.utcnow()
+    start_time = end_time - timedelta(days=days)
+
+    rows = (
+        db.query(ApiKeyUsage)
+        .filter(
+            ApiKeyUsage.api_key_id == api_key_id,
+            ApiKeyUsage.created_at >= start_time,
+        )
+        .order_by(ApiKeyUsage.created_at.asc())
+        .all()
+    )
+
+    total_requests = len(rows)
+    total_tokens = sum(int(r.tokens or 0) for r in rows)
+    buckets: Dict[str, Dict[str, int]] = {}
+    for r in rows:
+        date_key = r.created_at.date().isoformat() if r.created_at else "unknown"
+        if date_key not in buckets:
+            buckets[date_key] = {"requests": 0, "tokens": 0}
+        buckets[date_key]["requests"] += 1
+        buckets[date_key]["tokens"] += int(r.tokens or 0)
+
+    by_day = [
+        ApiKeyUsageBucket(date=day, requests=vals["requests"], tokens=vals["tokens"])
+        for day, vals in buckets.items()
+    ]
+    by_day.sort(key=lambda x: x.date)
+
+    return ApiKeyUsageSummary(
+        api_key_id=api_key_id,
+        from_date=start_time.date().isoformat(),
+        to_date=end_time.date().isoformat(),
+        total_requests=total_requests,
+        total_tokens=total_tokens,
+        by_day=by_day,
+    )

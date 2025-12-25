@@ -147,7 +147,17 @@
     "regenerate": "Regenerate",
     "stop": "Stop",
     "timeout": "Request timed out",
-    "timeoutWithKnowledgeBase": "Request timed out. Try again or switch to Normal Chat."
+    "timeoutWithKnowledgeBase": "Request timed out. Try again or switch to Normal Chat.",
+    "systemPrompt": {
+      "title": "System Prompt",
+      "label": "System Prompt",
+      "placeholder": "Optional instructions for the assistant. You can use {context} and {query} as placeholders for RAG.",
+      "helper": "If you include {context} or {query}, the prompt will be used as a full template.",
+      "save": "Save Prompt",
+      "clear": "Clear Prompt",
+      "saved": "System prompt saved",
+      "saveError": "Failed to save system prompt"
+    }
   },
   "documents": {
     "title": "Document Management",
@@ -1434,6 +1444,7 @@
     },
     "sections": {
       "aiModels": "AI model settings",
+      "prompt": "Chat prompt",
       "modelParams": "Model parameters",
       "ui": "UI settings"
     },
@@ -1441,6 +1452,9 @@
       "chatModel": "Chat model",
       "embeddingModel": "Embedding model",
       "rerankModel": "Rerank model",
+      "chatSystemPrompt": "Chat system prompt",
+      "chatSystemPromptPlaceholder": "Optional instructions for all chat messages. Use {context} and {query} for RAG templates.",
+      "chatSystemPromptHelp": "Saved per user and used as a default. You can override it in the Chat page.",
       "theme": "Theme",
       "language": "Language"
     },

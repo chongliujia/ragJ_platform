@@ -22,6 +22,7 @@ from app.services.elasticsearch_service import get_elasticsearch_service
 from app.services.reranking_service import reranking_service, RerankingProvider
 from app.db.database import SessionLocal
 from app.db.models.document import Document
+from app.db.models.knowledge_base import KnowledgeBase as KBModel
 from app.utils.kb_collection import resolve_kb_collection_name
 
 logger = structlog.get_logger(__name__)
@@ -35,6 +36,7 @@ class ChatState(TypedDict):
     tenant_id: int
     user_id: int
     model: Optional[str]
+    system_prompt: Optional[str]
     query_vector: Optional[List[float]]
     retrieved_docs: List[Dict[str, Any]]
     reranked_docs: List[Dict[str, Any]]
@@ -98,6 +100,7 @@ class LangGraphChatService:
             tenant_id=tenant_id,
             user_id=user_id,
             model=request.model,
+            system_prompt=request.system_prompt,
             query_vector=None,
             retrieved_docs=[],
             reranked_docs=[],
@@ -150,6 +153,7 @@ class LangGraphChatService:
                 tenant_id=tenant_id,
                 user_id=user_id,
                 model=request.model,
+                system_prompt=request.system_prompt,
                 query_vector=None,
                 retrieved_docs=[],
                 reranked_docs=[],
@@ -160,8 +164,11 @@ class LangGraphChatService:
 
             state = await self._generate_embedding(state)
             if not state["step_info"].get("embedding_generated"):
+                fallback_message = request.message
+                if request.system_prompt:
+                    fallback_message = f"{request.system_prompt}\n\n{request.message}"
                 async for chunk in llm_service.stream_chat(
-                    message=request.message,
+                    message=fallback_message,
                     model=request.model,
                     tenant_id=tenant_id,
                     user_id=user_id,
@@ -172,8 +179,11 @@ class LangGraphChatService:
 
             state = await self._retrieve_documents(state)
             if not state.get("retrieved_docs"):
+                fallback_message = request.message
+                if request.system_prompt:
+                    fallback_message = f"{request.system_prompt}\n\n{request.message}"
                 async for chunk in llm_service.stream_chat(
-                    message=request.message,
+                    message=fallback_message,
                     model=request.model,
                     tenant_id=tenant_id,
                     user_id=user_id,
@@ -185,8 +195,11 @@ class LangGraphChatService:
             state = await self._rerank_documents(state)
             context = state.get("context") or ""
             if not context:
+                fallback_message = request.message
+                if request.system_prompt:
+                    fallback_message = f"{request.system_prompt}\n\n{request.message}"
                 async for chunk in llm_service.stream_chat(
-                    message=request.message,
+                    message=fallback_message,
                     model=request.model,
                     tenant_id=tenant_id,
                     user_id=user_id,
@@ -195,7 +208,9 @@ class LangGraphChatService:
                 yield "data: [DONE]\n\n"
                 return
 
-            rag_prompt = self._construct_rag_prompt(request.message, context)
+            rag_prompt = self._construct_rag_prompt(
+                request.message, context, request.system_prompt
+            )
             async for chunk in llm_service.stream_chat(
                 message=rag_prompt,
                 model=request.model,
@@ -345,12 +360,25 @@ class LangGraphChatService:
         
         # Create tenant-specific collection and index names (stable from DB if available)
         tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+        kb_settings = {}
         try:
             db = SessionLocal()
             try:
-                tenant_collection_name = resolve_kb_collection_name(
-                    db, tenant_id, kb_name=kb_name
+                kb_row = (
+                    db.query(KBModel)
+                    .filter(
+                        KBModel.name == kb_name,
+                        KBModel.tenant_id == tenant_id,
+                        KBModel.is_active == True,
+                    )
+                    .first()
                 )
+                if kb_row is not None:
+                    tenant_collection_name = resolve_kb_collection_name(
+                        db, tenant_id, kb_name=kb_name
+                    )
+                    if isinstance(kb_row.settings, dict):
+                        kb_settings = dict(kb_row.settings or {})
             finally:
                 db.close()
         except Exception:
@@ -358,8 +386,12 @@ class LangGraphChatService:
         tenant_index_name = tenant_collection_name
         
         try:
-            # Perform hybrid search - 减少检索数量以提升速度
-            top_k = 3
+            # Perform hybrid search - allow KB-level tuning
+            top_k = int(kb_settings.get("retrieval_top_k") or 3)
+            if top_k <= 0:
+                top_k = 3
+            state["step_info"]["rerank_enabled"] = bool(kb_settings.get("rerank_enabled", True))
+            state["step_info"]["rerank_top_k"] = int(kb_settings.get("rerank_top_k") or 2)
             
             # Vector search with dimension mismatch handling
             async def safe_vector_search():
@@ -477,11 +509,14 @@ class LangGraphChatService:
             return state
         
         try:
+            rerank_top_k = int(state["step_info"].get("rerank_top_k") or 2)
+            if rerank_top_k <= 0:
+                rerank_top_k = 2
             reranked_docs = await reranking_service.rerank_documents(
                 query=state["query"],
                 documents=state["retrieved_docs"],
                 provider=RerankingProvider.BGE,
-                top_k=2,  # 进一步减少重排文档数量
+                top_k=rerank_top_k,
                 tenant_id=state["tenant_id"],
             )
             
@@ -510,7 +545,9 @@ class LangGraphChatService:
         logger.info("Generating final response")
         
         try:
-            prompt = self._construct_rag_prompt(state["query"], state["context"])
+            prompt = self._construct_rag_prompt(
+                state["query"], state["context"], state.get("system_prompt")
+            )
             
             model = state.get("model")
             llm_response = await llm_service.chat(
@@ -562,8 +599,11 @@ class LangGraphChatService:
         try:
             # Try standard chat without RAG
             model = state.get("model")
+            fallback_message = state["query"]
+            if state.get("system_prompt"):
+                fallback_message = f"{state['system_prompt']}\n\n{state['query']}"
             llm_response = await llm_service.chat(
-                message=state["query"],
+                message=fallback_message,
                 model=model,
                 tenant_id=state["tenant_id"],
                 user_id=state.get("user_id"),
@@ -591,13 +631,21 @@ class LangGraphChatService:
     
     def _should_rerank(self, state: ChatState) -> str:
         """Decide whether to rerank documents or fallback"""
-        if state["step_info"].get("docs_retrieved", 0) > 0:
+        if state["step_info"].get("docs_retrieved", 0) > 0 and state["step_info"].get("rerank_enabled", True):
             return "rerank"
         else:
             return "fallback"
     
-    def _construct_rag_prompt(self, query: str, context: str) -> str:
+    def _construct_rag_prompt(
+        self, query: str, context: str, system_prompt: Optional[str] = None
+    ) -> str:
         """Construct RAG prompt for LLM - 优化版本，更简洁以提升响应速度"""
+        if system_prompt and system_prompt.strip():
+            template = system_prompt.strip()
+            if "{context}" in template or "{query}" in template:
+                return template.format(context=context, query=query)
+            return f"{template}\n\nContext:\n{context}\n\nQuestion: {query}"
+
         prompt_template = """基于以下信息回答问题。请使用Markdown格式，包括标题、列表、粗体等来组织回答。
 
 信息：

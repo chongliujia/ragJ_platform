@@ -29,6 +29,7 @@ class ChatRequest(BaseModel):
     max_tokens: Optional[int] = Field(default=None, description="最大生成token数")
     stream: bool = Field(default=False, description="是否流式响应")
     context: Optional[Dict[str, Any]] = Field(default=None, description="上下文信息")
+    system_prompt: Optional[str] = Field(default=None, description="可选系统提示词")
 
     class Config:
         json_schema_extra = {

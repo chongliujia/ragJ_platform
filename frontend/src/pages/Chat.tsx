@@ -23,6 +23,10 @@ import {
   Chip,
   IconButton,
   Stack,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  FormHelperText,
 } from '@mui/material';
 import {
   Send as SendIcon,
@@ -31,10 +35,13 @@ import {
   Stop as StopIcon,
   Replay as ReplayIcon,
   ContentCopy as CopyIcon,
+  ExpandMore as ExpandMoreIcon,
 } from '@mui/icons-material';
 import { knowledgeBaseApi, chatApi, api } from '../services/api';
 import { modelConfigApi } from '../services/modelConfigApi';
 import DocumentChunksDialog from '../components/DocumentChunksDialog';
+import { authApi } from '../services/authApi';
+import { useSnackbar } from '../components/SnackbarProvider';
 
 interface ChatSource {
   document_id?: number;
@@ -70,12 +77,15 @@ interface AvailableChatModel {
 
 const Chat: React.FC = () => {
   const { t } = useTranslation();
+  const { enqueueSnackbar } = useSnackbar();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [selectedKb, setSelectedKb] = useState('');
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [availableChatModels, setAvailableChatModels] = useState<AvailableChatModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('');
+  const [systemPrompt, setSystemPrompt] = useState<string>('');
+  const [promptSaving, setPromptSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -146,6 +156,13 @@ const Chat: React.FC = () => {
         const preferred = (configResponse as any)?.data?.preferred_chat_model;
         if (preferred && models.some(m => m.model_name === preferred)) {
           setSelectedModel(preferred);
+        }
+        const savedPrompt =
+          (configResponse as any)?.data?.chat_system_prompt ||
+          (configResponse as any)?.data?.custom_settings?.chat_system_prompt ||
+          '';
+        if (savedPrompt) {
+          setSystemPrompt(String(savedPrompt));
         }
       } catch (error) {
         console.error('Failed to fetch available chat models:', error);
@@ -222,6 +239,9 @@ const Chat: React.FC = () => {
       // 选择了模型则传递 model（否则走租户默认）
       if (selectedModel) {
         requestData.model = selectedModel;
+      }
+      if (systemPrompt.trim()) {
+        requestData.system_prompt = systemPrompt.trim();
       }
 
       const { cancel, promise } = chatApi.streamMessageCancelable(
@@ -303,6 +323,21 @@ const Chat: React.FC = () => {
     }
   };
 
+  const saveSystemPrompt = async () => {
+    try {
+      setPromptSaving(true);
+      await authApi.updateUserConfig({
+        chat_system_prompt: systemPrompt.trim(),
+      });
+      enqueueSnackbar(t('chat.systemPrompt.saved'), 'success');
+    } catch (error) {
+      console.error('Failed to save system prompt:', error);
+      enqueueSnackbar(t('chat.systemPrompt.saveError'), 'error');
+    } finally {
+      setPromptSaving(false);
+    }
+  };
+
   return (
     <Box sx={{ 
       height: 'calc(100vh - 100px)', 
@@ -381,6 +416,44 @@ const Chat: React.FC = () => {
           </FormControl>
         </Stack>
       </Box>
+
+      <Accordion
+        sx={{
+          mb: 2,
+          background: 'rgba(0, 0, 0, 0.25)',
+          border: '1px solid rgba(0, 212, 255, 0.15)',
+          borderRadius: 2,
+          '&:before': { display: 'none' },
+        }}
+      >
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Typography sx={{ fontWeight: 600 }}>{t('chat.systemPrompt.title')}</Typography>
+        </AccordionSummary>
+        <AccordionDetails>
+          <TextField
+            fullWidth
+            multiline
+            minRows={4}
+            label={t('chat.systemPrompt.label')}
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            placeholder={t('chat.systemPrompt.placeholder')}
+          />
+          <FormHelperText sx={{ mt: 1 }}>
+            {t('chat.systemPrompt.helper')}
+          </FormHelperText>
+          <Box sx={{ mt: 1, display: 'flex', gap: 1 }}>
+            <Button size="small" variant="contained" onClick={saveSystemPrompt} disabled={promptSaving}>
+              {t('chat.systemPrompt.save')}
+            </Button>
+            {systemPrompt && (
+              <Button size="small" onClick={() => setSystemPrompt('')}>
+                {t('chat.systemPrompt.clear')}
+              </Button>
+            )}
+          </Box>
+        </AccordionDetails>
+      </Accordion>
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>

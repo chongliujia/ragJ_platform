@@ -162,7 +162,7 @@ async def upload_document(
     kb_name: str,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    chunking_strategy: Optional[str] = Form(ChunkingStrategy.RECURSIVE.value),
+    chunking_strategy: Optional[str] = Form(None),
     chunking_params: Optional[str] = Form(None),
     tenant_id: int = Depends(get_tenant_id),
     current_user: User = Depends(require_permission(PermissionType.DOCUMENT_UPLOAD.value)),
@@ -295,13 +295,17 @@ async def upload_document(
                     detail="Storage quota exceeded for this tenant",
                 )
 
-    # Parse chunking strategy
+    # Parse chunking strategy (fallback to KB settings)
+    kb_settings = kb_row.settings or {}
+    strategy_value = chunking_strategy or kb_settings.get("chunking_strategy")
+    if not strategy_value:
+        strategy_value = ChunkingStrategy.RECURSIVE.value
     try:
-        strategy = ChunkingStrategy(chunking_strategy)
+        strategy = ChunkingStrategy(strategy_value)
     except ValueError:
         strategy = ChunkingStrategy.RECURSIVE
         logger.warning(
-            f"Unknown chunking strategy '{chunking_strategy}', falling back to recursive."
+            f"Unknown chunking strategy '{strategy_value}', falling back to recursive."
         )
 
     # Parse chunking parameters
@@ -314,6 +318,17 @@ async def upload_document(
         except Exception as e:
             logger.warning(f"Failed to parse chunking params: {e}")
             params = {}
+    if not params:
+        raw_params = kb_settings.get("chunking_params")
+        if isinstance(raw_params, dict):
+            params = dict(raw_params)
+    if not params:
+        params = {
+            "chunk_size": int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE),
+            "chunk_overlap": int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP),
+        }
+    params.setdefault("chunk_size", int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE))
+    params.setdefault("chunk_overlap", int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP))
 
     # TODO: Add validation for file type based on settings.SUPPORTED_FILE_TYPES
     # For example, check file.content_type or filename extension
@@ -368,7 +383,7 @@ async def upload_document(
 async def preview_document_chunks(
     kb_name: str,
     file: UploadFile = File(...),
-    chunking_strategy: Optional[str] = Form(ChunkingStrategy.RECURSIVE.value),
+    chunking_strategy: Optional[str] = Form(None),
     chunking_params: Optional[str] = Form(None),
     limit: int = Form(5),
     tenant_id: int = Depends(get_tenant_id),
@@ -452,8 +467,12 @@ async def preview_document_chunks(
             detail=f"File too large. Max size: {settings.MAX_FILE_SIZE} bytes",
         )
 
+    kb_settings = kb_row.settings or {}
+    strategy_value = chunking_strategy or kb_settings.get("chunking_strategy")
+    if not strategy_value:
+        strategy_value = ChunkingStrategy.RECURSIVE.value
     try:
-        strategy = ChunkingStrategy(chunking_strategy)
+        strategy = ChunkingStrategy(strategy_value)
     except ValueError:
         strategy = ChunkingStrategy.RECURSIVE
 
@@ -465,6 +484,17 @@ async def preview_document_chunks(
             params = json.loads(chunking_params)
         except Exception:
             params = {}
+    if not params:
+        raw_params = kb_settings.get("chunking_params")
+        if isinstance(raw_params, dict):
+            params = dict(raw_params)
+    if not params:
+        params = {
+            "chunk_size": int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE),
+            "chunk_overlap": int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP),
+        }
+    params.setdefault("chunk_size", int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE))
+    params.setdefault("chunk_overlap", int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP))
 
     from app.services import parser_service
 

@@ -84,13 +84,13 @@ export const knowledgeBaseApi = {
 // 聊天相关 API
 export const chatApi = {
   // 发送消息 - 使用更长的超时时间以适应RAG处理
-  sendMessage: (data: { message: string; knowledge_base_id?: string; model?: string }) =>
+  sendMessage: (data: { message: string; knowledge_base_id?: string; model?: string; system_prompt?: string }) =>
     // 带结尾斜杠，避免在 Docker/Vite 代理场景触发 307 -> Location: http://backend:8000/... 导致浏览器 Network Error
     api.post('/api/v1/chat/', data, { timeout: 90000 }), // 90秒超时
   
   // 流式聊天
   streamMessage: async (
-    data: { message: string; knowledge_base_id?: string; model?: string },
+    data: { message: string; knowledge_base_id?: string; model?: string; system_prompt?: string },
     onChunk: (chunk: any) => void,
     onError: (error: any) => void,
     onComplete: () => void
@@ -118,7 +118,7 @@ export const chatApi = {
   
   // 流式聊天（可取消）
   streamMessageCancelable: (
-    data: { message: string; knowledge_base_id?: string; model?: string },
+    data: { message: string; knowledge_base_id?: string; model?: string; system_prompt?: string },
     onChunk: (chunk: any) => void,
     onError: (error: any) => void,
     onComplete: () => void

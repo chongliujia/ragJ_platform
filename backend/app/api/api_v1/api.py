@@ -17,6 +17,7 @@ from app.api.api_v1.endpoints import (
     workflows,
     public,
     api_keys,
+    evaluations,
 )
 
 api_router = APIRouter()
@@ -64,4 +65,9 @@ api_router.include_router(
 # Admin: API keys management
 api_router.include_router(
     api_keys.router, prefix="/admin", tags=["Admin"]
+)
+
+# Evaluation datasets and runs
+api_router.include_router(
+    evaluations.router, prefix="/evaluations", tags=["Evaluations"]
 )

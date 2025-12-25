@@ -37,6 +37,7 @@ class UserConfigUpdate(BaseModel):
     theme: Optional[str] = None
     language: Optional[str] = None
     custom_settings: Optional[dict] = None
+    chat_system_prompt: Optional[str] = None
 
 
 class UserConfigResponse(BaseModel):
@@ -54,6 +55,7 @@ class UserConfigResponse(BaseModel):
     theme: str
     language: str
     custom_settings: dict
+    chat_system_prompt: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -113,6 +115,7 @@ async def get_user_config(
         theme=config.theme,
         language=config.language,
         custom_settings=config.custom_settings or {},
+        chat_system_prompt=(config.custom_settings or {}).get("chat_system_prompt"),
         created_at=config.created_at.isoformat(),
         updated_at=(
             config.updated_at.isoformat()
@@ -137,9 +140,27 @@ async def update_user_config(
 
     # 更新配置
     update_data = config_update.dict(exclude_unset=True)
+    custom_settings = dict(config.custom_settings or {})
+    if "custom_settings" in update_data:
+        incoming = update_data.pop("custom_settings") or {}
+        if isinstance(incoming, dict):
+            custom_settings.update(incoming)
+    if "chat_system_prompt" in update_data:
+        prompt_value = update_data.pop("chat_system_prompt")
+        if prompt_value is None:
+            pass
+        else:
+            prompt_text = str(prompt_value).strip()
+            if prompt_text:
+                custom_settings["chat_system_prompt"] = prompt_text
+            else:
+                custom_settings.pop("chat_system_prompt", None)
+
     for field, value in update_data.items():
         if hasattr(config, field):
             setattr(config, field, value)
+    if custom_settings != (config.custom_settings or {}):
+        config.custom_settings = custom_settings
 
     db.commit()
     db.refresh(config)
@@ -159,6 +180,7 @@ async def update_user_config(
         theme=config.theme,
         language=config.language,
         custom_settings=config.custom_settings or {},
+        chat_system_prompt=(config.custom_settings or {}).get("chat_system_prompt"),
         created_at=config.created_at.isoformat(),
         updated_at=(
             config.updated_at.isoformat()
@@ -490,6 +512,7 @@ async def get_user_config_by_id(
         theme=config.theme,
         language=config.language,
         custom_settings=config.custom_settings or {},
+        chat_system_prompt=(config.custom_settings or {}).get("chat_system_prompt"),
         created_at=config.created_at.isoformat(),
         updated_at=(
             config.updated_at.isoformat()

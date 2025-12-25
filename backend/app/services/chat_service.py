@@ -24,6 +24,11 @@ class ChatService:
         """Initializes the chat service"""
         self.chat_history: Dict[str, List[ChatMessage]] = {}
 
+    def _merge_system_prompt(self, message: str, system_prompt: Optional[str]) -> str:
+        if system_prompt and system_prompt.strip():
+            return f"{system_prompt.strip()}\n\n{message}"
+        return message
+
     async def chat(
         self, request: ChatRequest, tenant_id: int = None, user_id: int = None
     ) -> ChatResponse:
@@ -57,8 +62,9 @@ class ChatService:
         # Otherwise, perform a standard chat completion
         logger.info("Performing standard chat completion.")
         try:
+            message = self._merge_system_prompt(request.message, request.system_prompt)
             llm_response = await llm_service.chat(
-                message=request.message,
+                message=message,
                 model=request.model,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens or 1000,
@@ -114,8 +120,9 @@ class ChatService:
                     yield chunk
                 return
 
+            message = self._merge_system_prompt(request.message, request.system_prompt)
             async for chunk in llm_service.stream_chat(
-                message=request.message,
+                message=message,
                 model=request.model,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens or 1000,

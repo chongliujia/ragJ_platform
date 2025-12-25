@@ -13,7 +13,7 @@ from app.services.chat_service import ChatService
 from app.services.langgraph_chat_service import langgraph_chat_service
 from app.services.reranking_service import reranking_service
 from app.core.dependencies import get_tenant_id, get_current_user
-from app.db.models.user import User
+from app.db.models.user import User, UserConfig
 from app.db.database import get_db
 from sqlalchemy.orm import Session
 from app.db.models.knowledge_base import KnowledgeBase as KBModel
@@ -50,6 +50,16 @@ async def handle_chat(
         )
         
         # Use LangGraph service for RAG chat if knowledge base is specified
+        user_prompt = None
+        try:
+            config = db.query(UserConfig).filter(UserConfig.user_id == current_user.id).first()
+            if config and isinstance(config.custom_settings, dict):
+                user_prompt = config.custom_settings.get("chat_system_prompt")
+        except Exception:
+            user_prompt = None
+        if user_prompt and not request.system_prompt:
+            request.system_prompt = user_prompt
+
         if request.knowledge_base_id:
             kb_row = (
                 db.query(KBModel)
@@ -93,6 +103,16 @@ async def handle_stream_chat(
             "Handling streaming chat request",
             knowledge_base_id=request.knowledge_base_id,
         )
+        user_prompt = None
+        try:
+            config = db.query(UserConfig).filter(UserConfig.user_id == current_user.id).first()
+            if config and isinstance(config.custom_settings, dict):
+                user_prompt = config.custom_settings.get("chat_system_prompt")
+        except Exception:
+            user_prompt = None
+        if user_prompt and not request.system_prompt:
+            request.system_prompt = user_prompt
+
         if request.knowledge_base_id:
             kb_row = (
                 db.query(KBModel)

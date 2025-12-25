@@ -4,10 +4,11 @@ Knowledge Base Management API Endpoints
 
 import logging
 import re
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import (
     ElasticsearchService,
@@ -30,6 +31,35 @@ from app.services.chunking_service import chunking_service, ChunkingStrategy
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+class KnowledgeBaseSettingsUpdate(BaseModel):
+    embedding_model: Optional[str] = None
+    chunking_strategy: Optional[str] = None
+    chunking_params: Optional[Dict[str, Any]] = None
+    retrieval_top_k: Optional[int] = None
+    rerank_enabled: Optional[bool] = None
+    rerank_top_k: Optional[int] = None
+
+
+class KnowledgeBaseSettingsResponse(BaseModel):
+    embedding_model: str
+    chunk_size: int
+    chunk_overlap: int
+    chunking_strategy: str
+    chunking_params: Dict[str, Any]
+    retrieval_top_k: int
+    rerank_enabled: bool
+    rerank_top_k: int
+    config_version: int
+    updated_at: Optional[str]
+
+
+class KnowledgeBaseReindexRequest(BaseModel):
+    document_ids: Optional[List[int]] = None
+    chunking_strategy: Optional[str] = None
+    chunking_params: Optional[Dict[str, Any]] = None
+    use_kb_config: bool = True
 
 def _can_read_kb(kb_row: KBModel, user: User) -> bool:
     if user.role in ("super_admin", "tenant_admin"):
@@ -57,6 +87,28 @@ def validate_collection_name(name: str) -> bool:
         return False
     # Only alphanumeric characters and underscores allowed
     return bool(re.match(r"^[a-zA-Z0-9_]+$", name))
+
+
+def _build_kb_settings_payload(kb_row: KBModel) -> KnowledgeBaseSettingsResponse:
+    raw = kb_row.settings or {}
+    chunking_params = raw.get("chunking_params") if isinstance(raw.get("chunking_params"), dict) else {}
+    chunk_size = int(getattr(kb_row, "chunk_size", 0) or chunking_params.get("chunk_size") or settings.CHUNK_SIZE)
+    chunk_overlap = int(getattr(kb_row, "chunk_overlap", 0) or chunking_params.get("chunk_overlap") or settings.CHUNK_OVERLAP)
+    chunking_params = dict(chunking_params or {})
+    chunking_params.setdefault("chunk_size", chunk_size)
+    chunking_params.setdefault("chunk_overlap", chunk_overlap)
+    return KnowledgeBaseSettingsResponse(
+        embedding_model=str(getattr(kb_row, "embedding_model", "") or "text-embedding-v2"),
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        chunking_strategy=str(raw.get("chunking_strategy") or ChunkingStrategy.RECURSIVE.value),
+        chunking_params=chunking_params,
+        retrieval_top_k=int(raw.get("retrieval_top_k") or 3),
+        rerank_enabled=bool(raw.get("rerank_enabled", True)),
+        rerank_top_k=int(raw.get("rerank_top_k") or 2),
+        config_version=int(raw.get("config_version") or 0),
+        updated_at=str(raw.get("updated_at")) if raw.get("updated_at") else None,
+    )
 
 
 @router.post(
@@ -155,6 +207,18 @@ async def create_knowledge_base(
                 .first()
             )
             if existing is None:
+                default_settings = {
+                    "config_version": 1,
+                    "chunking_strategy": ChunkingStrategy.RECURSIVE.value,
+                    "chunking_params": {
+                        "chunk_size": 1000,
+                        "chunk_overlap": 200,
+                    },
+                    "retrieval_top_k": 3,
+                    "rerank_enabled": True,
+                    "rerank_top_k": 2,
+                    "updated_at": datetime.utcnow().isoformat(),
+                }
                 kb_row = KBModel(
                     name=kb_name,
                     description=kb_create.description or "",
@@ -169,7 +233,7 @@ async def create_knowledge_base(
                     total_chunks=0,
                     total_size_bytes=0,
                     milvus_collection_name=tenant_collection_name,
-                    settings={},
+                    settings=default_settings,
                 )
                 db.add(kb_row)
                 db.commit()
@@ -491,6 +555,183 @@ async def get_knowledge_base(
             detail="Failed to retrieve knowledge base details from Milvus.",
         )
 
+
+@router.get("/{kb_name}/settings", response_model=KnowledgeBaseSettingsResponse)
+async def get_knowledge_base_settings(
+    kb_name: str,
+    tenant_id: int = Depends(get_tenant_id),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_READ.value)
+    ),
+):
+    """Get knowledge base settings."""
+    kb_row = (
+        db.query(KBModel)
+        .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id, KBModel.is_active == True)
+        .first()
+    )
+    if kb_row is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    if not _can_read_kb(kb_row, current_user):
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    return _build_kb_settings_payload(kb_row)
+
+
+@router.patch("/{kb_name}/settings", response_model=KnowledgeBaseSettingsResponse)
+async def update_knowledge_base_settings(
+    kb_name: str,
+    payload: KnowledgeBaseSettingsUpdate,
+    tenant_id: int = Depends(get_tenant_id),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_UPDATE.value)
+    ),
+):
+    """Update knowledge base settings (with config versioning)."""
+    kb_row = (
+        db.query(KBModel)
+        .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id, KBModel.is_active == True)
+        .first()
+    )
+    if kb_row is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    if not _can_write_kb(kb_row, current_user):
+        raise HTTPException(status_code=403, detail="Not allowed to manage this knowledge base")
+
+    raw_settings = dict(kb_row.settings or {})
+    updated = False
+
+    if payload.embedding_model is not None:
+        kb_row.embedding_model = payload.embedding_model
+        raw_settings["embedding_model"] = payload.embedding_model
+        updated = True
+
+    if payload.chunking_strategy is not None:
+        try:
+            strategy = ChunkingStrategy(str(payload.chunking_strategy)).value
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid chunking_strategy")
+        raw_settings["chunking_strategy"] = strategy
+        updated = True
+
+    if payload.chunking_params is not None:
+        if not isinstance(payload.chunking_params, dict):
+            raise HTTPException(status_code=400, detail="chunking_params must be an object")
+        raw_settings["chunking_params"] = payload.chunking_params
+        # Keep legacy columns in sync when available.
+        if "chunk_size" in payload.chunking_params:
+            try:
+                kb_row.chunk_size = int(payload.chunking_params.get("chunk_size") or kb_row.chunk_size)
+            except Exception:
+                pass
+        if "chunk_overlap" in payload.chunking_params:
+            try:
+                kb_row.chunk_overlap = int(payload.chunking_params.get("chunk_overlap") or kb_row.chunk_overlap)
+            except Exception:
+                pass
+        updated = True
+
+    if payload.retrieval_top_k is not None:
+        if int(payload.retrieval_top_k) <= 0:
+            raise HTTPException(status_code=400, detail="retrieval_top_k must be > 0")
+        raw_settings["retrieval_top_k"] = int(payload.retrieval_top_k)
+        updated = True
+
+    if payload.rerank_enabled is not None:
+        raw_settings["rerank_enabled"] = bool(payload.rerank_enabled)
+        updated = True
+
+    if payload.rerank_top_k is not None:
+        if int(payload.rerank_top_k) <= 0:
+            raise HTTPException(status_code=400, detail="rerank_top_k must be > 0")
+        raw_settings["rerank_top_k"] = int(payload.rerank_top_k)
+        updated = True
+
+    if updated:
+        raw_settings["config_version"] = int(raw_settings.get("config_version") or 0) + 1
+        raw_settings["updated_at"] = datetime.utcnow().isoformat()
+        kb_row.settings = raw_settings
+        db.add(kb_row)
+        db.commit()
+        db.refresh(kb_row)
+
+    return _build_kb_settings_payload(kb_row)
+
+
+@router.post("/{kb_name}/maintenance/reindex")
+async def reindex_knowledge_base_documents(
+    kb_name: str,
+    payload: KnowledgeBaseReindexRequest,
+    background_tasks: BackgroundTasks,
+    tenant_id: int = Depends(get_tenant_id),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_UPDATE.value)
+    ),
+):
+    """Reindex documents for a knowledge base using current or provided chunking settings."""
+    kb_row = (
+        db.query(KBModel)
+        .filter(KBModel.name == kb_name, KBModel.tenant_id == tenant_id, KBModel.is_active == True)
+        .first()
+    )
+    if kb_row is None:
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+    if not _can_write_kb(kb_row, current_user):
+        raise HTTPException(status_code=403, detail="Not allowed to manage this knowledge base")
+
+    # Resolve chunking strategy/params
+    raw_settings = kb_row.settings or {}
+    strategy_value = payload.chunking_strategy
+    if not strategy_value and payload.use_kb_config:
+        strategy_value = raw_settings.get("chunking_strategy")
+    if not strategy_value:
+        strategy_value = ChunkingStrategy.RECURSIVE.value
+    try:
+        strategy = ChunkingStrategy(str(strategy_value))
+    except Exception:
+        strategy = ChunkingStrategy.RECURSIVE
+
+    params = payload.chunking_params or {}
+    if not params and payload.use_kb_config:
+        params = raw_settings.get("chunking_params") if isinstance(raw_settings.get("chunking_params"), dict) else {}
+    if not isinstance(params, dict):
+        params = {}
+    params.setdefault("chunk_size", int(getattr(kb_row, "chunk_size", 0) or settings.CHUNK_SIZE))
+    params.setdefault("chunk_overlap", int(getattr(kb_row, "chunk_overlap", 0) or settings.CHUNK_OVERLAP))
+
+    from app.db.models.document import Document as DocModel, DocumentStatus as DocumentStatusEnum
+    docs_query = db.query(DocModel).filter(
+        DocModel.knowledge_base_name == kb_name,
+        DocModel.tenant_id == tenant_id,
+    )
+    if payload.document_ids:
+        docs_query = docs_query.filter(DocModel.id.in_(payload.document_ids))
+    docs = docs_query.all()
+
+    from app.services.document_service import document_service
+    scheduled = 0
+    skipped_processing = 0
+    for doc in docs:
+        if doc.status == DocumentStatusEnum.PROCESSING.value:
+            skipped_processing += 1
+            continue
+        background_tasks.add_task(
+            document_service.reindex_document,
+            doc.id,
+            tenant_id,
+            current_user.id,
+            strategy,
+            params,
+        )
+        scheduled += 1
+
+    return {
+        "message": "Reindex accepted",
+        "scheduled": scheduled,
+        "skipped_processing": skipped_processing,
+    }
 
 @router.post("/{kb_name}/maintenance/clear-vectors")
 async def clear_kb_vectors(

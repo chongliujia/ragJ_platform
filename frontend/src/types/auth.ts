@@ -63,6 +63,7 @@ export interface UserConfig {
   theme: string;
   language: string;
   custom_settings: Record<string, any>;
+  chat_system_prompt?: string;
   created_at: string;
   updated_at: string;
 }

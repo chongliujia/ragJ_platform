@@ -19,6 +19,8 @@ import {
   AccordionSummary,
   AccordionDetails,
   Slider,
+  TextField,
+  FormHelperText,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -46,6 +48,7 @@ interface UserConfig {
   theme: string;
   language: string;
   custom_settings: Record<string, any>;
+  chat_system_prompt?: string;
   created_at: string;
   updated_at: string;
 }
@@ -104,7 +107,11 @@ const UserSettings: React.FC = () => {
       }
 
       const data = await response.json();
-      setConfig(data);
+      const prompt =
+        (data as any)?.chat_system_prompt ||
+        (data as any)?.custom_settings?.chat_system_prompt ||
+        '';
+      setConfig({ ...data, chat_system_prompt: prompt });
     } catch (error: any) {
       setError(error.message);
     } finally {
@@ -174,6 +181,7 @@ const UserSettings: React.FC = () => {
           theme: config.theme,
           language: config.language,
           custom_settings: config.custom_settings,
+          chat_system_prompt: config.chat_system_prompt,
         }),
       });
 
@@ -182,7 +190,11 @@ const UserSettings: React.FC = () => {
       }
 
       const updatedConfig = await response.json();
-      setConfig(updatedConfig);
+      const prompt =
+        (updatedConfig as any)?.chat_system_prompt ||
+        (updatedConfig as any)?.custom_settings?.chat_system_prompt ||
+        '';
+      setConfig({ ...updatedConfig, chat_system_prompt: prompt });
       setSuccess(t('userSettings.messages.saved'));
       
       // 如果语言设置改变，更新i18n
@@ -347,6 +359,30 @@ const UserSettings: React.FC = () => {
               </FormControl>
             </Grid>
           </Grid>
+        </AccordionDetails>
+      </Accordion>
+
+      {/* 聊天提示词设置 */}
+      <Accordion>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <TuneIcon />
+            <Typography variant="h6">{t('userSettings.sections.prompt')}</Typography>
+          </Box>
+        </AccordionSummary>
+        <AccordionDetails>
+          <TextField
+            fullWidth
+            multiline
+            minRows={4}
+            label={t('userSettings.fields.chatSystemPrompt')}
+            value={config.chat_system_prompt || ''}
+            onChange={(e) => updateConfig('chat_system_prompt', e.target.value)}
+            placeholder={t('userSettings.fields.chatSystemPromptPlaceholder')}
+          />
+          <FormHelperText sx={{ mt: 1 }}>
+            {t('userSettings.fields.chatSystemPromptHelp')}
+          </FormHelperText>
         </AccordionDetails>
       </Accordion>
 

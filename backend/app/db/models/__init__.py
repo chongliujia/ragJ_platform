@@ -21,9 +21,11 @@ from .workflow import (
     ExecutionStatus
 )
 from .api_key import ApiKey
+from .api_key_usage import ApiKeyUsage
 from .tenant_model_config import TenantProviderConfig, TenantModelConfig
 from .user_model_config import UserProviderConfig, UserModelConfig
 from .agent import Agent
+from .evaluation import EvaluationDataset, EvaluationRun
 
 __all__ = [
     "Base",
@@ -50,9 +52,12 @@ __all__ = [
     "WorkflowStatus",
     "ExecutionStatus",
     "ApiKey",
+    "ApiKeyUsage",
     "TenantProviderConfig",
     "TenantModelConfig",
     "UserProviderConfig",
     "UserModelConfig",
     "Agent",
+    "EvaluationDataset",
+    "EvaluationRun",
 ]

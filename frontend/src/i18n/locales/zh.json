@@ -147,7 +147,17 @@
     "regenerate": "重新生成",
     "stop": "停止",
     "timeout": "请求超时",
-    "timeoutWithKnowledgeBase": "请求超时，可重试或切换到普通对话。"
+    "timeoutWithKnowledgeBase": "请求超时，可重试或切换到普通对话。",
+    "systemPrompt": {
+      "title": "系统提示词",
+      "label": "系统提示词",
+      "placeholder": "可选，给助手的额外指令。RAG 可用 {context} 和 {query} 占位。",
+      "helper": "若包含 {context} 或 {query}，将作为完整模板使用。",
+      "save": "保存提示词",
+      "clear": "清空提示词",
+      "saved": "提示词已保存",
+      "saveError": "保存提示词失败"
+    }
   },
   "documents": {
     "title": "文档管理",
@@ -1434,6 +1444,7 @@
     },
     "sections": {
       "aiModels": "AI 模型设置",
+      "prompt": "聊天提示词",
       "modelParams": "模型参数",
       "ui": "界面设置"
     },
@@ -1441,6 +1452,9 @@
       "chatModel": "聊天模型",
       "embeddingModel": "嵌入模型",
       "rerankModel": "重排序模型",
+      "chatSystemPrompt": "聊天系统提示词",
+      "chatSystemPromptPlaceholder": "可选，对所有聊天生效。RAG 模板可用 {context} 和 {query}。",
+      "chatSystemPromptHelp": "按用户保存，可在聊天页临时覆盖。",
       "theme": "主题",
       "language": "语言"
     },

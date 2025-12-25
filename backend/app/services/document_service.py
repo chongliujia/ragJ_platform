@@ -517,6 +517,43 @@ class DocumentService:
         chunking_params: dict | None = None,
     ) -> None:
         """Retry processing for an existing document row (no re-upload)."""
+        await self._rebuild_document(
+            document_id=document_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            chunking_strategy=chunking_strategy,
+            chunking_params=chunking_params,
+            require_failed=True,
+        )
+
+    async def reindex_document(
+        self,
+        document_id: int,
+        tenant_id: int,
+        user_id: int,
+        chunking_strategy: ChunkingStrategy = ChunkingStrategy.RECURSIVE,
+        chunking_params: dict | None = None,
+    ) -> None:
+        """Reindex an existing document (recompute chunks/vectors)."""
+        await self._rebuild_document(
+            document_id=document_id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            chunking_strategy=chunking_strategy,
+            chunking_params=chunking_params,
+            require_failed=False,
+        )
+
+    async def _rebuild_document(
+        self,
+        *,
+        document_id: int,
+        tenant_id: int,
+        user_id: int,
+        chunking_strategy: ChunkingStrategy,
+        chunking_params: dict | None,
+        require_failed: bool,
+    ) -> None:
         db = SessionLocal()
         try:
             document = (
@@ -526,11 +563,14 @@ class DocumentService:
             )
             if document is None:
                 raise ValueError("Document not found")
-            if document.status != DocumentStatus.FAILED.value:
+            if require_failed and document.status != DocumentStatus.FAILED.value:
                 raise ValueError("Only failed documents can be retried")
+            if not require_failed and document.status == DocumentStatus.PROCESSING.value:
+                raise ValueError("Document is currently processing")
             if not document.file_path or not os.path.exists(document.file_path):
                 raise ValueError("Document file not found on disk")
 
+            old_total_chunks = int(document.total_chunks or 0)
             kb_name = document.knowledge_base_name
             tenant_collection_name = resolve_kb_collection_name(
                 db,
@@ -539,7 +579,7 @@ class DocumentService:
                 kb_id=document.knowledge_base_id,
             )
 
-            # best-effort cleanup previous artifacts (failed docs should have none, but be safe)
+            # best-effort cleanup previous artifacts
             try:
                 from app.services.milvus_service import milvus_service
 
@@ -561,7 +601,7 @@ class DocumentService:
                         },
                     )
             except Exception as e:
-                logger.warning(f"Retry cleanup milvus failed: {e}")
+                logger.warning(f"Rebuild cleanup milvus failed: {e}")
 
             try:
                 from app.services.elasticsearch_service import get_elasticsearch_service
@@ -578,7 +618,7 @@ class DocumentService:
                         },
                     )
             except Exception as e:
-                logger.warning(f"Retry cleanup elasticsearch failed: {e}")
+                logger.warning(f"Rebuild cleanup elasticsearch failed: {e}")
 
             try:
                 db.query(DocumentChunk).filter(
@@ -588,7 +628,7 @@ class DocumentService:
                 db.commit()
             except Exception as e:
                 db.rollback()
-                logger.warning(f"Retry cleanup document_chunks failed: {e}")
+                logger.warning(f"Rebuild cleanup document_chunks failed: {e}")
 
             # reset doc status/fields
             document.status = DocumentStatus.PROCESSING.value
@@ -596,6 +636,13 @@ class DocumentService:
             document.total_chunks = 0
             document.vector_ids = []
             document.processed_at = None
+            try:
+                meta = dict(document.doc_metadata or {})
+                meta["chunking_strategy"] = getattr(chunking_strategy, "value", str(chunking_strategy))
+                meta["chunking_params"] = chunking_params or {}
+                document.doc_metadata = meta
+            except Exception:
+                pass
             db.add(document)
             db.commit()
             self._update_document_progress(
@@ -603,7 +650,7 @@ class DocumentService:
                 document.id,
                 stage="processing",
                 percentage=5,
-                message="Retry started",
+                message="Rebuild started" if not require_failed else "Retry started",
             )
 
             if chunking_params is None:
@@ -735,7 +782,7 @@ class DocumentService:
                     db.commit()
             except Exception as e:
                 db.rollback()
-                logger.warning(f"Retry persist document_chunks failed: {e}")
+                logger.warning(f"Rebuild persist document_chunks failed: {e}")
             else:
                 self._update_document_progress(
                     db,
@@ -760,6 +807,23 @@ class DocumentService:
                 percentage=100,
                 message="Processing completed",
             )
+
+            # Best-effort update KB totals (adjust by delta)
+            try:
+                kb = (
+                    db.query(KBModel)
+                    .filter(KBModel.id == document.knowledge_base_id, KBModel.tenant_id == tenant_id)
+                    .first()
+                )
+                if kb is not None:
+                    new_total_chunks = int(document.total_chunks or 0)
+                    delta = new_total_chunks - old_total_chunks
+                    kb.total_chunks = max(0, int(kb.total_chunks or 0) + delta)
+                    db.add(kb)
+                    db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Rebuild update KB totals failed: {e}")
         except Exception as e:
             try:
                 db.rollback()
@@ -772,8 +836,9 @@ class DocumentService:
                     .first()
                 )
                 if document is not None:
+                    prefix = "Retry failed" if require_failed else "Reindex failed"
                     document.status = DocumentStatus.FAILED.value
-                    document.error_message = f"Retry failed: {e}"
+                    document.error_message = f"{prefix}: {e}"
                     db.add(document)
                     db.commit()
                     self._update_document_progress(
@@ -785,7 +850,7 @@ class DocumentService:
                     )
             except Exception:
                 pass
-            logger.error(f"Retry processing failed for document {document_id}: {e}", exc_info=True)
+            logger.error(f"Rebuild processing failed for document {document_id}: {e}", exc_info=True)
         finally:
             db.close()
 
