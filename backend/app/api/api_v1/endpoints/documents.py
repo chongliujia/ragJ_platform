@@ -665,7 +665,9 @@ async def delete_document(
         
         # Remove from vector database (prefer pk deletion; fallback to filters)
         try:
-            tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+            tenant_collection_name = (
+                kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+            )
             from app.services.milvus_service import milvus_service
             ids = []
             if document.vector_ids:
@@ -709,7 +711,9 @@ async def delete_document(
             from app.services.elasticsearch_service import get_elasticsearch_service
             es_service = await get_elasticsearch_service()
             if es_service is not None:
-                tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+                tenant_index_name = (
+                    kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+                )
                 await es_service.delete_by_query(
                     index_name=tenant_index_name,
                     term_filters={
@@ -1001,12 +1005,16 @@ async def batch_delete_documents(
 
         deleted_count = 0
         from app.services.milvus_service import milvus_service
-        tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+        tenant_collection_name = (
+            kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+        )
 
         # ES service (optional)
         from app.services.elasticsearch_service import get_elasticsearch_service
         es_service = await get_elasticsearch_service()
-        tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+        tenant_index_name = (
+            kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
+        )
 
         for doc in docs:
             # Delete vectors: prefer IDs, fallback to filters

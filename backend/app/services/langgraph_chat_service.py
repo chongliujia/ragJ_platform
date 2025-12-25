@@ -22,6 +22,7 @@ from app.services.elasticsearch_service import get_elasticsearch_service
 from app.services.reranking_service import reranking_service, RerankingProvider
 from app.db.database import SessionLocal
 from app.db.models.document import Document
+from app.utils.kb_collection import resolve_kb_collection_name
 
 logger = structlog.get_logger(__name__)
 
@@ -342,9 +343,19 @@ class LangGraphChatService:
         query_vector = state["query_vector"]
         query_text = state["query"]
         
-        # Create tenant-specific collection and index names
+        # Create tenant-specific collection and index names (stable from DB if available)
         tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
-        tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+        try:
+            db = SessionLocal()
+            try:
+                tenant_collection_name = resolve_kb_collection_name(
+                    db, tenant_id, kb_name=kb_name
+                )
+            finally:
+                db.close()
+        except Exception:
+            pass
+        tenant_index_name = tenant_collection_name
         
         try:
             # Perform hybrid search - 减少检索数量以提升速度

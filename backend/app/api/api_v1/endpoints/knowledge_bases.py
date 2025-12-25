@@ -600,9 +600,11 @@ async def clear_all_kb_vectors(
             raise HTTPException(status_code=403, detail="Tenant admin access required")
         tenant_prefix = f"tenant_{tenant_id}_"
 
-        # Load KB names from DB
+        # Load KB collection names from DB (stable, not derived from KB name)
         kb_rows = db.query(KBModel).filter(KBModel.tenant_id == tenant_id).all()
-        kb_names_in_db = {kb.name for kb in kb_rows}
+        kb_collections_in_db = {
+            kb.milvus_collection_name or f"{tenant_prefix}{kb.name}" for kb in kb_rows
+        }
 
         # List all Milvus collections and identify those for this tenant
         all_collections = milvus_service.list_collections()
@@ -610,16 +612,15 @@ async def clear_all_kb_vectors(
 
         # Drop stray collections (not in DB)
         for coll in tenant_collections:
-            kb_name = coll[len(tenant_prefix):]
-            if kb_name not in kb_names_in_db:
+            if coll not in kb_collections_in_db:
                 try:
                     await milvus_service.async_drop_collection(coll)
                 except Exception as e:
                     logger.warning(f"Failed to drop stray collection '{coll}': {e}")
 
         # For KBs in DB: drop and recreate their collections
-        for kb_name in kb_names_in_db:
-            coll_name = f"{tenant_prefix}{kb_name}"
+        for kb in kb_rows:
+            coll_name = kb.milvus_collection_name or f"{tenant_prefix}{kb.name}"
             if milvus_service.has_collection(coll_name):
                 try:
                     await milvus_service.async_drop_collection(coll_name)
@@ -643,8 +644,8 @@ async def clear_all_kb_vectors(
         if include_es:
             if es_service is None:
                 raise HTTPException(status_code=503, detail="Elasticsearch service not available")
-            for kb_name in kb_names_in_db:
-                idx = f"{tenant_prefix}{kb_name}"
+            for kb in kb_rows:
+                idx = kb.milvus_collection_name or f"{tenant_prefix}{kb.name}"
                 try:
                     if await es_service.index_exists(idx):
                         await es_service.delete_index(idx)

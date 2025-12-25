@@ -44,6 +44,7 @@ from app.services.llm_service import llm_service
 from app.services.milvus_service import milvus_service
 from app.services.elasticsearch_service import get_elasticsearch_service
 from app.services.reranking_service import reranking_service, RerankingProvider
+from app.utils.kb_collection import resolve_kb_collection_name
 
 logger = structlog.get_logger(__name__)
 
@@ -1248,6 +1249,7 @@ async def generate_workflow_code(request: WorkflowCreateRequest):
 async def test_retrieve(
     payload: Dict[str, Any],
     tenant_id: int = Depends(get_tenant_id),
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """预览检索结果（不进行 LLM 生成）。
@@ -1278,7 +1280,7 @@ async def test_retrieve(
     query_vec = emb["embeddings"][0]
 
     # 2) Milvus 向量检索
-    collection = f"tenant_{tenant_id}_{kb}"
+    collection = resolve_kb_collection_name(db, tenant_id, kb_name=kb)
     try:
         vec_results = await milvus_service.search(
             collection_name=collection,

@@ -21,6 +21,7 @@ from app.db.database import SessionLocal
 from app.db.models.document import Document, DocumentStatus
 from app.db.models.knowledge_base import KnowledgeBase as KBModel
 from app.db.models.document_chunk import DocumentChunk
+from app.utils.kb_collection import resolve_kb_collection_name
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +324,9 @@ class DocumentService:
             ]
 
             # Create tenant-specific collection name
-            tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
+            tenant_collection_name = resolve_kb_collection_name(
+                db, tenant_id, kb_name=kb_name
+            )
 
             # Insert into Milvus (synchronous call)
             try:
@@ -419,7 +422,7 @@ class DocumentService:
                 )
 
             # Index documents in Elasticsearch with tenant isolation
-            tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+            tenant_index_name = tenant_collection_name
             es_docs = [
                 {
                     "text": chunk,
@@ -528,12 +531,18 @@ class DocumentService:
             if not document.file_path or not os.path.exists(document.file_path):
                 raise ValueError("Document file not found on disk")
 
+            kb_name = document.knowledge_base_name
+            tenant_collection_name = resolve_kb_collection_name(
+                db,
+                tenant_id,
+                kb_name=kb_name,
+                kb_id=document.knowledge_base_id,
+            )
+
             # best-effort cleanup previous artifacts (failed docs should have none, but be safe)
             try:
                 from app.services.milvus_service import milvus_service
 
-                kb_name = document.knowledge_base_name
-                tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
                 ids = []
                 if document.vector_ids:
                     try:
@@ -559,8 +568,7 @@ class DocumentService:
 
                 es_service = await get_elasticsearch_service()
                 if es_service is not None:
-                    kb_name = document.knowledge_base_name
-                    tenant_index_name = f"tenant_{tenant_id}_{kb_name}"
+                    tenant_index_name = tenant_collection_name
                     await es_service.delete_by_query(
                         index_name=tenant_index_name,
                         term_filters={
@@ -670,8 +678,6 @@ class DocumentService:
                 extra={"chunks": len(chunks), "vectors": len(embeddings)},
             )
 
-            kb_name = document.knowledge_base_name
-            tenant_collection_name = f"tenant_{tenant_id}_{kb_name}"
             entities = [
                 {
                     "text": chunk,

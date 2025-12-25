@@ -1391,6 +1391,7 @@ class WorkflowExecutionEngine:
         if tenant_id is None:
             raise RuntimeError("缺少租户ID，无法执行RAG检索节点")
 
+        tenant_collection_name = f"tenant_{tenant_id}_{knowledge_base}"
         # Enforce KB read access (avoid workflow bypassing KB permissions)
         try:
             from app.db.database import SessionLocal
@@ -1410,6 +1411,8 @@ class WorkflowExecutionEngine:
                 )
                 if kb_row is None:
                     raise RuntimeError("知识库不存在或不可用")
+                if kb_row.milvus_collection_name:
+                    tenant_collection_name = kb_row.milvus_collection_name
                 if user_id is not None:
                     u = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
                     if not u:
@@ -1437,9 +1440,8 @@ class WorkflowExecutionEngine:
         query_vector = embedding_response['embeddings'][0]
 
         # 向量搜索（按租户隔离集合）
-        collection_name = f"tenant_{tenant_id}_{knowledge_base}"
         results = await milvus_service.search(
-            collection_name=collection_name,
+            collection_name=tenant_collection_name,
             query_vector=query_vector,
             top_k=top_k
         )
@@ -1490,6 +1492,7 @@ class WorkflowExecutionEngine:
         if tenant_id is None:
             raise RuntimeError("缺少租户ID，无法执行混合检索")
 
+        tenant_collection_name = f"tenant_{tenant_id}_{knowledge_base}"
         # Enforce KB read access (avoid workflow bypassing KB permissions)
         try:
             from app.db.database import SessionLocal
@@ -1509,6 +1512,8 @@ class WorkflowExecutionEngine:
                 )
                 if kb_row is None:
                     raise RuntimeError("知识库不存在或不可用")
+                if kb_row.milvus_collection_name:
+                    tenant_collection_name = kb_row.milvus_collection_name
                 if user_id is not None:
                     u = db.query(UserModel).filter(UserModel.id == int(user_id)).first()
                     if not u:
@@ -1532,7 +1537,6 @@ class WorkflowExecutionEngine:
             raise RuntimeError("向量生成失败")
         query_vector = embedding_response['embeddings'][0]
 
-        tenant_collection_name = f"tenant_{tenant_id}_{knowledge_base}"
         tenant_index_name = tenant_collection_name
 
         # 向量检索
@@ -1656,6 +1660,19 @@ class WorkflowExecutionEngine:
             raise RuntimeError('缺少租户ID，无法执行关键词检索')
 
         index_name = f"tenant_{tenant_id}_{knowledge_base}"
+        try:
+            from app.db.database import SessionLocal
+            from app.utils.kb_collection import resolve_kb_collection_name
+
+            db = SessionLocal()
+            try:
+                index_name = resolve_kb_collection_name(
+                    db, tenant_id, kb_name=knowledge_base
+                )
+            finally:
+                db.close()
+        except Exception:
+            pass
         try:
             es_service = await get_elasticsearch_service()
             results = []
