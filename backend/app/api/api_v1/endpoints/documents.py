@@ -6,14 +6,25 @@ Handles document uploads and processing within a knowledge base.
 import hashlib
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, status, Form, HTTPException, Depends, Path
+from fastapi import (
+    APIRouter,
+    UploadFile,
+    File,
+    BackgroundTasks,
+    status,
+    Form,
+    HTTPException,
+    Depends,
+    Path,
+    Query,
+)
 import os
 import uuid
 
 import aiofiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func
+from sqlalchemy import func as sa_func, or_
 
 from app.services.document_service import document_service
 from app.services.chunking_service import ChunkingStrategy, chunking_service
@@ -314,6 +325,17 @@ class DocumentStatus(BaseModel):
     status: str
     error_message: Optional[str]
     progress: Optional[dict] = None
+
+
+class DocumentSearchItem(BaseModel):
+    id: int
+    label: str
+    status: str
+
+
+class DocumentSearchResponse(BaseModel):
+    total: int
+    items: List[DocumentSearchItem]
 
 
 class DocumentChunk(BaseModel):
@@ -935,6 +957,69 @@ async def get_chunking_strategies():
     Get available chunking strategies and their parameters.
     """
     return {"strategies": chunking_service.get_available_strategies()}
+
+
+@router.get("/search", response_model=DocumentSearchResponse)
+async def search_knowledge_base_documents(
+    kb_name: str,
+    q: Optional[str] = Query(None, description="Search query for filename/title"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(30, ge=1, le=100),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    db: Session = Depends(get_db),
+    tenant_id: int = Depends(get_tenant_id),
+    current_user: User = Depends(require_permission(PermissionType.DOCUMENT_READ.value)),
+):
+    """
+    Search documents in a knowledge base with pagination.
+    """
+    kb_row = (
+        db.query(KBModel)
+        .filter(
+            KBModel.name == kb_name,
+            KBModel.tenant_id == tenant_id,
+            KBModel.is_active == True,
+        )
+        .first()
+    )
+    if kb_row is None or not _can_read_kb(kb_row, current_user):
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    query_text = (q or "").strip().lower()
+    base_query = db.query(Document).filter(
+        Document.knowledge_base_name == kb_name,
+        Document.tenant_id == tenant_id,
+    )
+    if status_filter:
+        base_query = base_query.filter(Document.status == status_filter)
+    if query_text:
+        pattern = f"%{query_text}%"
+        base_query = base_query.filter(
+            or_(
+                sa_func.lower(sa_func.coalesce(Document.original_filename, "")).like(pattern),
+                sa_func.lower(sa_func.coalesce(Document.filename, "")).like(pattern),
+                sa_func.lower(sa_func.coalesce(Document.title, "")).like(pattern),
+            )
+        )
+
+    total = base_query.order_by(None).count()
+    documents = (
+        base_query.order_by(Document.created_at.desc(), Document.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    items: list[DocumentSearchItem] = []
+    for doc in documents:
+        label = doc.original_filename or doc.filename or doc.title or f"doc-{doc.id}"
+        items.append(
+            DocumentSearchItem(
+                id=doc.id,
+                label=label,
+                status=doc.status,
+            )
+        )
+    return DocumentSearchResponse(total=total, items=items)
 
 
 @router.get("/", response_model=List[DocumentInfo])

@@ -113,7 +113,7 @@ export const knowledgeBaseApi = {
   discoverSemanticCandidates: (
     kbName: string,
     data: {
-      scope?: 'all' | 'recent';
+      scope?: 'all' | 'recent' | 'selected';
       include_relations?: boolean;
       reset?: boolean;
       document_limit?: number;
@@ -129,6 +129,10 @@ export const knowledgeBaseApi = {
       summary_max_chars?: number;
       entity_types?: string[];
       relation_types?: string[];
+      discovery_mode?: 'facts' | 'insights';
+      insight_scope?: 'document' | 'cross';
+      insight_domain?: string;
+      document_ids?: number[];
     }
   ) => api.post(`/api/v1/knowledge-bases/${kbName}/semantic/discover`, data),
 
@@ -218,6 +222,12 @@ export const documentApi = {
   // 获取文档列表
   getList: (knowledgeBaseId: string) => 
     api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/`),
+
+  // 搜索文档（远程分页）
+  search: (
+    knowledgeBaseId: string,
+    params?: { q?: string; offset?: number; limit?: number; status?: string }
+  ) => api.get(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/search`, { params }),
   
   // 上传文档（使用嵌套路由，避免额外参数解析不一致）
   upload: (knowledgeBaseId: string, formData: FormData, signal?: AbortSignal) => 

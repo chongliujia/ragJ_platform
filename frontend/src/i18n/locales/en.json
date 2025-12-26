@@ -133,7 +133,8 @@
         "total": "Total candidates",
         "entities": "Entity candidates",
         "relations": "Relation candidates",
-        "attributes": "Attribute candidates"
+        "attributes": "Attribute candidates",
+        "insights": "Insight candidates"
       },
       "graph": {
         "title": "Candidate relation graph",
@@ -155,7 +156,8 @@
         "all": "All",
         "entities": "Entities",
         "relations": "Relations",
-        "attributes": "Attributes"
+        "attributes": "Attributes",
+        "insights": "Insights"
       },
       "filters": {
         "search": "Search candidates",
@@ -170,7 +172,8 @@
       "types": {
         "entity": "Entity",
         "relation": "Relation",
-        "attribute": "Attribute"
+        "attribute": "Attribute",
+        "insight": "Insight"
       },
       "status": {
         "pending": "Pending",
@@ -218,7 +221,12 @@
           "conflicts": "Conflict hints",
           "aliases": "Aliases",
           "attributes": "Attributes",
+          "insight": "Insight details",
           "evidence": "Evidence"
+        },
+        "insight": {
+          "type": "Type",
+          "scope": "Scope"
         },
         "actions": {
           "approve": "Approve",
@@ -279,6 +287,24 @@
         "scope": "Scope",
         "scopeAll": "All documents",
         "scopeRecent": "New documents only",
+        "scopeSelected": "Selected documents",
+        "discoveryMode": "Discovery mode",
+        "discoveryModeFacts": "Fact candidates",
+        "discoveryModeInsights": "Insight mode",
+        "insightScope": "Insight scope",
+        "insightScopeDocument": "Single-document insights",
+        "insightScopeCross": "Cross-document insights",
+        "insightDomain": "Insight domain",
+        "insightDomainGeneral": "General",
+        "insightDomainLegal": "Legal",
+        "insightDomainMedical": "Medical",
+        "insightDomainMath": "Math",
+        "insightDomainBusiness": "Business",
+        "insightDomainNews": "News",
+        "insightDomainIntelligence": "Intelligence",
+        "documentSelect": "Select documents",
+        "documentSelectHelp": "Search and select multiple documents; leave empty to use scope",
+        "documentSelectSingleHelp": "Select exactly one document for insights",
         "includeRelations": "Include relations",
         "limitsTitle": "Extraction limits",
         "autoChunking": "Auto scale by document length",

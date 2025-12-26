@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
+  Autocomplete,
   Alert,
   Box,
   Button,
@@ -47,15 +48,17 @@ import {
   ZoomOut as ZoomOutIcon,
 } from '@mui/icons-material';
 import { alpha, useTheme } from '@mui/material/styles';
-import { knowledgeBaseApi } from '../services/api';
+import { documentApi, knowledgeBaseApi } from '../services/api';
 import { authApi } from '../services/authApi';
 import cytoscape from 'cytoscape';
 import type { Core, ElementDefinition, LayoutOptions } from 'cytoscape';
 
 type CandidateStatus = 'pending' | 'approved' | 'rejected';
-type CandidateType = 'entity' | 'relation' | 'attribute';
+type CandidateType = 'entity' | 'relation' | 'attribute' | 'insight';
 type ChunkStrategy = 'uniform' | 'leading' | 'head_tail' | 'diverse';
 type ExtractionMode = 'direct' | 'summary';
+type DiscoveryMode = 'facts' | 'insights';
+type InsightScope = 'document' | 'cross';
 type DiscoveryStatus = 'idle' | 'running' | 'completed' | 'failed';
 
 interface SemanticEvidence {
@@ -139,6 +142,7 @@ const EXTRACTION_MAX_DOCUMENT_LIMIT = 50;
 const EXTRACTION_MAX_PROGRESSIVE_ITEMS = 50;
 const EXTRACTION_MAX_PROGRESSIVE_STEP = 50;
 const EXTRACTION_MAX_SUMMARY_CHARS = 4000;
+const DOCUMENT_SEARCH_PAGE_SIZE = 30;
 
 const CHUNK_STRATEGY_OPTIONS: Array<{ value: ChunkStrategy; labelKey: string }> = [
   { value: 'uniform', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.chunkStrategyUniform' },
@@ -150,6 +154,26 @@ const CHUNK_STRATEGY_OPTIONS: Array<{ value: ChunkStrategy; labelKey: string }> 
 const EXTRACTION_MODE_OPTIONS: Array<{ value: ExtractionMode; labelKey: string }> = [
   { value: 'direct', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.modeDirect' },
   { value: 'summary', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.modeSummary' },
+];
+
+const DISCOVERY_MODE_OPTIONS: Array<{ value: DiscoveryMode; labelKey: string }> = [
+  { value: 'facts', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.discoveryModeFacts' },
+  { value: 'insights', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.discoveryModeInsights' },
+];
+
+const INSIGHT_SCOPE_OPTIONS: Array<{ value: InsightScope; labelKey: string }> = [
+  { value: 'document', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightScopeDocument' },
+  { value: 'cross', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightScopeCross' },
+];
+
+const INSIGHT_DOMAIN_OPTIONS = [
+  { value: 'general', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightDomainGeneral' },
+  { value: 'legal', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightDomainLegal' },
+  { value: 'medical', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightDomainMedical' },
+  { value: 'math', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightDomainMath' },
+  { value: 'business', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightDomainBusiness' },
+  { value: 'news', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightDomainNews' },
+  { value: 'intelligence', labelKey: 'knowledgeBase.semanticLayer.discoveryDialog.insightDomainIntelligence' },
 ];
 
 const toLimitString = (value: unknown, fallback: number, min: number, max: number) => {
@@ -173,11 +197,31 @@ const toExtractionMode = (value: unknown, fallback: ExtractionMode): ExtractionM
   return fallback;
 };
 
+const toDiscoveryMode = (value: unknown, fallback: DiscoveryMode): DiscoveryMode => {
+  if (value === 'facts' || value === 'insights') {
+    return value;
+  }
+  return fallback;
+};
+
+const toInsightScope = (value: unknown, fallback: InsightScope): InsightScope => {
+  if (value === 'document' || value === 'cross') {
+    return value;
+  }
+  return fallback;
+};
+
 const parseTypeList = (value: string) =>
   value
     .split(/[,;\n]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+
+type DocumentOption = {
+  id: string;
+  label: string;
+  status?: string;
+};
 
 const CytoscapeGraph: React.FC<CytoscapeGraphProps> = ({
   elements,
@@ -309,6 +353,15 @@ const KnowledgeBaseSemantic: React.FC = () => {
   const [autoChunking, setAutoChunking] = useState(false);
   const [chunkStrategy, setChunkStrategy] = useState<ChunkStrategy>('uniform');
   const [extractionMode, setExtractionMode] = useState<ExtractionMode>(EXTRACTION_DEFAULT_MODE);
+  const [discoveryMode, setDiscoveryMode] = useState<DiscoveryMode>('facts');
+  const [insightScope, setInsightScope] = useState<InsightScope>('document');
+  const [insightDomain, setInsightDomain] = useState('general');
+  const [documentOptions, setDocumentOptions] = useState<DocumentOption[]>([]);
+  const [selectedDocuments, setSelectedDocuments] = useState<DocumentOption[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentQuery, setDocumentQuery] = useState('');
+  const [documentOffset, setDocumentOffset] = useState(0);
+  const [documentHasMore, setDocumentHasMore] = useState(true);
   const [progressiveEnabled, setProgressiveEnabled] = useState(false);
   const [progressiveMinItems, setProgressiveMinItems] = useState(
     String(EXTRACTION_DEFAULT_PROGRESSIVE_MIN_ITEMS)
@@ -322,6 +375,31 @@ const KnowledgeBaseSemantic: React.FC = () => {
   const [entityTypeWhitelist, setEntityTypeWhitelist] = useState('');
   const [relationTypeWhitelist, setRelationTypeWhitelist] = useState('');
   const limitsTouchedRef = useRef(false);
+  const scopeTouchedRef = useRef(false);
+  const documentSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const documentRequestRef = useRef(0);
+  const selectedDocumentsRef = useRef<DocumentOption[]>([]);
+
+  const mergeDocumentOptions = useCallback(
+    (base: DocumentOption[], selected: DocumentOption[]) => {
+      const map = new Map<string, DocumentOption>();
+      base.forEach((item) => {
+        map.set(item.id, item);
+      });
+      selected.forEach((item) => {
+        if (!map.has(item.id)) {
+          map.set(item.id, item);
+        }
+      });
+      return Array.from(map.values());
+    },
+    []
+  );
+
+  const isInsightMode = discoveryMode === 'insights';
+  const isSingleDocInsight = isInsightMode && insightScope === 'document';
+  const requiresSelection = scope === 'selected' || isSingleDocInsight;
+
 
   const selectedCandidate = useMemo(
     () => candidates.find((candidate) => candidate.id === selectedId) || null,
@@ -334,11 +412,17 @@ const KnowledgeBaseSemantic: React.FC = () => {
     }
   }, [graphFocusSelection, selectedCandidate]);
 
+  useEffect(() => {
+    selectedDocumentsRef.current = selectedDocuments;
+    setDocumentOptions((prev) => mergeDocumentOptions(prev, selectedDocuments));
+  }, [mergeDocumentOptions, selectedDocuments]);
+
   const counts = useMemo(
     () => ({
       entities: candidates.filter((c) => c.type === 'entity').length,
       relations: candidates.filter((c) => c.type === 'relation').length,
       attributes: candidates.filter((c) => c.type === 'attribute').length,
+      insights: candidates.filter((c) => c.type === 'insight').length,
     }),
     [candidates]
   );
@@ -407,6 +491,7 @@ const KnowledgeBaseSemantic: React.FC = () => {
       if (tab === 1 && candidate.type !== 'entity') return false;
       if (tab === 2 && candidate.type !== 'relation') return false;
       if (tab === 3 && candidate.type !== 'attribute') return false;
+      if (tab === 4 && candidate.type !== 'insight') return false;
       if (statusFilter !== 'all' && candidate.status !== statusFilter) return false;
       if (candidate.confidence < minConfidence) return false;
       if (!text) return true;
@@ -461,6 +546,26 @@ const KnowledgeBaseSemantic: React.FC = () => {
 
   const markLimitsTouched = () => {
     limitsTouchedRef.current = true;
+  };
+
+  const handleDocumentInputChange = useCallback(
+    (_: React.SyntheticEvent, value: string, reason: string) => {
+      if (reason === 'reset' && !isSingleDocInsight) {
+        setDocumentQuery('');
+        return;
+      }
+      setDocumentQuery(value);
+    },
+    [isSingleDocInsight]
+  );
+
+  const handleDocumentListScroll = (event: React.SyntheticEvent) => {
+    if (documentsLoading || !documentHasMore) return;
+    const listboxNode = event.currentTarget as HTMLElement;
+    const threshold = 40;
+    if (listboxNode.scrollTop + listboxNode.clientHeight >= listboxNode.scrollHeight - threshold) {
+      fetchDocumentOptions(documentQuery.trim(), documentOffset, true);
+    }
   };
 
   useEffect(() => {
@@ -654,6 +759,95 @@ const KnowledgeBaseSemantic: React.FC = () => {
     loadDiscoveryDefaults();
   }, []);
 
+  useEffect(() => {
+    if (discoveryMode !== 'insights') return;
+    if (!scopeTouchedRef.current && scope === 'all') {
+      setScope('recent');
+    }
+  }, [discoveryMode, scope]);
+
+  useEffect(() => {
+    if (discoveryMode !== 'insights') return;
+    if (insightScope === 'document' && scope !== 'selected') {
+      setScope('selected');
+    }
+  }, [discoveryMode, insightScope, scope]);
+
+  useEffect(() => {
+    if (!isSingleDocInsight) return;
+    if (selectedDocuments.length <= 1) return;
+    setSelectedDocuments((prev) => (prev.length > 0 ? [prev[0]] : []));
+  }, [isSingleDocInsight, selectedDocuments.length]);
+
+  const fetchDocumentOptions = useCallback(
+    async (query: string, offset: number, append: boolean) => {
+      if (!kbId) return;
+      const requestId = ++documentRequestRef.current;
+      setDocumentsLoading(true);
+      try {
+        const response = await documentApi.search(kbId, {
+          q: query || undefined,
+          offset,
+          limit: DOCUMENT_SEARCH_PAGE_SIZE,
+        });
+        if (documentRequestRef.current !== requestId) return;
+        const payload = response.data as { total?: number; items?: any[] };
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        const total = Number.isFinite(payload?.total) ? Number(payload?.total) : offset + items.length;
+        const mapped = items.map((item: any) => ({
+          id: String(item.id),
+          label: String(item.label || `doc-${item.id}`),
+          status: item.status || undefined,
+        }));
+        setDocumentOptions((prev) => {
+          const base = append ? [...prev, ...mapped] : mapped;
+          return mergeDocumentOptions(base, selectedDocumentsRef.current);
+        });
+        const nextOffset = offset + mapped.length;
+        setDocumentOffset(nextOffset);
+        setDocumentHasMore(nextOffset < total);
+      } catch {
+        if (documentRequestRef.current !== requestId) return;
+        if (!append) {
+          setDocumentOptions(mergeDocumentOptions([], selectedDocumentsRef.current));
+        }
+        setDocumentHasMore(false);
+      } finally {
+        if (documentRequestRef.current === requestId) {
+          setDocumentsLoading(false);
+        }
+      }
+    },
+    [kbId, mergeDocumentOptions]
+  );
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    setDocumentOptions([]);
+    setDocumentOffset(0);
+    setDocumentHasMore(true);
+  }, [dialogOpen, kbId]);
+
+  useEffect(() => {
+    if (!dialogOpen || !kbId) return;
+    if (!requiresSelection) return;
+    if (documentSearchTimerRef.current) {
+      clearTimeout(documentSearchTimerRef.current);
+    }
+    setDocumentOffset(0);
+    setDocumentHasMore(true);
+    const query = documentQuery.trim();
+    documentSearchTimerRef.current = window.setTimeout(() => {
+      fetchDocumentOptions(query, 0, false);
+    }, 250);
+    return () => {
+      if (documentSearchTimerRef.current) {
+        clearTimeout(documentSearchTimerRef.current);
+        documentSearchTimerRef.current = null;
+      }
+    };
+  }, [dialogOpen, documentQuery, fetchDocumentOptions, kbId, requiresSelection]);
+
   const requestDiscovery = async () => {
     if (!kbId) return;
     setDialogOpen(false);
@@ -674,6 +868,10 @@ const KnowledgeBaseSemantic: React.FC = () => {
       summary_max_chars?: number;
       entity_types?: string[];
       relation_types?: string[];
+      discovery_mode?: DiscoveryMode;
+      insight_scope?: InsightScope;
+      insight_domain?: string;
+      document_ids?: number[];
     } = {
       scope,
       include_relations: includeRelations,
@@ -704,6 +902,16 @@ const KnowledgeBaseSemantic: React.FC = () => {
     payload.progressive_enabled = progressiveEnabled;
     payload.entity_types = parseTypeList(entityTypeWhitelist);
     payload.relation_types = parseTypeList(relationTypeWhitelist);
+    payload.discovery_mode = discoveryMode;
+    if (discoveryMode === 'insights') {
+      payload.insight_scope = insightScope;
+      payload.insight_domain = insightDomain;
+    }
+    if (scope === 'selected' && selectedDocuments.length > 0) {
+      payload.document_ids = selectedDocuments
+        .map((doc) => Number(doc.id))
+        .filter((id) => Number.isFinite(id));
+    }
     try {
       startDiscoveryPolling();
       await knowledgeBaseApi.discoverSemanticCandidates(kbId, {
@@ -869,9 +1077,22 @@ const KnowledgeBaseSemantic: React.FC = () => {
         return t('knowledgeBase.semanticLayer.types.relation');
       case 'attribute':
         return t('knowledgeBase.semanticLayer.types.attribute');
+      case 'insight':
+        return t('knowledgeBase.semanticLayer.types.insight');
       default:
         return t('knowledgeBase.semanticLayer.types.entity');
     }
+  };
+
+  const insightScopeLabel = (scope?: string) => {
+    if (!scope) return '';
+    if (scope === 'document') {
+      return t('knowledgeBase.semanticLayer.discoveryDialog.insightScopeDocument');
+    }
+    if (scope === 'cross') {
+      return t('knowledgeBase.semanticLayer.discoveryDialog.insightScopeCross');
+    }
+    return scope;
   };
 
   const statusColor = (status: CandidateStatus) => {
@@ -893,6 +1114,11 @@ const KnowledgeBaseSemantic: React.FC = () => {
     [canonicalEntities]
   );
   const candidateConflicts = selectedCandidate ? getCandidateConflicts(selectedCandidate) : [];
+  const canSubmitDiscovery = !requiresSelection
+    ? true
+    : isSingleDocInsight
+      ? selectedDocuments.length === 1
+      : selectedDocuments.length > 0;
   const mergeConflicts = useMemo(() => {
     if (!selectedCandidate) return [];
     const conflicts: string[] = [];
@@ -1115,6 +1341,9 @@ const KnowledgeBaseSemantic: React.FC = () => {
 
   function getCandidateConflicts(candidate: SemanticCandidate) {
     const conflicts: string[] = [];
+    if (candidate.type === 'insight') {
+      return conflicts;
+    }
     if (candidate.type === 'entity') {
       const exists = canonicalEntities.some(
         (entity) =>
@@ -1196,6 +1425,7 @@ const KnowledgeBaseSemantic: React.FC = () => {
     const edges: GraphEdge[] = [];
     const entityMap = new Map<string, EntityDraft>();
     const attributeDrafts: AttributeDraft[] = [];
+    const graphCandidates = filteredCandidates.filter((candidate) => candidate.type !== 'insight');
 
     const ensureEntity = (name: string, status: CandidateStatus, candidateId?: string) => {
       const key = normalize(name);
@@ -1220,13 +1450,13 @@ const KnowledgeBaseSemantic: React.FC = () => {
       });
     };
 
-    filteredCandidates.forEach((candidate) => {
+    graphCandidates.forEach((candidate) => {
       if (candidate.type === 'entity') {
         ensureEntity(candidate.name, candidate.status, candidate.id);
       }
     });
 
-    filteredCandidates.forEach((candidate) => {
+    graphCandidates.forEach((candidate) => {
       if (candidate.type === 'relation' && candidate.relation) {
         ensureEntity(candidate.relation.source, candidate.status);
         ensureEntity(candidate.relation.target, candidate.status);
@@ -1292,7 +1522,7 @@ const KnowledgeBaseSemantic: React.FC = () => {
       });
     });
 
-    filteredCandidates.forEach((candidate) => {
+    graphCandidates.forEach((candidate) => {
       if (candidate.type !== 'relation' || !candidate.relation) return;
       const sourceKey = normalize(candidate.relation.source);
       const targetKey = normalize(candidate.relation.target);
@@ -1586,7 +1816,7 @@ const KnowledgeBaseSemantic: React.FC = () => {
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' },
+          gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(5, 1fr)' },
           gap: 2,
           mb: 2,
         }}
@@ -1614,6 +1844,12 @@ const KnowledgeBaseSemantic: React.FC = () => {
             {t('knowledgeBase.semanticLayer.stats.attributes')}
           </Typography>
           <Typography variant="h6">{counts.attributes}</Typography>
+        </Paper>
+        <Paper sx={{ p: 2 }}>
+          <Typography variant="caption" color="text.secondary">
+            {t('knowledgeBase.semanticLayer.stats.insights')}
+          </Typography>
+          <Typography variant="h6">{counts.insights}</Typography>
         </Paper>
       </Box>
 
@@ -1663,8 +1899,24 @@ const KnowledgeBaseSemantic: React.FC = () => {
         )}
       </Paper>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' }, gap: 2 }}>
-        <Paper sx={{ p: 2 }}>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: '2fr 1fr' },
+          gap: 2,
+          alignItems: 'start',
+        }}
+      >
+        <Paper
+          sx={{
+            p: 2,
+            position: { md: 'sticky' },
+            top: { md: 88 },
+            alignSelf: { md: 'start' },
+            maxHeight: { md: 'calc(100vh - 120px)' },
+            overflow: { md: 'auto' },
+          }}
+        >
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1, flexWrap: 'wrap' }}>
             <Box>
               <Typography variant="h6">{t('knowledgeBase.semanticLayer.listTitle')}</Typography>
@@ -1698,6 +1950,7 @@ const KnowledgeBaseSemantic: React.FC = () => {
             <Tab label={t('knowledgeBase.semanticLayer.tabs.entities')} />
             <Tab label={t('knowledgeBase.semanticLayer.tabs.relations')} />
             <Tab label={t('knowledgeBase.semanticLayer.tabs.attributes')} />
+            <Tab label={t('knowledgeBase.semanticLayer.tabs.insights')} />
           </Tabs>
           <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 2 }}>
             <TextField
@@ -1910,6 +2163,34 @@ const KnowledgeBaseSemantic: React.FC = () => {
                 label={t('knowledgeBase.semanticLayer.details.highlight')}
                 sx={{ mb: 2 }}
               />
+              {selectedCandidate.type === 'insight' && (
+                <>
+                  <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                    {t('knowledgeBase.semanticLayer.details.sections.insight')}
+                  </Typography>
+                  <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', mb: 1 }}>
+                    {selectedCandidate.attributes?.insight_type && (
+                      <Chip
+                        size="small"
+                        label={`${t('knowledgeBase.semanticLayer.details.insight.type')}: ${selectedCandidate.attributes.insight_type}`}
+                      />
+                    )}
+                    {selectedCandidate.attributes?.scope && (
+                      <Chip
+                        size="small"
+                        label={`${t('knowledgeBase.semanticLayer.details.insight.scope')}: ${insightScopeLabel(
+                          String(selectedCandidate.attributes.scope)
+                        )}`}
+                      />
+                    )}
+                  </Stack>
+                  {selectedCandidate.attributes?.notes && (
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      {selectedCandidate.attributes.notes}
+                    </Typography>
+                  )}
+                </>
+              )}
               {selectedMerge && (
                 <>
                   <Typography variant="subtitle2" sx={{ mb: 1 }}>
@@ -2056,9 +2337,11 @@ const KnowledgeBaseSemantic: React.FC = () => {
                 >
                   {t('knowledgeBase.semanticLayer.details.actions.reject')}
                 </Button>
-                <Button size="small" variant="outlined" onClick={openMergeDialog}>
-                  {t('knowledgeBase.semanticLayer.details.actions.merge')}
-                </Button>
+                {selectedCandidate.type === 'entity' && (
+                  <Button size="small" variant="outlined" onClick={openMergeDialog}>
+                    {t('knowledgeBase.semanticLayer.details.actions.merge')}
+                  </Button>
+                )}
               </Stack>
             </>
           )}
@@ -2074,10 +2357,31 @@ const KnowledgeBaseSemantic: React.FC = () => {
               <Select
                 value={scope}
                 label={t('knowledgeBase.semanticLayer.discoveryDialog.scope')}
-                onChange={(e) => setScope(String(e.target.value))}
+                onChange={(e) => {
+                  scopeTouchedRef.current = true;
+                  setScope(String(e.target.value));
+                }}
               >
                 <MenuItem value="all">{t('knowledgeBase.semanticLayer.discoveryDialog.scopeAll')}</MenuItem>
                 <MenuItem value="recent">{t('knowledgeBase.semanticLayer.discoveryDialog.scopeRecent')}</MenuItem>
+                <MenuItem value="selected">{t('knowledgeBase.semanticLayer.discoveryDialog.scopeSelected')}</MenuItem>
+              </Select>
+            </FormControl>
+            <FormControl fullWidth size="small">
+              <InputLabel>{t('knowledgeBase.semanticLayer.discoveryDialog.discoveryMode')}</InputLabel>
+              <Select
+                value={discoveryMode}
+                label={t('knowledgeBase.semanticLayer.discoveryDialog.discoveryMode')}
+                onChange={(e) => {
+                  markLimitsTouched();
+                  setDiscoveryMode(toDiscoveryMode(e.target.value, 'facts'));
+                }}
+              >
+                {DISCOVERY_MODE_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </MenuItem>
+                ))}
               </Select>
             </FormControl>
             <FormControlLabel
@@ -2086,6 +2390,84 @@ const KnowledgeBaseSemantic: React.FC = () => {
               }
               label={t('knowledgeBase.semanticLayer.discoveryDialog.includeRelations')}
             />
+            {discoveryMode === 'insights' && (
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)' }, gap: 2 }}>
+                <FormControl size="small">
+                  <InputLabel>{t('knowledgeBase.semanticLayer.discoveryDialog.insightScope')}</InputLabel>
+                  <Select
+                    value={insightScope}
+                    label={t('knowledgeBase.semanticLayer.discoveryDialog.insightScope')}
+                    onChange={(e) => {
+                      markLimitsTouched();
+                      setInsightScope(toInsightScope(e.target.value, 'document'));
+                    }}
+                  >
+                    {INSIGHT_SCOPE_OPTIONS.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {t(option.labelKey)}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl size="small">
+                  <InputLabel>{t('knowledgeBase.semanticLayer.discoveryDialog.insightDomain')}</InputLabel>
+                  <Select
+                    value={insightDomain}
+                    label={t('knowledgeBase.semanticLayer.discoveryDialog.insightDomain')}
+                    onChange={(e) => {
+                      markLimitsTouched();
+                      setInsightDomain(String(e.target.value));
+                    }}
+                  >
+                    {INSIGHT_DOMAIN_OPTIONS.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {t(option.labelKey)}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Box>
+            )}
+            {requiresSelection && (
+              <Autocomplete
+                multiple={!isSingleDocInsight}
+                options={documentOptions}
+                loading={documentsLoading}
+                inputValue={documentQuery}
+                value={
+                  isSingleDocInsight ? selectedDocuments[0] || null : selectedDocuments
+                }
+                onInputChange={handleDocumentInputChange}
+                onChange={(_, value) => {
+                  markLimitsTouched();
+                  if (Array.isArray(value)) {
+                    setSelectedDocuments(value as DocumentOption[]);
+                    return;
+                  }
+                  if (value) {
+                    setSelectedDocuments([value as DocumentOption]);
+                    return;
+                  }
+                  setSelectedDocuments([]);
+                }}
+                filterOptions={(options) => options}
+                ListboxProps={{ onScroll: handleDocumentListScroll }}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+                getOptionLabel={(option) => option.label}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    size="small"
+                    label={t('knowledgeBase.semanticLayer.discoveryDialog.documentSelect')}
+                    helperText={t(
+                      isSingleDocInsight
+                        ? 'knowledgeBase.semanticLayer.discoveryDialog.documentSelectSingleHelp'
+                        : 'knowledgeBase.semanticLayer.discoveryDialog.documentSelectHelp'
+                    )}
+                  />
+                )}
+              />
+            )}
             <Divider />
             <Typography variant="subtitle2">
               {t('knowledgeBase.semanticLayer.discoveryDialog.limitsTitle')}
@@ -2269,7 +2651,7 @@ const KnowledgeBaseSemantic: React.FC = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>{t('common.cancel')}</Button>
-          <Button variant="contained" onClick={requestDiscovery}>
+          <Button variant="contained" onClick={requestDiscovery} disabled={!canSubmitDiscovery}>
             {t('knowledgeBase.semanticLayer.discoveryDialog.confirm')}
           </Button>
         </DialogActions>

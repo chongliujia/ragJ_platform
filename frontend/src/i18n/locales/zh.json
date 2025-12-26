@@ -133,7 +133,8 @@
         "total": "候选总数",
         "entities": "实体候选",
         "relations": "关系候选",
-        "attributes": "属性候选"
+        "attributes": "属性候选",
+        "insights": "洞察候选"
       },
       "graph": {
         "title": "候选关系图",
@@ -155,7 +156,8 @@
         "all": "全部",
         "entities": "实体",
         "relations": "关系",
-        "attributes": "属性"
+        "attributes": "属性",
+        "insights": "洞察"
       },
       "filters": {
         "search": "搜索候选",
@@ -170,7 +172,8 @@
       "types": {
         "entity": "实体",
         "relation": "关系",
-        "attribute": "属性"
+        "attribute": "属性",
+        "insight": "洞察"
       },
       "status": {
         "pending": "待确认",
@@ -218,7 +221,12 @@
           "conflicts": "冲突提示",
           "aliases": "别名",
           "attributes": "属性",
+          "insight": "洞察信息",
           "evidence": "证据片段"
+        },
+        "insight": {
+          "type": "类型",
+          "scope": "范围"
         },
         "actions": {
           "approve": "通过",
@@ -279,6 +287,24 @@
         "scope": "范围",
         "scopeAll": "全量文档",
         "scopeRecent": "仅最近新增文档",
+        "scopeSelected": "指定文档",
+        "discoveryMode": "发现模式",
+        "discoveryModeFacts": "事实候选",
+        "discoveryModeInsights": "洞察模式",
+        "insightScope": "洞察范围",
+        "insightScopeDocument": "单文档洞察",
+        "insightScopeCross": "跨文档洞察",
+        "insightDomain": "洞察领域",
+        "insightDomainGeneral": "通用",
+        "insightDomainLegal": "法律",
+        "insightDomainMedical": "医疗",
+        "insightDomainMath": "数学",
+        "insightDomainBusiness": "商业",
+        "insightDomainNews": "新闻",
+        "insightDomainIntelligence": "情报",
+        "documentSelect": "选择文档",
+        "documentSelectHelp": "可搜索并多选，留空表示使用范围设置",
+        "documentSelectSingleHelp": "请选择 1 个文档进行洞察",
         "includeRelations": "同时抽取关系",
         "limitsTitle": "抽取限制",
         "autoChunking": "按文档长度自动抽样",

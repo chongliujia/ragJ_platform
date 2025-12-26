@@ -39,6 +39,18 @@ EXTRACTION_DEFAULT_PROGRESSIVE_ENABLED = False
 EXTRACTION_DEFAULT_PROGRESSIVE_MIN_ITEMS = 6
 EXTRACTION_DEFAULT_PROGRESSIVE_STEP = 3
 EXTRACTION_DEFAULT_SUMMARY_MAX_CHARS = 2000
+EXTRACTION_DEFAULT_DISCOVERY_MODE = "facts"
+INSIGHT_DEFAULT_SCOPE = "document"
+INSIGHT_DEFAULT_DOMAIN = "general"
+INSIGHT_TYPES = (
+    "causal",
+    "logical",
+    "implied",
+    "risk",
+    "contradiction",
+    "trend",
+    "dependency",
+)
 EXTRACTION_AUTO_MIN_CHUNKS = 3
 EXTRACTION_MIN_CHUNKS = 1
 EXTRACTION_MAX_CHUNKS_LIMIT = 50
@@ -79,10 +91,11 @@ class SemanticCandidateResponse(BaseModel):
 
 
 class SemanticDiscoveryRequest(BaseModel):
-    scope: Literal["all", "recent"] = "all"
+    scope: Literal["all", "recent", "selected"] = "all"
     include_relations: bool = True
     reset: bool = False
     document_limit: Optional[int] = None
+    document_ids: Optional[List[int]] = None
     max_chunks: Optional[int] = None
     max_text_chars: Optional[int] = None
     max_items: Optional[int] = None
@@ -95,6 +108,9 @@ class SemanticDiscoveryRequest(BaseModel):
     summary_max_chars: Optional[int] = None
     entity_types: Optional[List[str]] = None
     relation_types: Optional[List[str]] = None
+    discovery_mode: Optional[str] = None
+    insight_scope: Optional[str] = None
+    insight_domain: Optional[str] = None
 
 
 class SemanticDiscoveryResponse(BaseModel):
@@ -209,6 +225,25 @@ def _coerce_extraction_mode(value: Optional[str], default: str) -> str:
     return default
 
 
+def _coerce_discovery_mode(value: Optional[str], default: str) -> str:
+    if value in ("facts", "insights"):
+        return value
+    return default
+
+
+def _coerce_insight_scope(value: Optional[str], default: str) -> str:
+    if value in ("document", "cross"):
+        return value
+    return default
+
+
+def _coerce_insight_domain(value: Optional[str], default: str) -> str:
+    cleaned = str(value or "").strip().lower()
+    if cleaned:
+        return cleaned
+    return default
+
+
 def _parse_whitelist(raw: Optional[Any]) -> List[str]:
     if raw is None:
         return []
@@ -252,6 +287,31 @@ def _jaccard_similarity(a: List[str], b: List[str]) -> float:
     if not set_a or not set_b:
         return 0.0
     return len(set_a & set_b) / len(set_a | set_b)
+
+
+def _build_insight_ref(doc_id: Optional[int], chunk_index: Optional[int]) -> str:
+    if doc_id is None:
+        return ""
+    idx = chunk_index if chunk_index is not None else 0
+    return f"D{doc_id}-C{idx}"
+
+
+def _parse_refs(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        refs = [str(v).strip() for v in value if str(v).strip()]
+    else:
+        text = str(value or "").strip()
+        refs = [ref.strip() for ref in re.split(r"[,\s]+", text) if ref.strip()]
+    seen = set()
+    cleaned: List[str] = []
+    for ref in refs:
+        if ref in seen:
+            continue
+        seen.add(ref)
+        cleaned.append(ref)
+    return cleaned
 
 
 def _select_diverse_chunks(
@@ -398,6 +458,43 @@ def _build_summary_prompt(text: str, max_chars: int) -> str:
         f"{max_chars} characters. Return only plain text."
     )
     return f"{instructions}\n\nText:\n{text}"
+
+
+def _build_insight_prompt(
+    segments: List[Dict[str, str]],
+    *,
+    max_items: int,
+    domain: str,
+    scope: str,
+) -> str:
+    schema = (
+        '{"insights":[{"statement":"","type":"","confidence":0.0,'
+        '"relation":{"source":"","relation":"","target":""},"refs":[""],"notes":""}]}'
+    )
+    domain_note = (
+        "Use domain-appropriate reasoning but do not provide legal/medical advice. "
+        "Mark uncertainty explicitly."
+    )
+    instructions = [
+        "Identify causal, logical, and implied relationships plus latent insights.",
+        "Only use the provided text; do not add external knowledge.",
+        f"Limit to {max_items} insights. If none, return an empty list.",
+        f"Allowed types: {', '.join(INSIGHT_TYPES)}.",
+        "If an insight is a relationship between entities, fill the relation object; otherwise leave it empty.",
+        "Use refs to cite which segments support the insight.",
+        domain_note,
+        f"Domain: {domain}. Scope: {scope}.",
+        f"Return ONLY valid JSON using this schema: {schema}",
+    ]
+    blocks = []
+    for seg in segments:
+        ref = seg.get("ref") or ""
+        text = seg.get("text") or ""
+        source = seg.get("source") or ""
+        header = f"[{ref} | {source}]".strip()
+        blocks.append(f"{header}\n{text}")
+    joined = "\n\n".join(blocks)
+    return f"{chr(10).join(instructions)}\n\nSegments:\n{joined}"
 
 
 def _build_evidence_from_chunk(doc: Document, chunk: DocumentChunk) -> Dict[str, Any]:
@@ -680,19 +777,48 @@ async def discover_candidates(
     )
     entity_type_set = {_normalize_type(item) for item in entity_type_whitelist}
     relation_type_set = {_normalize_type(item) for item in relation_type_whitelist}
+    discovery_mode = _coerce_discovery_mode(
+        request.discovery_mode, EXTRACTION_DEFAULT_DISCOVERY_MODE
+    )
+    insight_scope = _coerce_insight_scope(request.insight_scope, INSIGHT_DEFAULT_SCOPE)
+    insight_domain = _coerce_insight_domain(request.insight_domain, INSIGHT_DEFAULT_DOMAIN)
+
+    document_ids: List[int] = []
+    if request.document_ids:
+        for raw in request.document_ids:
+            try:
+                document_ids.append(int(raw))
+            except Exception:
+                continue
+    if document_ids:
+        document_ids = sorted(set(document_ids))
+
+    if request.scope == "selected" and not document_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No documents selected")
+    if discovery_mode == "insights" and insight_scope == "document":
+        if len(document_ids) != 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Insight single-document mode requires exactly one document",
+            )
 
     q = db.query(Document).filter(
         Document.tenant_id == tenant_id,
         Document.knowledge_base_name == kb.name,
     )
-    if request.scope == "recent":
-        cutoff = datetime.utcnow() - timedelta(days=30)
-        q = q.filter(Document.created_at >= cutoff).order_by(Document.created_at.desc())
+    if document_ids:
+        q = q.filter(Document.id.in_(document_ids)).order_by(Document.created_at.asc())
     else:
-        q = q.order_by(Document.created_at.asc())
-    if document_limit:
-        q = q.limit(max(1, int(document_limit)))
+        if request.scope == "recent":
+            cutoff = datetime.utcnow() - timedelta(days=30)
+            q = q.filter(Document.created_at >= cutoff).order_by(Document.created_at.desc())
+        else:
+            q = q.order_by(Document.created_at.asc())
+        if document_limit:
+            q = q.limit(max(1, int(document_limit)))
     docs = q.all()
+    if document_ids and not docs:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Selected documents not found")
     total_docs = len(docs)
     run_id = uuid.uuid4().hex
     progress_payload = {
@@ -799,6 +925,98 @@ async def discover_candidates(
         summary = _truncate_text(summary, summary_max_chars)
         return summary or text
 
+    async def extract_insights(
+        segments: List[Dict[str, str]],
+        evidence_map: Dict[str, Dict[str, Any]],
+        scope: str,
+    ) -> bool:
+        if not segments:
+            return False
+        prompt = _build_insight_prompt(
+            segments,
+            max_items=max_items,
+            domain=insight_domain,
+            scope=scope,
+        )
+        try:
+            llm_response = await llm_service.chat(
+                message=prompt,
+                model=model_name,
+                temperature=0.2,
+                max_tokens=900,
+                tenant_id=tenant_id,
+                user_id=current_user.id,
+            )
+        except Exception as exc:
+            logger.warning("LLM insight extraction failed", error=str(exc))
+            return False
+        if not llm_response.get("success"):
+            logger.warning(
+                "LLM insight extraction returned failure",
+                error=str(llm_response.get("error") or llm_response.get("message")),
+            )
+            return False
+        payload = _extract_json_payload(llm_response.get("message") or "")
+        if not payload:
+            return False
+        insights = payload.get("insights") or []
+        if not isinstance(insights, list):
+            return False
+        extracted_any = False
+        fallback_evidence = list(evidence_map.values())[:1]
+        for item in insights[:max_items]:
+            if not isinstance(item, dict):
+                continue
+            statement = str(item.get("statement") or item.get("summary") or "").strip()
+            if not statement:
+                continue
+            insight_type = str(item.get("type") or "").strip().lower()
+            if insight_type not in INSIGHT_TYPES:
+                insight_type = "implied"
+            confidence = coerce_confidence(item.get("confidence"), 0.55)
+            refs = _parse_refs(item.get("refs"))
+            evidence: List[Dict[str, Any]] = []
+            for ref in refs:
+                ev = evidence_map.get(ref)
+                if ev:
+                    evidence.append(dict(ev))
+            if not evidence and fallback_evidence:
+                evidence = [dict(fallback_evidence[0])]
+            relation_payload = None
+            if isinstance(item.get("relation"), dict):
+                rel = item.get("relation") or {}
+                source = str(rel.get("source") or "").strip()
+                target = str(rel.get("target") or "").strip()
+                relation_name = str(rel.get("relation") or "").strip()
+                if source and target:
+                    relation_payload = {
+                        "source": source,
+                        "relation": relation_name or "RELATED_TO",
+                        "target": target,
+                    }
+            attributes = {
+                "insight_type": insight_type,
+                "scope": scope,
+            }
+            notes = item.get("notes") or item.get("reason")
+            if isinstance(notes, str) and notes.strip():
+                attributes["notes"] = notes.strip()
+            if refs:
+                attributes["refs"] = refs
+            if add_candidate(
+                "insight",
+                statement,
+                evidence,
+                confidence=confidence,
+                relation=relation_payload,
+                attributes=attributes,
+            ):
+                extracted_any = True
+        return extracted_any
+
+    cross_segments: List[Dict[str, str]] = []
+    cross_evidence_map: Dict[str, Dict[str, Any]] = {}
+
     try:
         for doc_index, doc in enumerate(docs, start=1):
             chunk_q = (
@@ -881,6 +1099,41 @@ async def discover_candidates(
                 )
                 if preview:
                     chunk_sources.append((preview, [_build_evidence(db, doc)]))
+
+            if discovery_mode == "insights":
+                segments: List[Dict[str, str]] = []
+                evidence_map: Dict[str, Dict[str, Any]] = {}
+                for text, evidence in chunk_sources:
+                    if not evidence:
+                        continue
+                    base_ev = evidence[0]
+                    ref = _build_insight_ref(base_ev.get("document_id"), base_ev.get("chunk_index"))
+                    if not ref:
+                        continue
+                    insight_text = await summarize_text(text)
+                    insight_text = _truncate_text(insight_text, max_text_chars)
+                    if not insight_text:
+                        continue
+                    segments.append(
+                        {
+                            "ref": ref,
+                            "text": insight_text,
+                            "source": str(base_ev.get("source") or ""),
+                        }
+                    )
+                    evidence_map[ref] = base_ev
+
+                if insight_scope == "document":
+                    await extract_insights(segments, evidence_map, "document")
+                else:
+                    cross_segments.extend(segments)
+                    cross_evidence_map.update(evidence_map)
+
+                progress_payload["current"] = doc_index
+                progress_payload["updated_at"] = _now_iso()
+                progress_payload["message"] = f"Processed {doc_index}/{total_docs} documents"
+                _set_discovery_progress(db, kb, progress_payload)
+                continue
 
             extracted_any = False
             extracted_items = 0
@@ -1050,6 +1303,24 @@ async def discover_candidates(
             progress_payload["updated_at"] = _now_iso()
             progress_payload["message"] = f"Processed {doc_index}/{total_docs} documents"
             _set_discovery_progress(db, kb, progress_payload)
+
+        if discovery_mode == "insights" and insight_scope == "cross" and cross_segments:
+            max_segments = max(EXTRACTION_AUTO_MIN_CHUNKS, max_chunks * 4)
+            max_segments = min(max_segments, 40)
+            if len(cross_segments) > max_segments:
+                indices = _select_chunk_indices(len(cross_segments), max_segments, "uniform")
+                if indices:
+                    cross_segments = [cross_segments[i] for i in indices]
+                    next_map: Dict[str, Dict[str, Any]] = {}
+                    for seg in cross_segments:
+                        ref = seg.get("ref")
+                        if not ref:
+                            continue
+                        ev = cross_evidence_map.get(ref)
+                        if ev:
+                            next_map[ref] = ev
+                    cross_evidence_map = next_map
+            await extract_insights(cross_segments, cross_evidence_map, "cross")
 
         if candidates_to_add:
             db.add_all(candidates_to_add)

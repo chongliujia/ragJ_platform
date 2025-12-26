@@ -47,12 +47,17 @@ const Dashboard: React.FC = () => {
         const kbResponse = await knowledgeBaseApi.getList();
         const kbList = kbResponse.data || [];
         const knowledgeBasesCount = kbList.length;
+        const documentsFallback = kbList.reduce(
+          (acc: number, kb: any) =>
+            acc + (kb.document_count ?? kb.documentCount ?? 0),
+          0
+        );
         const sizeSum = kbList.reduce((acc: number, kb: any) => acc + (kb.total_size_bytes || 0), 0);
         const chunksSum = kbList.reduce((acc: number, kb: any) => acc + (kb.total_chunks || 0), 0);
         
         // 尝试获取系统统计信息
         let systemStats = {
-          documents: 0,
+          documents: documentsFallback,
           totalChats: 0,
           systemStatus: 'healthy' as const,
         };
@@ -60,7 +65,10 @@ const Dashboard: React.FC = () => {
         try {
           const statsResponse = await systemApi.getStats();
           systemStats = {
-            documents: statsResponse.data.documents || 0,
+            documents:
+              typeof statsResponse.data.documents === 'number'
+                ? statsResponse.data.documents
+                : documentsFallback,
             totalChats: statsResponse.data.chats || 0,
             systemStatus: statsResponse.data.status || 'healthy',
           };
