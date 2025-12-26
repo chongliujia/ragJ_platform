@@ -98,6 +98,9 @@ interface DocumentManagerProps {
   onClose: () => void;
   knowledgeBaseId: string;
   onDocumentsChanged: () => void;
+  initialDocumentId?: string;
+  initialChunkIndex?: number;
+  highlightTerms?: string[];
 }
 
 const DocumentManager: React.FC<DocumentManagerProps> = ({
@@ -105,6 +108,9 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   onClose,
   knowledgeBaseId,
   onDocumentsChanged,
+  initialDocumentId,
+  initialChunkIndex,
+  highlightTerms,
 }) => {
   const { t } = useTranslation();
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -121,6 +127,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
   const [errorDialogOpen, setErrorDialogOpen] = useState(false);
   const [activeDocForError, setActiveDocForError] = useState<Document | null>(null);
   const [retryingDocuments, setRetryingDocuments] = useState<string[]>([]);
+  const [jumpNotice, setJumpNotice] = useState<string | null>(null);
 
   // 获取文档列表（真实 API，做字段映射以复用现有表格）
   const fetchDocuments = async (silent = false) => {
@@ -342,6 +349,28 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
     }
   }, [open, knowledgeBaseId]);
 
+  const jumpHandledRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      jumpHandledRef.current = false;
+      setJumpNotice(null);
+      return;
+    }
+    if (!initialDocumentId || jumpHandledRef.current) return;
+    if (loading) return;
+    const match =
+      documents.find((d) => d.id === initialDocumentId) ||
+      documents.find((d) => d.filename === initialDocumentId);
+    if (match) {
+      setActiveDocForChunks(match);
+      setChunksDialogOpen(true);
+      setJumpNotice(null);
+    } else {
+      setJumpNotice(t('document.manager.jumpNotFound'));
+    }
+    jumpHandledRef.current = true;
+  }, [documents, initialDocumentId, loading, open, t]);
+
   // Auto refresh while there are processing/pending docs
   const refreshTimerRef = useRef<any>(null);
   useEffect(() => {
@@ -395,6 +424,11 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
             {error}
           </Alert>
         )}
+        {jumpNotice && (
+          <Alert severity="info" sx={{ mb: 3 }} onClose={() => setJumpNotice(null)}>
+            {jumpNotice}
+          </Alert>
+        )}
 
         {/* 工具栏 */}
 	        <Toolbar sx={{ px: 0, minHeight: 'auto !important', mb: 2 }}>
@@ -442,22 +476,47 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
 	          >
 	            {t('document.manager.actions.refresh')}
 	          </Button>
-	          <Button
-	            size="small"
-	            onClick={async () => {
-	              if (!window.confirm(t('document.manager.confirm.clearVectors'))) return;
-	              try {
-	                await knowledgeBaseApi.clearVectors(knowledgeBaseId);
-	                setDocuments(prev => prev.map(d => ({ ...d, chunks_count: 0 })));
-	              } catch (e: any) {
-	                console.error('Failed to clear vectors:', e);
-	                setError(e?.response?.data?.detail || t('document.manager.messages.clearVectorsFailed'));
-	              }
-	            }}
-	            startIcon={<ProcessIcon />}
-	          >
-	            {t('document.manager.actions.clearVectors')}
-	          </Button>
+          <Button
+            size="small"
+            onClick={async () => {
+              if (!window.confirm(t('document.manager.confirm.clearVectors'))) return;
+              try {
+                await knowledgeBaseApi.clearVectors(knowledgeBaseId);
+                setDocuments(prev => prev.map(d => ({ ...d, chunks_count: 0 })));
+              } catch (e: any) {
+                console.error('Failed to clear vectors:', e);
+                setError(e?.response?.data?.detail || t('document.manager.messages.clearVectorsFailed'));
+              }
+            }}
+            startIcon={<ProcessIcon />}
+          >
+            {t('document.manager.actions.clearVectors')}
+          </Button>
+          <Button
+            size="small"
+            onClick={async () => {
+              if (!window.confirm(t('document.manager.confirm.semanticCleanup'))) return;
+              try {
+                const response = await knowledgeBaseApi.cleanupSemanticCandidates(knowledgeBaseId, {
+                  delete_orphan_candidates: true,
+                  dry_run: false,
+                });
+                const data = response.data || {};
+                setJumpNotice(
+                  t('document.manager.messages.semanticCleanupSuccess', {
+                    removed: data.evidence_removed ?? 0,
+                    deleted: data.candidates_deleted ?? 0,
+                  })
+                );
+              } catch (e: any) {
+                console.error('Failed to cleanup semantic candidates:', e);
+                setError(e?.response?.data?.detail || t('document.manager.messages.semanticCleanupFailed'));
+              }
+            }}
+            startIcon={<ProcessIcon />}
+          >
+            {t('document.manager.actions.semanticCleanup')}
+          </Button>
           
           <Button
             size="small"
@@ -880,6 +939,16 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({
           documentId={activeDocForChunks.id}
           filename={activeDocForChunks.filename}
           totalChunks={activeDocForChunks.chunks_count}
+          initialChunkIndex={
+            initialDocumentId && activeDocForChunks.id === initialDocumentId
+              ? initialChunkIndex
+              : undefined
+          }
+          highlightTerms={
+            initialDocumentId && activeDocForChunks.id === initialDocumentId
+              ? highlightTerms
+              : undefined
+          }
         />
       )}
     </Dialog>

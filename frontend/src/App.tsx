@@ -10,6 +10,7 @@ import ModelConfigReminder from './components/ModelConfigReminder';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import KnowledgeBases from './pages/KnowledgeBases';
+import KnowledgeBaseSemantic from './pages/KnowledgeBaseSemantic';
 import Documents from './pages/Documents';
 import Chat from './pages/Chat';
 import Teams from './pages/Teams';
@@ -493,6 +494,7 @@ function App() {
                     <Routes>
                       <Route path="/" element={<Dashboard />} />
                       <Route path="/knowledge-bases" element={<KnowledgeBases />} />
+                      <Route path="/knowledge-bases/:kbId/semantic" element={<KnowledgeBaseSemantic />} />
                       <Route path="/documents" element={<Documents />} />
                       <Route path="/chat" element={<Chat />} />
                       <Route path="/teams" element={<Teams />} />

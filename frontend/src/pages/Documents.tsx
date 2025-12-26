@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Typography, Box, Paper, FormControl, InputLabel, Select, MenuItem, Button, Stack } from '@mui/material';
 import { CloudUpload as UploadIcon, ListAlt as ListIcon, Refresh as RefreshIcon, Storage as StorageIcon } from '@mui/icons-material';
@@ -13,11 +13,29 @@ interface KnowledgeBase { id: string; name: string; }
 const Documents: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { enqueueSnackbar } = useSnackbar();
   const [kbs, setKbs] = useState<KnowledgeBase[]>([]);
   const [selectedKb, setSelectedKb] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
+  const jumpHandledRef = useRef(false);
+
+  const jumpParams = useMemo(() => {
+    const kbId = searchParams.get('kbId') || '';
+    const docId = searchParams.get('docId') || '';
+    const chunkRaw = searchParams.get('chunk');
+    const parsed = chunkRaw ? Number(chunkRaw) : NaN;
+    const chunkIndex = Number.isFinite(parsed) ? parsed : undefined;
+    const termsRaw = searchParams.get('terms') || '';
+    const terms = termsRaw ? termsRaw.split(',').map((term) => term.trim()).filter(Boolean) : [];
+    const openTarget = searchParams.get('open') || '';
+    return { kbId, docId, chunkIndex, terms, openTarget };
+  }, [searchParams]);
+
+  useEffect(() => {
+    jumpHandledRef.current = false;
+  }, [jumpParams.docId, jumpParams.kbId, jumpParams.openTarget]);
 
   const loadKBs = async () => {
     try {
@@ -28,6 +46,16 @@ const Documents: React.FC = () => {
         setSelectedKb('');
       } else if (!selectedKb || !list.some(kb => kb.id === selectedKb)) {
         setSelectedKb(list[0].id);
+      }
+      if (!jumpHandledRef.current && jumpParams.docId) {
+        const targetKb = list.find((kb) => kb.id === jumpParams.kbId) || list[0];
+        if (targetKb) {
+          setSelectedKb(targetKb.id);
+          if (jumpParams.openTarget === 'chunks') {
+            setManagerOpen(true);
+          }
+        }
+        jumpHandledRef.current = true;
       }
     } catch {
       enqueueSnackbar(t('documents.messages.loadKnowledgeBasesFailed'), 'error');
@@ -95,6 +123,9 @@ const Documents: React.FC = () => {
             onClose={() => setManagerOpen(false)}
             knowledgeBaseId={selectedKb}
             onDocumentsChanged={() => enqueueSnackbar(t('documents.messages.documentsUpdated'), 'info')}
+            initialDocumentId={jumpParams.docId || undefined}
+            initialChunkIndex={jumpParams.chunkIndex}
+            highlightTerms={jumpParams.terms}
           />
         </>
       )}

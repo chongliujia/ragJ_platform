@@ -27,6 +27,7 @@ from app.db.models.tenant import Tenant
 from app.db.models.user import User
 from app.db.models.permission import PermissionType
 from app.db.models.document import Document
+from app.db.models.semantic_candidate import SemanticCandidate
 from app.services import parser_service
 from app.services.storage_service import storage_service
 from app.services.chunking_service import chunking_service, ChunkingStrategy
@@ -77,6 +78,17 @@ class KnowledgeBaseConsistencyResponse(BaseModel):
     total_chunks: int
     total_size_bytes: int
 
+
+class KnowledgeBaseSemanticCleanupRequest(BaseModel):
+    delete_orphan_candidates: bool = True
+    dry_run: bool = False
+
+
+class KnowledgeBaseSemanticCleanupResponse(BaseModel):
+    scanned_candidates: int
+    evidence_removed: int
+    candidates_deleted: int
+
 def _can_read_kb(kb_row: KBModel, user: User) -> bool:
     if user.role in ("super_admin", "tenant_admin"):
         return True
@@ -124,6 +136,81 @@ def _build_kb_settings_payload(kb_row: KBModel) -> KnowledgeBaseSettingsResponse
         rerank_top_k=int(raw.get("rerank_top_k") or 2),
         config_version=int(raw.get("config_version") or 0),
         updated_at=str(raw.get("updated_at")) if raw.get("updated_at") else None,
+    )
+
+
+def _cleanup_semantic_candidates(
+    db: Session,
+    kb_row: KBModel,
+    tenant_id: int,
+    *,
+    delete_orphan_candidates: bool,
+    dry_run: bool,
+) -> KnowledgeBaseSemanticCleanupResponse:
+    doc_ids = {
+        int(row[0])
+        for row in db.query(Document.id)
+        .filter(
+            Document.knowledge_base_name == kb_row.name,
+            Document.tenant_id == tenant_id,
+        )
+        .all()
+    }
+
+    candidates = (
+        db.query(SemanticCandidate)
+        .filter(
+            SemanticCandidate.tenant_id == tenant_id,
+            SemanticCandidate.knowledge_base_id == kb_row.id,
+        )
+        .all()
+    )
+    evidence_removed = 0
+    candidates_deleted = 0
+
+    for candidate in candidates:
+        evidence = candidate.evidence or []
+        if not isinstance(evidence, list):
+            continue
+        filtered: list[dict] = []
+        removed = 0
+        for item in evidence:
+            if not isinstance(item, dict):
+                filtered.append(item)
+                continue
+            raw_doc_id = item.get("document_id")
+            if raw_doc_id is None:
+                filtered.append(item)
+                continue
+            try:
+                doc_id = int(raw_doc_id)
+            except Exception:
+                filtered.append(item)
+                continue
+            if doc_id in doc_ids:
+                filtered.append(item)
+            else:
+                removed += 1
+        if removed == 0:
+            continue
+        evidence_removed += removed
+        if filtered:
+            if not dry_run:
+                candidate.evidence = filtered
+        else:
+            candidates_deleted += 1
+            if delete_orphan_candidates and not dry_run:
+                db.delete(candidate)
+            elif not dry_run:
+                candidate.evidence = []
+
+    if not dry_run:
+        db.commit()
+
+    return KnowledgeBaseSemanticCleanupResponse(
+        scanned_candidates=len(candidates),
+        evidence_removed=evidence_removed,
+        candidates_deleted=candidates_deleted if delete_orphan_candidates else 0,
     )
 
 
@@ -1100,6 +1187,41 @@ async def reconcile_knowledge_base(
         document_count=int(kb_row.document_count or 0),
         total_chunks=int(kb_row.total_chunks or 0),
         total_size_bytes=int(kb_row.total_size_bytes or 0),
+    )
+
+
+@router.post(
+    "/{kb_name}/maintenance/semantic-cleanup",
+    response_model=KnowledgeBaseSemanticCleanupResponse,
+)
+async def cleanup_semantic_candidates(
+    kb_name: str,
+    payload: KnowledgeBaseSemanticCleanupRequest,
+    tenant_id: int = Depends(get_tenant_id),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(
+        require_permission(PermissionType.KNOWLEDGE_BASE_UPDATE.value)
+    ),
+):
+    """Remove semantic candidate evidence referencing deleted documents."""
+    kb_row = (
+        db.query(KBModel)
+        .filter(
+            KBModel.name == kb_name,
+            KBModel.tenant_id == tenant_id,
+            KBModel.is_active == True,
+        )
+        .first()
+    )
+    if kb_row is None or not _can_write_kb(kb_row, current_user):
+        raise HTTPException(status_code=404, detail="Knowledge base not found")
+
+    return _cleanup_semantic_candidates(
+        db,
+        kb_row,
+        tenant_id,
+        delete_orphan_candidates=bool(payload.delete_orphan_candidates),
+        dry_run=bool(payload.dry_run),
     )
 
 @router.delete("/{kb_name}", status_code=status.HTTP_204_NO_CONTENT)

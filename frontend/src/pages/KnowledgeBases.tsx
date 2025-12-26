@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Typography,
@@ -26,6 +27,7 @@ import {
   Description as DocumentIcon,
   CloudUpload as UploadIcon,
   Tune as TuneIcon,
+  AccountTree as SemanticIcon,
 } from '@mui/icons-material';
 import { knowledgeBaseApi } from '../services/api';
 import type { KnowledgeBase } from '../types/models';
@@ -35,6 +37,7 @@ import DocumentManager from '../components/DocumentManager';
 
 const KnowledgeBases: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -169,6 +172,10 @@ const KnowledgeBases: React.FC = () => {
     } finally {
       setSettingsLoading(false);
     }
+  };
+
+  const openSemanticLayer = (kbId: string, kbName: string) => {
+    navigate(`/knowledge-bases/${kbId}/semantic`, { state: { kbName } });
   };
 
   const saveSettings = async () => {
@@ -355,7 +362,7 @@ const KnowledgeBases: React.FC = () => {
                   </Typography>
                 </CardContent>
                 
-                <CardActions>
+                <CardActions sx={{ flexWrap: 'wrap', gap: 1 }}>
                   <Button 
                     size="small" 
                     color="primary"
@@ -378,6 +385,14 @@ const KnowledgeBases: React.FC = () => {
                     startIcon={<TuneIcon />}
                   >
                     {t('knowledgeBase.card.settings')}
+                  </Button>
+                  <Button
+                    size="small"
+                    color="primary"
+                    onClick={() => openSemanticLayer(kb.id, kb.name)}
+                    startIcon={<SemanticIcon />}
+                  >
+                    {t('knowledgeBase.card.semanticLayer')}
                   </Button>
                   <IconButton
                     size="small"

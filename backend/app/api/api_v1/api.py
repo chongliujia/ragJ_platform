@@ -18,6 +18,7 @@ from app.api.api_v1.endpoints import (
     public,
     api_keys,
     evaluations,
+    semantic,
 )
 
 api_router = APIRouter()
@@ -32,6 +33,9 @@ api_router.include_router(agents.router, prefix="/agents", tags=["Agents"])
 # Mount documents router under knowledge bases
 knowledge_bases.router.include_router(
     documents.router, prefix="/{kb_name}/documents", tags=["Documents"]
+)
+knowledge_bases.router.include_router(
+    semantic.router, prefix="/{kb_name}/semantic", tags=["Semantic Layer"]
 )
 api_router.include_router(
     knowledge_bases.router, prefix="/knowledge-bases", tags=["Knowledge Bases"]

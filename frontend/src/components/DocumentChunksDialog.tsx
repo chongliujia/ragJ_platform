@@ -27,6 +27,8 @@ interface DocumentChunksDialogProps {
   documentId: string;
   filename?: string;
   totalChunks?: number;
+  initialChunkIndex?: number;
+  highlightTerms?: string[];
 }
 
 interface ChunkItem {
@@ -44,6 +46,8 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
   documentId,
   filename,
   totalChunks,
+  initialChunkIndex,
+  highlightTerms,
 }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
@@ -52,6 +56,33 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_ROWS_PER_PAGE);
+
+  const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const highlightText = (text: string, terms?: string[]) => {
+    const cleaned = (terms || []).map((term) => term.trim()).filter(Boolean);
+    if (cleaned.length === 0) return text;
+    const escaped = cleaned.map(escapeRegExp);
+    const regex = new RegExp(`(${escaped.join('|')})`, 'gi');
+    const parts = text.split(regex);
+    const lowerTerms = cleaned.map((term) => term.toLowerCase());
+    return parts.map((part, index) => {
+      const isMatch = lowerTerms.includes(part.toLowerCase());
+      if (!isMatch) return part;
+      return (
+        <Box
+          key={`${part}-${index}`}
+          component="span"
+          sx={{
+            backgroundColor: 'rgba(255, 213, 79, 0.3)',
+            borderRadius: 0.5,
+            px: 0.4,
+          }}
+        >
+          {part}
+        </Box>
+      );
+    });
+  };
 
   const loadPage = async (nextPage: number, nextRowsPerPage: number) => {
     try {
@@ -74,11 +105,23 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
     if (open) {
       setChunks([]);
       setHasMore(true);
-      setPage(0);
-      loadPage(0, rowsPerPage);
+      const initialPage =
+        typeof initialChunkIndex === 'number' && initialChunkIndex >= 0
+          ? Math.floor(initialChunkIndex / rowsPerPage)
+          : 0;
+      loadPage(initialPage, rowsPerPage);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, knowledgeBaseId, documentId]);
+  }, [open, knowledgeBaseId, documentId, rowsPerPage, initialChunkIndex]);
+
+  useEffect(() => {
+    if (!open || typeof initialChunkIndex !== 'number') return;
+    const targetId = `chunk-${initialChunkIndex}`;
+    const el = document.getElementById(targetId);
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+    }
+  }, [open, chunks, initialChunkIndex]);
 
   const copyAll = async () => {
     try {
@@ -156,12 +199,22 @@ const DocumentChunksDialog: React.FC<DocumentChunksDialogProps> = ({
         ) : (
           <List>
             {chunks.map((c) => (
-              <ListItem key={`${c.id}-${c.chunk_index}`} alignItems="flex-start" divider>
+              <ListItem
+                key={`${c.id}-${c.chunk_index}`}
+                id={`chunk-${c.chunk_index}`}
+                alignItems="flex-start"
+                divider
+                sx={
+                  typeof initialChunkIndex === 'number' && c.chunk_index === initialChunkIndex
+                    ? { bgcolor: 'rgba(0, 212, 255, 0.08)' }
+                    : undefined
+                }
+              >
                 <ListItemText
                   primary={`#${c.chunk_index + 1}`}
                   secondary={
                     <Box sx={{ whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: '0.875rem' }}>
-                      {c.text}
+                      {highlightText(c.text, highlightTerms)}
                     </Box>
                   }
                   secondaryTypographyProps={{ component: 'div' }}

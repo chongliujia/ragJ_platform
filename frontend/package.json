@@ -18,6 +18,7 @@
     "@mui/material": "^7.2.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "axios": "^1.10.0",
+    "cytoscape": "^3.26.0",
     "i18next": "^25.3.1",
     "i18next-browser-languagedetector": "^8.2.0",
     "react": "^19.1.0",

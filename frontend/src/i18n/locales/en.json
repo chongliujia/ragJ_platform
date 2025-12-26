@@ -117,7 +117,208 @@
       "manageDocuments": "Manage Documents",
       "uploadDocuments": "Upload Documents",
       "settings": "Settings",
+      "semanticLayer": "Semantic Layer",
       "noDescription": "No description"
+    },
+    "semanticLayer": {
+      "title": "Semantic Layer / Ontology",
+      "kbLabel": "Knowledge Base",
+      "comingSoon": "Coming soon",
+      "description": "Automatically discover candidate entities, relations, and attributes. After human review, they become part of the ontology for better retrieval and analysis.",
+      "actions": {
+        "startDiscovery": "Auto discovery",
+        "review": "Review candidates"
+      },
+      "stats": {
+        "total": "Total candidates",
+        "entities": "Entity candidates",
+        "relations": "Relation candidates",
+        "attributes": "Attribute candidates"
+      },
+      "graph": {
+        "title": "Candidate relation graph",
+        "description": "Visualize entities, relations, and attributes from the current filters.",
+        "empty": "No candidates to visualize yet.",
+        "open": "Open graph",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out",
+        "reset": "Reset view",
+        "controls": "Graph controls",
+        "layoutLabel": "Layout",
+        "layoutRadial": "Radial",
+        "layoutGrid": "Grid",
+        "showRelations": "Show relations",
+        "showAttributes": "Show attributes",
+        "focusSelection": "Focus selection"
+      },
+      "tabs": {
+        "all": "All",
+        "entities": "Entities",
+        "relations": "Relations",
+        "attributes": "Attributes"
+      },
+      "filters": {
+        "search": "Search candidates",
+        "status": "Status",
+        "confidenceMin": "Min confidence",
+        "reset": "Reset filters",
+        "statusAll": "All",
+        "statusPending": "Pending",
+        "statusApproved": "Approved",
+        "statusRejected": "Rejected"
+      },
+      "types": {
+        "entity": "Entity",
+        "relation": "Relation",
+        "attribute": "Attribute"
+      },
+      "status": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected"
+      },
+      "empty": {
+        "title": "No candidates yet",
+        "description": "Click “Auto discovery” to generate candidates, then review and merge them here.",
+        "action": "Auto discovery"
+      },
+      "listTitle": "Candidate list",
+      "list": {
+        "empty": "No candidates yet. Run auto discovery first.",
+        "emptyFiltered": "No candidates match the filters.",
+        "selected": "{{count}} selected",
+        "loading": "Loading candidates...",
+        "columns": {
+          "name": "Name",
+          "type": "Type",
+          "confidence": "Confidence",
+          "evidence": "Evidence",
+          "status": "Status",
+          "actions": "Actions"
+        },
+        "actions": {
+          "bulkApprove": "Approve selected",
+          "bulkReject": "Reject selected",
+          "approve": "Approve",
+          "reject": "Reject"
+        }
+      },
+      "details": {
+        "title": "Candidate details",
+        "empty": "Select a candidate to view evidence and suggested relations.",
+        "meta": {
+          "type": "Type",
+          "status": "Status",
+          "confidence": "Confidence"
+        },
+        "sections": {
+          "relation": "Relation structure",
+          "graph": "Relation graph",
+          "merge": "Canonical mapping",
+          "conflicts": "Conflict hints",
+          "aliases": "Aliases",
+          "attributes": "Attributes",
+          "evidence": "Evidence"
+        },
+        "actions": {
+          "approve": "Approve",
+          "reject": "Reject",
+          "merge": "Merge/Map"
+        },
+        "highlight": "Highlight evidence",
+        "noConflicts": "No conflicts detected"
+      },
+      "conflicts": {
+        "entityExists": "An entity or alias with the same name already exists.",
+        "relationExists": "This relation already exists in the ontology.",
+        "attributeConflict": "Attribute conflict: {{key}} already has {{existing}}.",
+        "attributeExists": "Attribute already exists: {{key}}.",
+        "aliasSame": "Candidate name matches the target entity; alias will be skipped.",
+        "aliasExists": "Candidate name already exists as an alias; alias will be skipped.",
+        "targetMissing": "Target entity not found; a new entity will be created.",
+        "nameCollision": "Target name already exists and may cause a collision."
+      },
+      "evidence": {
+        "open": "Open snippet",
+        "unavailable": "No jumpable document snippet"
+      },
+      "merge": {
+        "title": "Merge candidate",
+        "mode": "Merge mode",
+        "modeExisting": "Merge into existing entity",
+        "modeNew": "Create new entity",
+        "modeLabel": "Mode",
+        "target": "Target entity name",
+        "targetLabel": "Target",
+        "addAlias": "Keep current name as alias",
+        "aliasChip": "Alias kept",
+        "suggestions": "Suggested entities",
+        "helper": "Enter the target or new entity name.",
+        "note": "This will write the merge decision and mark the candidate as approved.",
+        "confirm": "Confirm merge",
+        "error": "Target name is required",
+        "notice": "“{{name}}” merged into “{{target}}”.",
+        "noticeAliasSkipped": "“{{name}}” merged into “{{target}}”, alias skipped.",
+        "conflicts": "Conflicts"
+      },
+      "previewNotice": "Preview data only. Backend integration will replace these candidates.",
+      "queued": "Auto discovery submitted. {{time}}",
+      "messages": {
+        "fetchError": "Failed to load candidates",
+        "discoveryError": "Auto discovery failed",
+        "updateError": "Failed to update candidate status",
+        "mergeError": "Failed to merge candidate"
+      },
+      "progress": {
+        "running": "Discovering: {{current}} / {{total}} documents processed",
+        "completed": "Discovery completed ({{total}} documents)",
+        "failed": "Discovery failed: {{message}}"
+      },
+      "discoveryDialog": {
+        "title": "Auto discovery",
+        "scope": "Scope",
+        "scopeAll": "All documents",
+        "scopeRecent": "New documents only",
+        "includeRelations": "Include relations",
+        "limitsTitle": "Extraction limits",
+        "autoChunking": "Auto scale by document length",
+        "chunkStrategy": "Sampling strategy",
+        "chunkStrategyUniform": "Uniform sampling",
+        "chunkStrategyLeading": "Leading chunks first",
+        "chunkStrategyHeadTail": "Head + tail balance",
+        "chunkStrategyDiverse": "Diverse sampling",
+        "documentLimit": "Documents per discovery",
+        "documentLimitHelper": "1-50, default 6",
+        "maxChunks": "Chunks per document",
+        "maxChunksHelper": "1-50, default 3",
+        "maxTextChars": "Max chars per chunk",
+        "maxTextCharsHelper": "200-4000, default 1800",
+        "maxItems": "Max items per type",
+        "maxItemsHelper": "1-30, default 12",
+        "strategyTitle": "Extraction strategy",
+        "mode": "Extraction mode",
+        "modeDirect": "Direct extraction",
+        "modeSummary": "Summarize then extract",
+        "summaryMaxChars": "Summary length limit",
+        "summaryMaxCharsHelper": "200-4000, default 2000",
+        "progressiveEnabled": "Progressive expansion",
+        "progressiveMinItems": "Expansion target count",
+        "progressiveMinItemsHelper": "1-50, default 6",
+        "progressiveStep": "Expansion step",
+        "progressiveStepHelper": "1-50, default 3",
+        "whitelistTitle": "Type whitelist",
+        "entityTypes": "Entity types",
+        "entityTypesHelper": "Comma or newline separated; leave blank for all",
+        "relationTypes": "Relation types",
+        "relationTypesHelper": "Comma or newline separated; leave blank for all",
+        "note": "This will trigger backend discovery.",
+        "confirm": "Start discovery"
+      },
+      "features": {
+        "discovery": "Auto discovery",
+        "review": "Human review",
+        "linking": "Evidence linking"
+      }
     },
     "settings": {
       "title": "Knowledge Base Settings",
@@ -275,6 +476,7 @@
       "documentsCount": "documents",
       "fetchError": "Failed to fetch documents",
       "deleteError": "Failed to delete documents",
+      "jumpNotFound": "Document not found for jump.",
       "search": {
         "placeholder": "Search document names..."
       },
@@ -285,7 +487,8 @@
         "actions": "Actions",
         "deleteSelected": "Delete Selected",
         "clearVectors": "Clear vectors",
-        "clearVectorsMilvus": "Clear vectors (Milvus)"
+        "clearVectorsMilvus": "Clear vectors (Milvus)",
+        "semanticCleanup": "Cleanup semantic evidence"
       },
       "table": {
         "filename": "Filename",
@@ -312,10 +515,13 @@
         "processedAt": "Processed"
       },
       "confirm": {
-        "clearVectors": "Clear all vectors in this knowledge base? This cannot be undone."
+        "clearVectors": "Clear all vectors in this knowledge base? This cannot be undone.",
+        "semanticCleanup": "This will remove semantic evidence that references deleted documents. Continue?"
       },
       "messages": {
         "clearVectorsFailed": "Failed to clear vectors",
+        "semanticCleanupSuccess": "Removed {{removed}} evidence entries and deleted {{deleted}} candidates.",
+        "semanticCleanupFailed": "Failed to cleanup semantic evidence",
         "retryFailed": "Retry failed"
       },
       "filters": {
@@ -1452,12 +1658,14 @@
       "description": "These parameters affect only your account. If model list is empty, configure providers in Settings → Model Configuration first.",
       "labels": {
         "chat": "Chat model: ",
+        "extraction": "Extraction: ",
         "embedding": "Embedding: ",
         "rerank": "Rerank: ",
         "chunk": "Chunk: "
       },
       "items": {
         "chat": "Default model for chat responses.",
+        "extraction": "Default model used for semantic candidate extraction.",
         "embedding": "Used for document vectorization and retrieval.",
         "rerank": "Reranks retrieval results (better relevance but more latency/cost).",
         "chunk": "Larger chunks preserve context but increase indexing cost."
@@ -1465,6 +1673,7 @@
     },
     "sections": {
       "aiModels": "AI model settings",
+      "extraction": "Semantic extraction defaults",
       "prompt": "Chat prompt",
       "modelParams": "Model parameters",
       "ui": "UI settings"
@@ -1473,6 +1682,40 @@
       "chatModel": "Chat model",
       "embeddingModel": "Embedding model",
       "rerankModel": "Rerank model",
+      "extractionModel": "Extraction model",
+      "extractionModelHelp": "Used for semantic extraction in the knowledge base.",
+      "extractionMaxChunks": "Max chunks per document",
+      "extractionMaxChunksHelp": "1–50. Increase for long documents.",
+      "extractionMaxTextChars": "Max characters per chunk",
+      "extractionMaxTextCharsHelp": "200–4000. Longer text costs more.",
+      "extractionMaxItems": "Max candidates per type",
+      "extractionMaxItemsHelp": "1–30 for entities, relations, and attributes.",
+      "extractionDocumentLimit": "Documents per discovery",
+      "extractionDocumentLimitHelp": "1–50. Limits how many documents are scanned per run.",
+      "extractionAutoChunking": "Auto scale by document length",
+      "extractionAutoChunkingHelp": "Adjusts sampling size based on chunk count.",
+      "extractionChunkStrategy": "Sampling strategy",
+      "extractionChunkStrategyHelp": "Controls how chunks are sampled.",
+      "extractionChunkStrategyUniform": "Uniform sampling",
+      "extractionChunkStrategyLeading": "Leading chunks first",
+      "extractionChunkStrategyHeadTail": "Head + tail balance",
+      "extractionChunkStrategyDiverse": "Diverse sampling",
+      "extractionMode": "Extraction mode",
+      "extractionModeHelp": "Choose direct extraction or summarize first.",
+      "extractionModeDirect": "Direct extraction",
+      "extractionModeSummary": "Summarize then extract",
+      "extractionSummaryMaxChars": "Summary length limit",
+      "extractionSummaryMaxCharsHelp": "200–4000, applied in summary mode",
+      "extractionProgressiveEnabled": "Progressive expansion",
+      "extractionProgressiveEnabledHelp": "Expand chunks when results are sparse",
+      "extractionProgressiveMinItems": "Expansion target count",
+      "extractionProgressiveMinItemsHelp": "1–50, stop when reached",
+      "extractionProgressiveStep": "Expansion step",
+      "extractionProgressiveStepHelp": "1–50, chunks added per step",
+      "extractionEntityTypeWhitelist": "Entity type whitelist",
+      "extractionEntityTypeWhitelistHelp": "Comma or newline separated types to keep",
+      "extractionRelationTypeWhitelist": "Relation type whitelist",
+      "extractionRelationTypeWhitelistHelp": "Comma or newline separated relation types",
       "chatSystemPrompt": "Chat system prompt",
       "chatSystemPromptPlaceholder": "Optional instructions for all chat messages. Use {context} and {query} for RAG templates.",
       "chatSystemPromptHelp": "Saved per user and used as a default. You can override it in the Chat page.",

@@ -70,6 +70,21 @@ class UserConfig(Base):
     preferred_chat_model = Column(String(100), default="deepseek-chat")
     preferred_embedding_model = Column(String(100), default="text-embedding-v2")
     preferred_rerank_model = Column(String(100), default="gte-rerank")
+    preferred_extraction_model = Column(String(100), default="deepseek-chat")
+    # 语义抽取默认限制
+    extraction_max_chunks = Column(Integer, default=3)
+    extraction_max_text_chars = Column(Integer, default=1800)
+    extraction_max_items = Column(Integer, default=12)
+    extraction_document_limit = Column(Integer, default=6)
+    extraction_auto_chunking = Column(Boolean, default=False)
+    extraction_chunk_strategy = Column(String(20), default="uniform")
+    extraction_mode = Column(String(20), default="direct")
+    extraction_progressive_enabled = Column(Boolean, default=False)
+    extraction_progressive_min_items = Column(Integer, default=6)
+    extraction_progressive_step = Column(Integer, default=3)
+    extraction_summary_max_chars = Column(Integer, default=2000)
+    extraction_entity_type_whitelist = Column(Text, default="")
+    extraction_relation_type_whitelist = Column(Text, default="")
 
     # 聊天配置
     max_tokens = Column(Integer, default=2000)

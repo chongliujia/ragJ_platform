@@ -101,6 +101,56 @@ def _get_file_hash(doc: Document) -> Optional[str]:
         return None
 
 
+def _prune_semantic_candidates_for_documents(
+    *,
+    db: Session,
+    kb_row: KBModel,
+    tenant_id: int,
+    document_ids: list[int],
+) -> None:
+    if not document_ids:
+        return
+    from app.db.models.semantic_candidate import SemanticCandidate
+
+    doc_id_set = {int(doc_id) for doc_id in document_ids if doc_id is not None}
+    if not doc_id_set:
+        return
+
+    candidates = (
+        db.query(SemanticCandidate)
+        .filter(
+            SemanticCandidate.tenant_id == tenant_id,
+            SemanticCandidate.knowledge_base_id == kb_row.id,
+        )
+        .all()
+    )
+    for candidate in candidates:
+        evidence = candidate.evidence or []
+        if not isinstance(evidence, list):
+            continue
+        filtered: list[dict] = []
+        removed = False
+        for item in evidence:
+            if not isinstance(item, dict):
+                filtered.append(item)
+                continue
+            raw_doc_id = item.get("document_id")
+            try:
+                doc_id = int(raw_doc_id)
+            except Exception:
+                doc_id = None
+            if doc_id in doc_id_set:
+                removed = True
+                continue
+            filtered.append(item)
+        if not removed:
+            continue
+        if filtered:
+            candidate.evidence = filtered
+        else:
+            db.delete(candidate)
+
+
 async def _purge_documents(
     *,
     db: Session,
@@ -182,6 +232,12 @@ async def _purge_documents(
             logger.warning(f"Failed to delete DB row for document {doc.id}: {e}")
 
     try:
+        _prune_semantic_candidates_for_documents(
+            db=db,
+            kb_row=kb_row,
+            tenant_id=tenant_id,
+            document_ids=[doc.id for doc in docs],
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -229,6 +285,7 @@ class DocumentUploadResponse(BaseModel):
     filename: str
     content_type: str
     message: str
+    document_id: Optional[int] = None
 
 
 class DocumentInfo(BaseModel):
@@ -545,6 +602,40 @@ async def upload_document(
         doc_metadata["version_of"] = existing_by_name[0].id
         doc_metadata["version_index"] = len(existing_by_name) + 1
 
+    document_record = None
+    try:
+        display_title = (original_filename or safe_filename).strip() or safe_filename
+        if len(display_title) > 255:
+            display_title = display_title[:255]
+        document_record = Document(
+            filename=safe_filename,
+            original_filename=original_filename or safe_filename,
+            file_type=ext or "unknown",
+            file_size=file_size,
+            file_path=storage_path,
+            knowledge_base_id=kb_row.id,
+            knowledge_base_name=kb_name,
+            tenant_id=tenant_id,
+            uploaded_by=current_user.id,
+            status=DocumentStatusEnum.PENDING.value,
+            title=display_title,
+            content_preview=None,
+            total_chunks=0,
+            vector_ids=[],
+            doc_metadata=doc_metadata or {},
+        )
+        db.add(document_record)
+        db.commit()
+        db.refresh(document_record)
+    except Exception as e:
+        db.rollback()
+        try:
+            storage_service.delete(storage_path)
+        except Exception:
+            pass
+        logger.error(f"Failed to persist document record: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create document record")
+
     # Parse chunking strategy (fallback to KB settings)
     kb_settings = kb_row.settings or {}
     strategy_value = chunking_strategy or kb_settings.get("chunking_strategy")
@@ -594,6 +685,7 @@ async def upload_document(
                 params,
                 doc_metadata,
                 original_filename,
+                document_record.id if document_record else None,
             )
         except Exception as e:
             try:
@@ -616,12 +708,14 @@ async def upload_document(
             storage_path,
             doc_metadata,
             original_filename,
+            document_record.id if document_record else None,
         )
 
     return {
         "filename": safe_filename,
         "content_type": file.content_type,
         "message": "File accepted and is being processed in the background.",
+        "document_id": document_record.id if document_record else None,
     }
 
 
@@ -1017,6 +1111,12 @@ async def delete_document(
         
         # Remove from database
         db.delete(document)
+        _prune_semantic_candidates_for_documents(
+            db=db,
+            kb_row=kb_row,
+            tenant_id=tenant_id,
+            document_ids=[document.id],
+        )
         db.commit()
         
         logger.info(f"Successfully deleted document {document_id} from knowledge base '{kb_name}'")
@@ -1283,6 +1383,7 @@ async def batch_delete_documents(
         )
 
         deleted_count = 0
+        deleted_doc_ids: list[int] = []
         from app.services.milvus_service import milvus_service
         tenant_collection_name = (
             kb_row.milvus_collection_name or f"tenant_{tenant_id}_{kb_name}"
@@ -1355,9 +1456,16 @@ async def batch_delete_documents(
             try:
                 db.delete(doc)
                 deleted_count += 1
+                deleted_doc_ids.append(doc.id)
             except Exception as e:
                 logger.warning(f"Failed to delete DB row for document {doc.id}: {e}")
 
+        _prune_semantic_candidates_for_documents(
+            db=db,
+            kb_row=kb_row,
+            tenant_id=tenant_id,
+            document_ids=deleted_doc_ids,
+        )
         db.commit()
         return BatchDeleteResult(deleted=deleted_count)
     except Exception as e:

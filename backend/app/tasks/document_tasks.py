@@ -20,6 +20,7 @@ def process_document_task(
     chunking_params: Optional[Dict[str, Any]] = None,
     doc_metadata: Optional[Dict[str, Any]] = None,
     original_filename: Optional[str] = None,
+    document_id: Optional[int] = None,
 ):
     """Process a document from a saved file path (worker context)."""
     if not storage_service.exists(file_path):
@@ -41,6 +42,7 @@ def process_document_task(
                 file_system_path=file_path,
                 doc_metadata=doc_metadata,
                 original_filename=original_filename,
+                document_id=document_id,
             )
             return {"success": True}
         except Exception as e:

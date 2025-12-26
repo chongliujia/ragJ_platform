@@ -26,6 +26,7 @@ from .tenant_model_config import TenantProviderConfig, TenantModelConfig
 from .user_model_config import UserProviderConfig, UserModelConfig
 from .agent import Agent
 from .evaluation import EvaluationDataset, EvaluationRun
+from .semantic_candidate import SemanticCandidate
 
 __all__ = [
     "Base",
@@ -60,4 +61,5 @@ __all__ = [
     "Agent",
     "EvaluationDataset",
     "EvaluationRun",
+    "SemanticCandidate",
 ]

@@ -28,6 +28,20 @@ class UserConfigUpdate(BaseModel):
     preferred_chat_model: Optional[str] = None
     preferred_embedding_model: Optional[str] = None
     preferred_rerank_model: Optional[str] = None
+    preferred_extraction_model: Optional[str] = None
+    extraction_max_chunks: Optional[int] = None
+    extraction_max_text_chars: Optional[int] = None
+    extraction_max_items: Optional[int] = None
+    extraction_document_limit: Optional[int] = None
+    extraction_auto_chunking: Optional[bool] = None
+    extraction_chunk_strategy: Optional[str] = None
+    extraction_mode: Optional[str] = None
+    extraction_progressive_enabled: Optional[bool] = None
+    extraction_progressive_min_items: Optional[int] = None
+    extraction_progressive_step: Optional[int] = None
+    extraction_summary_max_chars: Optional[int] = None
+    extraction_entity_type_whitelist: Optional[str] = None
+    extraction_relation_type_whitelist: Optional[str] = None
     max_tokens: Optional[int] = None
     temperature: Optional[str] = None
     top_p: Optional[str] = None
@@ -46,6 +60,20 @@ class UserConfigResponse(BaseModel):
     preferred_chat_model: str
     preferred_embedding_model: str
     preferred_rerank_model: str
+    preferred_extraction_model: str
+    extraction_max_chunks: int
+    extraction_max_text_chars: int
+    extraction_max_items: int
+    extraction_document_limit: int
+    extraction_auto_chunking: bool
+    extraction_chunk_strategy: str
+    extraction_mode: str
+    extraction_progressive_enabled: bool
+    extraction_progressive_min_items: int
+    extraction_progressive_step: int
+    extraction_summary_max_chars: int
+    extraction_entity_type_whitelist: str
+    extraction_relation_type_whitelist: str
     max_tokens: int
     temperature: str
     top_p: str
@@ -106,6 +134,20 @@ async def get_user_config(
         preferred_chat_model=config.preferred_chat_model,
         preferred_embedding_model=config.preferred_embedding_model,
         preferred_rerank_model=config.preferred_rerank_model,
+        preferred_extraction_model=config.preferred_extraction_model or config.preferred_chat_model,
+        extraction_max_chunks=config.extraction_max_chunks,
+        extraction_max_text_chars=config.extraction_max_text_chars,
+        extraction_max_items=config.extraction_max_items,
+        extraction_document_limit=config.extraction_document_limit,
+        extraction_auto_chunking=config.extraction_auto_chunking,
+        extraction_chunk_strategy=config.extraction_chunk_strategy,
+        extraction_mode=config.extraction_mode,
+        extraction_progressive_enabled=config.extraction_progressive_enabled,
+        extraction_progressive_min_items=config.extraction_progressive_min_items,
+        extraction_progressive_step=config.extraction_progressive_step,
+        extraction_summary_max_chars=config.extraction_summary_max_chars,
+        extraction_entity_type_whitelist=config.extraction_entity_type_whitelist or "",
+        extraction_relation_type_whitelist=config.extraction_relation_type_whitelist or "",
         max_tokens=config.max_tokens,
         temperature=config.temperature,
         top_p=config.top_p,
@@ -171,6 +213,20 @@ async def update_user_config(
         preferred_chat_model=config.preferred_chat_model,
         preferred_embedding_model=config.preferred_embedding_model,
         preferred_rerank_model=config.preferred_rerank_model,
+        preferred_extraction_model=config.preferred_extraction_model or config.preferred_chat_model,
+        extraction_max_chunks=config.extraction_max_chunks,
+        extraction_max_text_chars=config.extraction_max_text_chars,
+        extraction_max_items=config.extraction_max_items,
+        extraction_document_limit=config.extraction_document_limit,
+        extraction_auto_chunking=config.extraction_auto_chunking,
+        extraction_chunk_strategy=config.extraction_chunk_strategy,
+        extraction_mode=config.extraction_mode,
+        extraction_progressive_enabled=config.extraction_progressive_enabled,
+        extraction_progressive_min_items=config.extraction_progressive_min_items,
+        extraction_progressive_step=config.extraction_progressive_step,
+        extraction_summary_max_chars=config.extraction_summary_max_chars,
+        extraction_entity_type_whitelist=config.extraction_entity_type_whitelist or "",
+        extraction_relation_type_whitelist=config.extraction_relation_type_whitelist or "",
         max_tokens=config.max_tokens,
         temperature=config.temperature,
         top_p=config.top_p,
@@ -503,6 +559,20 @@ async def get_user_config_by_id(
         preferred_chat_model=config.preferred_chat_model,
         preferred_embedding_model=config.preferred_embedding_model,
         preferred_rerank_model=config.preferred_rerank_model,
+        preferred_extraction_model=config.preferred_extraction_model or config.preferred_chat_model,
+        extraction_max_chunks=config.extraction_max_chunks,
+        extraction_max_text_chars=config.extraction_max_text_chars,
+        extraction_max_items=config.extraction_max_items,
+        extraction_document_limit=config.extraction_document_limit,
+        extraction_auto_chunking=config.extraction_auto_chunking,
+        extraction_chunk_strategy=config.extraction_chunk_strategy,
+        extraction_mode=config.extraction_mode,
+        extraction_progressive_enabled=config.extraction_progressive_enabled,
+        extraction_progressive_min_items=config.extraction_progressive_min_items,
+        extraction_progressive_step=config.extraction_progressive_step,
+        extraction_summary_max_chars=config.extraction_summary_max_chars,
+        extraction_entity_type_whitelist=config.extraction_entity_type_whitelist or "",
+        extraction_relation_type_whitelist=config.extraction_relation_type_whitelist or "",
         max_tokens=config.max_tokens,
         temperature=config.temperature,
         top_p=config.top_p,

@@ -169,6 +169,7 @@ class DocumentService:
         file_system_path: Optional[str] = None,
         doc_metadata: Optional[dict] = None,
         original_filename: Optional[str] = None,
+        document_id: Optional[int] = None,
     ):
         """
         Process an uploaded document with proper status tracking.
@@ -182,6 +183,16 @@ class DocumentService:
                 if not file_system_path:
                     raise Exception("File content missing and storage path not provided")
                 content = storage_service.read_bytes(file_system_path)
+
+            if document_id is not None:
+                try:
+                    document_record = (
+                        db.query(Document)
+                        .filter(Document.id == document_id, Document.tenant_id == tenant_id)
+                        .first()
+                    )
+                except Exception:
+                    document_record = None
 
             # Save initial document record
             file_type = filename.split('.')[-1].lower() if '.' in filename else 'unknown'
@@ -208,21 +219,36 @@ class DocumentService:
             title = lines[0][:255] if lines else filename
             content_preview = document_text[:500] if document_text else None
             
-            # Create document record
-            document_record = self._save_document_record(
-                db=db,
-                filename=filename,
-                file_type=file_type,
-                file_size=file_size,
-                file_path=file_path,
-                kb_name=kb_name,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                content_preview=content_preview,
-                title=title,
-                original_filename=original_filename,
-                doc_metadata=doc_metadata,
-            )
+            if document_record:
+                document_record.file_type = file_type
+                document_record.file_size = file_size
+                document_record.file_path = file_path
+                document_record.original_filename = original_filename or document_record.original_filename
+                document_record.title = title
+                document_record.content_preview = content_preview
+                if doc_metadata:
+                    meta = dict(document_record.doc_metadata or {})
+                    meta.update(doc_metadata)
+                    document_record.doc_metadata = meta
+                db.add(document_record)
+                db.commit()
+                db.refresh(document_record)
+            else:
+                # Create document record
+                document_record = self._save_document_record(
+                    db=db,
+                    filename=filename,
+                    file_type=file_type,
+                    file_size=file_size,
+                    file_path=file_path,
+                    kb_name=kb_name,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    content_preview=content_preview,
+                    title=title,
+                    original_filename=original_filename,
+                    doc_metadata=doc_metadata,
+                )
             self._update_document_progress(
                 db,
                 document_record.id,

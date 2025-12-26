@@ -98,6 +98,56 @@ export const knowledgeBaseApi = {
     kbName: string,
     data?: { delete_missing?: boolean }
   ) => api.post(`/api/v1/knowledge-bases/${kbName}/maintenance/consistency`, data || {}),
+
+  // 清理语义候选证据（移除已删除文档的引用）
+  cleanupSemanticCandidates: (
+    kbName: string,
+    data?: { delete_orphan_candidates?: boolean; dry_run?: boolean }
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/maintenance/semantic-cleanup`, data || {}),
+
+  // 语义层候选列表
+  getSemanticCandidates: (kbName: string) =>
+    api.get(`/api/v1/knowledge-bases/${kbName}/semantic/candidates`),
+
+  // 触发语义候选发现
+  discoverSemanticCandidates: (
+    kbName: string,
+    data: {
+      scope?: 'all' | 'recent';
+      include_relations?: boolean;
+      reset?: boolean;
+      document_limit?: number;
+      max_chunks?: number;
+      max_text_chars?: number;
+      max_items?: number;
+      auto_chunking?: boolean;
+      chunk_strategy?: 'uniform' | 'leading' | 'head_tail' | 'diverse';
+      mode?: 'direct' | 'summary';
+      progressive_enabled?: boolean;
+      progressive_min_items?: number;
+      progressive_step?: number;
+      summary_max_chars?: number;
+      entity_types?: string[];
+      relation_types?: string[];
+    }
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/semantic/discover`, data),
+
+  // 语义候选发现进度
+  getSemanticDiscoveryProgress: (kbName: string) =>
+    api.get(`/api/v1/knowledge-bases/${kbName}/semantic/discover/status`),
+
+  // 批量更新候选状态
+  updateSemanticCandidateStatus: (
+    kbName: string,
+    data: { ids: number[]; status: 'pending' | 'approved' | 'rejected' }
+  ) => api.patch(`/api/v1/knowledge-bases/${kbName}/semantic/candidates/status`, data),
+
+  // 归并候选
+  mergeSemanticCandidate: (
+    kbName: string,
+    candidateId: number,
+    data: { mode: 'existing' | 'new'; target: string; alias?: boolean }
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/semantic/candidates/${candidateId}/merge`, data),
 };
 
 // 聊天相关 API

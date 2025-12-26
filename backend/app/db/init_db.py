@@ -100,6 +100,7 @@ async def init_db():
         try:
             _safe_migrate_documents_table()
             _safe_migrate_users_table()
+            _safe_migrate_user_configs_table()
             _safe_migrate_tenants_table()
         except Exception as mig_err:
             logger.warning(f"文档表迁移检查失败: {mig_err}")
@@ -225,6 +226,226 @@ def _safe_migrate_users_table():
             conn.execute(text(sql))
         if to_add:
             logger.info("users 表字段补齐完成")
+    finally:
+        conn.close()
+
+
+def _safe_migrate_user_configs_table():
+    """补齐 user_configs 表的新增字段，兼容旧版本 SQLite 文件。"""
+    from sqlalchemy import text
+    conn = engine.connect()
+    try:
+        dialect = engine.dialect.name
+        if dialect == "sqlite":
+            cols = conn.execute(text("PRAGMA table_info('user_configs')")).fetchall()
+            if not cols:
+                return
+            existing = {c[1] for c in cols}
+
+            to_add = []
+            if "preferred_extraction_model" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN preferred_extraction_model TEXT DEFAULT 'deepseek-chat'"
+                )
+            if "extraction_max_chunks" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_max_chunks INTEGER DEFAULT 3"
+                )
+            if "extraction_max_text_chars" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_max_text_chars INTEGER DEFAULT 1800"
+                )
+            if "extraction_max_items" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_max_items INTEGER DEFAULT 12"
+                )
+            if "extraction_document_limit" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_document_limit INTEGER DEFAULT 6"
+                )
+            if "extraction_auto_chunking" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_auto_chunking BOOLEAN DEFAULT 0"
+                )
+            if "extraction_chunk_strategy" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_chunk_strategy TEXT DEFAULT 'uniform'"
+                )
+            if "extraction_mode" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_mode TEXT DEFAULT 'direct'"
+                )
+            if "extraction_progressive_enabled" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_progressive_enabled BOOLEAN DEFAULT 0"
+                )
+            if "extraction_progressive_min_items" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_progressive_min_items INTEGER DEFAULT 6"
+                )
+            if "extraction_progressive_step" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_progressive_step INTEGER DEFAULT 3"
+                )
+            if "extraction_summary_max_chars" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_summary_max_chars INTEGER DEFAULT 2000"
+                )
+            if "extraction_entity_type_whitelist" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_entity_type_whitelist TEXT DEFAULT ''"
+                )
+            if "extraction_relation_type_whitelist" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_relation_type_whitelist TEXT DEFAULT ''"
+                )
+
+            for sql in to_add:
+                logger.info(f"迁移 user_configs 表：执行 {sql}")
+                conn.execute(text(sql))
+
+            if to_add:
+                conn.execute(
+                    text(
+                        "UPDATE user_configs "
+                        "SET "
+                        "preferred_extraction_model = COALESCE(preferred_extraction_model, preferred_chat_model, 'deepseek-chat'), "
+                        "extraction_max_chunks = COALESCE(extraction_max_chunks, 3), "
+                        "extraction_max_text_chars = COALESCE(extraction_max_text_chars, 1800), "
+                        "extraction_max_items = COALESCE(extraction_max_items, 12), "
+                        "extraction_document_limit = COALESCE(extraction_document_limit, 6), "
+                        "extraction_auto_chunking = COALESCE(extraction_auto_chunking, 0), "
+                        "extraction_chunk_strategy = COALESCE(extraction_chunk_strategy, 'uniform'), "
+                        "extraction_mode = COALESCE(extraction_mode, 'direct'), "
+                        "extraction_progressive_enabled = COALESCE(extraction_progressive_enabled, 0), "
+                        "extraction_progressive_min_items = COALESCE(extraction_progressive_min_items, 6), "
+                        "extraction_progressive_step = COALESCE(extraction_progressive_step, 3), "
+                        "extraction_summary_max_chars = COALESCE(extraction_summary_max_chars, 2000), "
+                        "extraction_entity_type_whitelist = COALESCE(extraction_entity_type_whitelist, ''), "
+                        "extraction_relation_type_whitelist = COALESCE(extraction_relation_type_whitelist, '')"
+                    )
+                )
+                logger.info("user_configs 表字段补齐完成")
+            return
+
+        if dialect in ("mysql", "mariadb"):
+            cols = conn.execute(
+                text(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_configs'"
+                )
+            ).fetchall()
+            existing = {row[0] for row in cols}
+            to_add = []
+            if "preferred_extraction_model" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN preferred_extraction_model VARCHAR(100) DEFAULT 'deepseek-chat'"
+                )
+            if "extraction_max_chunks" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_max_chunks INT DEFAULT 3"
+                )
+            if "extraction_max_text_chars" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_max_text_chars INT DEFAULT 1800"
+                )
+            if "extraction_max_items" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_max_items INT DEFAULT 12"
+                )
+            if "extraction_document_limit" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_document_limit INT DEFAULT 6"
+                )
+            if "extraction_auto_chunking" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_auto_chunking BOOLEAN DEFAULT 0"
+                )
+            if "extraction_chunk_strategy" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_chunk_strategy VARCHAR(20) DEFAULT 'uniform'"
+                )
+            if "extraction_mode" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_mode VARCHAR(20) DEFAULT 'direct'"
+                )
+            if "extraction_progressive_enabled" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_progressive_enabled BOOLEAN DEFAULT 0"
+                )
+            if "extraction_progressive_min_items" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_progressive_min_items INT DEFAULT 6"
+                )
+            if "extraction_progressive_step" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_progressive_step INT DEFAULT 3"
+                )
+            if "extraction_summary_max_chars" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_summary_max_chars INT DEFAULT 2000"
+                )
+            if "extraction_entity_type_whitelist" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_entity_type_whitelist TEXT"
+                )
+            if "extraction_relation_type_whitelist" not in existing:
+                to_add.append(
+                    "ALTER TABLE user_configs "
+                    "ADD COLUMN extraction_relation_type_whitelist TEXT"
+                )
+            for sql in to_add:
+                logger.info(f"迁移 user_configs 表：执行 {sql}")
+                conn.execute(text(sql))
+            if to_add:
+                conn.execute(
+                    text(
+                        "UPDATE user_configs "
+                        "SET "
+                        "preferred_extraction_model = COALESCE(preferred_extraction_model, preferred_chat_model, 'deepseek-chat'), "
+                        "extraction_max_chunks = COALESCE(extraction_max_chunks, 3), "
+                        "extraction_max_text_chars = COALESCE(extraction_max_text_chars, 1800), "
+                        "extraction_max_items = COALESCE(extraction_max_items, 12), "
+                        "extraction_document_limit = COALESCE(extraction_document_limit, 6), "
+                        "extraction_auto_chunking = COALESCE(extraction_auto_chunking, 0), "
+                        "extraction_chunk_strategy = COALESCE(extraction_chunk_strategy, 'uniform'), "
+                        "extraction_mode = COALESCE(extraction_mode, 'direct'), "
+                        "extraction_progressive_enabled = COALESCE(extraction_progressive_enabled, 0), "
+                        "extraction_progressive_min_items = COALESCE(extraction_progressive_min_items, 6), "
+                        "extraction_progressive_step = COALESCE(extraction_progressive_step, 3), "
+                        "extraction_summary_max_chars = COALESCE(extraction_summary_max_chars, 2000), "
+                        "extraction_entity_type_whitelist = COALESCE(extraction_entity_type_whitelist, ''), "
+                        "extraction_relation_type_whitelist = COALESCE(extraction_relation_type_whitelist, '')"
+                    )
+                )
+                logger.info("user_configs 表字段补齐完成")
     finally:
         conn.close()
 
@@ -476,6 +697,20 @@ async def init_super_admin(db: Session):
             preferred_chat_model="deepseek-chat",
             preferred_embedding_model="text-embedding-v2",
             preferred_rerank_model="gte-rerank",
+            preferred_extraction_model="deepseek-chat",
+            extraction_max_chunks=3,
+            extraction_max_text_chars=1800,
+            extraction_max_items=12,
+            extraction_document_limit=6,
+            extraction_auto_chunking=False,
+            extraction_chunk_strategy="uniform",
+            extraction_mode="direct",
+            extraction_progressive_enabled=False,
+            extraction_progressive_min_items=6,
+            extraction_progressive_step=3,
+            extraction_summary_max_chars=2000,
+            extraction_entity_type_whitelist="",
+            extraction_relation_type_whitelist="",
             theme="light",
             language="zh",
         )
