@@ -1278,6 +1278,41 @@ async def delete_knowledge_base(
                 f"Elasticsearch enabled but unavailable; could not delete index '{tenant_collection_name}'."
             )
 
+        # Delete ontology drafts first to satisfy FK constraints
+        try:
+            from app.db.models.ontology import OntologyItem, OntologyVersion
+            db.query(OntologyItem).filter(
+                OntologyItem.knowledge_base_id == kb_row.id,
+                OntologyItem.tenant_id == tenant_id,
+            ).delete(synchronize_session=False)
+            db.query(OntologyVersion).filter(
+                OntologyVersion.knowledge_base_id == kb_row.id,
+                OntologyVersion.tenant_id == tenant_id,
+            ).delete(synchronize_session=False)
+            db.commit()
+        except Exception as dbe:
+            db.rollback()
+            logger.error(f"Failed to delete KB ontology drafts from DB: {dbe}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete knowledge base ontology drafts",
+            )
+
+        # Delete semantic candidates and evidence
+        try:
+            db.query(SemanticCandidate).filter(
+                SemanticCandidate.knowledge_base_id == kb_row.id,
+                SemanticCandidate.tenant_id == tenant_id,
+            ).delete(synchronize_session=False)
+            db.commit()
+        except Exception as dbe:
+            db.rollback()
+            logger.error(f"Failed to delete KB semantic candidates from DB: {dbe}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete knowledge base semantic candidates",
+            )
+
         # Delete document chunks first to satisfy FK constraints
         try:
             from app.db.models.document_chunk import DocumentChunk as DocumentChunkModel

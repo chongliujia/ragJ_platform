@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -12,6 +12,8 @@ import {
   MenuItem,
   Avatar,
   Chip,
+  LinearProgress,
+  Tooltip,
   useMediaQuery,
   ListItemIcon,
   ListItemText,
@@ -23,6 +25,7 @@ import {
   Logout as LogoutIcon,
   ExpandMore as ExpandIcon,
   AdminPanelSettings as AdminIcon,
+  StopCircle as StopIcon,
 } from '@mui/icons-material';
 import LanguageSwitcher from './LanguageSwitcher';
 import { TeamSelector } from './TeamSelector';
@@ -30,7 +33,26 @@ import { AuthManager } from '../services/authApi';
 import { usePermissions } from '../hooks/usePermissions';
 import type { UserInfo } from '../types/auth';
 import { mainNavItems, workflowNavItems, adminNavItems } from '../config/navConfig';
+import { knowledgeBaseApi } from '../services/api';
+import { SEMANTIC_DISCOVERY_TRACKER_KEY } from '../constants/storage';
 import { alpha, useTheme } from '@mui/material/styles';
+
+interface DiscoveryTracker {
+  kbId: string;
+  kbName?: string;
+}
+
+interface DiscoveryProgress {
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
+  current?: number;
+  total?: number;
+  current_chunks?: number;
+  total_chunks?: number;
+  processed_chunks_total?: number;
+  planned_chunks_total?: number;
+  document_label?: string;
+  cancel_requested?: boolean;
+}
 
 const TopBar: React.FC = () => {
   const navigate = useNavigate();
@@ -38,6 +60,9 @@ const TopBar: React.FC = () => {
   const { t } = useTranslation();
   const theme = useTheme();
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [discoveryTracker, setDiscoveryTracker] = useState<DiscoveryTracker | null>(null);
+  const [discoveryProgress, setDiscoveryProgress] = useState<DiscoveryProgress | null>(null);
+  const [isCancellingDiscovery, setIsCancellingDiscovery] = useState(false);
   const [userMenuAnchor, setUserMenuAnchor] = useState<null | HTMLElement>(null);
   const [workflowMenuAnchor, setWorkflowMenuAnchor] = useState<null | HTMLElement>(null);
   const [adminMenuAnchor, setAdminMenuAnchor] = useState<null | HTMLElement>(null);
@@ -50,6 +75,89 @@ const TopBar: React.FC = () => {
     const currentUser = authManager.getCurrentUser();
     setUser(currentUser);
   }, []);
+
+  const loadDiscoveryTracker = useCallback(() => {
+    const raw = localStorage.getItem(SEMANTIC_DISCOVERY_TRACKER_KEY);
+    if (!raw) {
+      setDiscoveryTracker(null);
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as DiscoveryTracker;
+      if (parsed?.kbId) {
+        setDiscoveryTracker({ kbId: String(parsed.kbId), kbName: parsed.kbName });
+      } else {
+        setDiscoveryTracker(null);
+      }
+    } catch {
+      setDiscoveryTracker(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleUpdate = () => loadDiscoveryTracker();
+    handleUpdate();
+    window.addEventListener('semanticDiscoveryUpdated', handleUpdate);
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === SEMANTIC_DISCOVERY_TRACKER_KEY) {
+        loadDiscoveryTracker();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener('semanticDiscoveryUpdated', handleUpdate);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [loadDiscoveryTracker]);
+
+  useEffect(() => {
+    if (!discoveryTracker?.kbId) {
+      setDiscoveryProgress(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchProgress = async () => {
+      try {
+        const response = await knowledgeBaseApi.getSemanticDiscoveryProgress(discoveryTracker.kbId);
+        const data = response.data as DiscoveryProgress;
+        if (cancelled) return;
+        if (data && typeof data === 'object') {
+          setDiscoveryProgress(data);
+          if (data.status !== 'running') {
+            localStorage.removeItem(SEMANTIC_DISCOVERY_TRACKER_KEY);
+            window.dispatchEvent(new Event('semanticDiscoveryUpdated'));
+          }
+        }
+      } catch {
+        return;
+      }
+    };
+    fetchProgress();
+    const timer = window.setInterval(fetchProgress, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [discoveryTracker?.kbId]);
+
+  const handleCancelDiscovery = useCallback(
+    async (event?: React.MouseEvent) => {
+      event?.stopPropagation();
+      if (!discoveryTracker?.kbId || isCancellingDiscovery) return;
+      setIsCancellingDiscovery(true);
+      try {
+        await knowledgeBaseApi.cancelSemanticDiscovery(discoveryTracker.kbId);
+        localStorage.removeItem(SEMANTIC_DISCOVERY_TRACKER_KEY);
+        window.dispatchEvent(new Event('semanticDiscoveryUpdated'));
+        setDiscoveryProgress((prev) => (prev ? { ...prev, status: 'cancelled' } : prev));
+      } catch (error) {
+        console.error('Cancel discovery error:', error);
+      } finally {
+        setIsCancellingDiscovery(false);
+      }
+    },
+    [discoveryTracker?.kbId, isCancellingDiscovery]
+  );
 
   const menuItems = mainNavItems.filter(i => i.showInTopBar && (!i.requiredRole || permissions.hasRole(i.requiredRole)));
   const workflowMenuItems = workflowNavItems.filter(i => i.showInTopBar && (!i.requiredRole || permissions.hasRole(i.requiredRole)));
@@ -68,6 +176,47 @@ const TopBar: React.FC = () => {
   const activeBg = alpha(theme.palette.primary.main, 0.1);
   const activeBorder = alpha(theme.palette.primary.main, 0.3);
   const hoverBg = alpha(theme.palette.primary.main, 0.1);
+
+  const discoveryTotal = discoveryProgress?.total ?? 0;
+  const discoveryCurrent = discoveryProgress?.current ?? 0;
+  const discoveryChunkTotal = discoveryProgress?.total_chunks ?? 0;
+  const discoveryChunkCurrent = discoveryProgress?.current_chunks ?? 0;
+  const discoveryPlannedChunksTotal = discoveryProgress?.planned_chunks_total ?? 0;
+  const discoveryProcessedChunksTotal = discoveryProgress?.processed_chunks_total ?? 0;
+  const hasChunkTotals = discoveryPlannedChunksTotal > 0;
+  const chunkTotal = hasChunkTotals ? discoveryPlannedChunksTotal : discoveryChunkTotal;
+  const chunkCurrent = hasChunkTotals ? discoveryProcessedChunksTotal : discoveryChunkCurrent;
+  const hasChunkProgress = chunkTotal > 0;
+  const discoveryPercent = hasChunkProgress
+    ? Math.min(100, Math.round((chunkCurrent / chunkTotal) * 100))
+    : discoveryTotal > 0
+      ? Math.min(100, Math.round((discoveryCurrent / discoveryTotal) * 100))
+      : 0;
+  const discoveryLabel = hasChunkProgress
+    ? t('topBar.discoveryProgressChunks', {
+        current: chunkCurrent,
+        total: chunkTotal,
+      })
+    : t('topBar.discoveryProgressDocs', {
+        current: discoveryCurrent,
+        total: discoveryTotal,
+      });
+  const discoveryDocLabel = (discoveryProgress?.document_label || '').trim();
+  const discoveryTooltip = discoveryDocLabel
+    ? `${discoveryLabel} - ${t('topBar.discoveryProgressDocLabel', { doc: discoveryDocLabel })}`
+    : discoveryLabel;
+  const discoveryCancelRequested = Boolean(discoveryProgress?.cancel_requested);
+  const discoveryTitle = discoveryTracker
+    ? discoveryPercent > 0
+      ? t('topBar.discoveryProgressShort', {
+          kb: discoveryTracker.kbName || discoveryTracker.kbId,
+          percent: discoveryPercent,
+        })
+      : t('topBar.discoveryProgressPreparing', {
+          kb: discoveryTracker.kbName || discoveryTracker.kbId,
+        })
+    : '';
+  const showDiscoveryProgress = Boolean(discoveryTracker);
 
   const NavButton: React.FC<{ 
     text: string; 
@@ -265,6 +414,83 @@ const TopBar: React.FC = () => {
 
         {/* 右侧：设置、团队选择器、用户菜单 */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          {showDiscoveryProgress && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <Tooltip title={discoveryTooltip}>
+                <Box
+                  onClick={() => navigate(`/knowledge-bases/${discoveryTracker?.kbId}/semantic`)}
+                  sx={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 0.5,
+                    px: 1,
+                    py: 0.5,
+                    borderRadius: 1.5,
+                    minWidth: isMobile ? 100 : 160,
+                    cursor: 'pointer',
+                    border: `1px solid ${alpha(theme.palette.primary.main, 0.3)}`,
+                    backgroundColor: alpha(theme.palette.primary.main, 0.08),
+                    '&:hover': {
+                      backgroundColor: alpha(theme.palette.primary.main, 0.16),
+                    },
+                  }}
+                >
+                  <Typography
+                    variant="caption"
+                    sx={{
+                      color: alpha(theme.palette.common.white, 0.85),
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                      maxWidth: isMobile ? 90 : 140,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {discoveryTitle}
+                  </Typography>
+                  <LinearProgress
+                    variant={discoveryPercent > 0 ? 'determinate' : 'indeterminate'}
+                    value={discoveryPercent}
+                    sx={{
+                      height: 4,
+                      borderRadius: 2,
+                      backgroundColor: alpha(theme.palette.common.white, 0.1),
+                      '& .MuiLinearProgress-bar': {
+                        backgroundColor: theme.palette.primary.main,
+                      },
+                    }}
+                  />
+                </Box>
+              </Tooltip>
+              {discoveryProgress?.status === 'running' && (
+                <Tooltip
+                  title={
+                    isCancellingDiscovery || discoveryCancelRequested
+                      ? t('topBar.discoveryCancelling')
+                      : t('topBar.discoveryCancel')
+                  }
+                >
+                  <span>
+                    <IconButton
+                      size="small"
+                      onClick={handleCancelDiscovery}
+                      disabled={isCancellingDiscovery || discoveryCancelRequested}
+                      sx={{
+                        color: theme.palette.error.main,
+                        border: `1px solid ${alpha(theme.palette.error.main, 0.35)}`,
+                        backgroundColor: alpha(theme.palette.error.main, 0.12),
+                        '&:hover': {
+                          backgroundColor: alpha(theme.palette.error.main, 0.2),
+                        },
+                      }}
+                    >
+                      <StopIcon fontSize="small" />
+                    </IconButton>
+                  </span>
+                </Tooltip>
+              )}
+            </Box>
+          )}
           {/* 设置按钮 */}
           <IconButton
             onClick={() => navigate('/settings')}

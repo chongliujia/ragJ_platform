@@ -134,6 +134,7 @@
         "entities": "实体候选",
         "relations": "关系候选",
         "attributes": "属性候选",
+        "structures": "结构候选",
         "insights": "洞察候选"
       },
       "graph": {
@@ -145,18 +146,36 @@
         "zoomOut": "缩小",
         "reset": "重置视图",
         "controls": "图谱控制",
+        "modeLabel": "展示模式",
+        "modeAll": "全部候选",
+        "modeStructure": "结构图（章节）",
         "layoutLabel": "布局方式",
         "layoutRadial": "环形",
         "layoutGrid": "网格",
         "showRelations": "显示关系",
+        "showStructures": "显示结构",
+        "groupStructures": "按文档分组结构",
+        "collapseDocuments": "折叠结构分组",
+        "structureDepth": "结构深度",
+        "structureDepthHelper": "0 表示不限，最大 {{max}} 级",
+        "nodeLimitToggle": "限制节点数量",
+        "nodeLimit": "最大节点数",
+        "nodeLimitHelper": "范围 {{min}} - {{max}}",
+        "labelMode": "标签显示",
+        "labelAuto": "自动（大图隐藏）",
+        "labelShow": "始终显示",
+        "labelHide": "隐藏标签",
         "showAttributes": "显示属性",
-        "focusSelection": "聚焦选中项"
+        "focusSelection": "聚焦选中项",
+        "prunedNotice": "已显示 {{visible}} / {{total}} 个节点（已裁剪）",
+        "showAll": "显示全部"
       },
       "tabs": {
         "all": "全部",
         "entities": "实体",
         "relations": "关系",
         "attributes": "属性",
+        "structure": "结构",
         "insights": "洞察"
       },
       "filters": {
@@ -173,6 +192,7 @@
         "entity": "实体",
         "relation": "关系",
         "attribute": "属性",
+        "structure": "结构",
         "insight": "洞察"
       },
       "status": {
@@ -221,8 +241,14 @@
           "conflicts": "冲突提示",
           "aliases": "别名",
           "attributes": "属性",
+          "structure": "结构信息",
           "insight": "洞察信息",
           "evidence": "证据片段"
+        },
+        "structure": {
+          "doc": "文档",
+          "level": "层级",
+          "parent": "上级"
         },
         "insight": {
           "type": "类型",
@@ -275,12 +301,122 @@
         "fetchError": "获取候选列表失败",
         "discoveryError": "自动发现失败",
         "updateError": "更新候选状态失败",
-        "mergeError": "归并失败"
+        "mergeError": "归并失败",
+        "ontologyError": "本体操作失败"
       },
       "progress": {
-        "running": "发现中：已处理 {{current}} / {{total}} 个文档",
+        "preparing": "正在准备发现进度...",
+        "running": "文档进度：{{current}} / {{total}}",
+        "overallChunks": "累计分块：{{current}} / {{total}}",
+        "currentDoc": "当前文档：{{doc}}",
+        "runningChunks": "分片进度：{{current}} / {{total}}",
+        "runningChunksDoc": "分片进度（{{doc}}）：{{current}} / {{total}}",
+        "backgroundNote": "任务在后台运行，可离开此页稍后查看进度。",
+        "cancel": "终止自动发现",
+        "cancelling": "正在终止...",
         "completed": "自动发现完成（{{total}} 个文档）",
+        "cancelled": "自动发现已终止",
         "failed": "自动发现失败：{{message}}"
+      },
+      "ontology": {
+        "title": "本体管理",
+        "description": "生成与维护知识库本体，用于约束抽取与结构化。",
+        "actions": {
+          "generate": "生成草案",
+          "review": "审核草案",
+          "publish": "发布本体",
+          "refresh": "刷新版本",
+          "addItem": "新增条目",
+          "edit": "编辑",
+          "approve": "通过",
+          "reject": "拒绝"
+        },
+        "cards": {
+          "activeTitle": "生效本体",
+          "activeEmpty": "尚未发布生效版本",
+          "draftTitle": "草案进度",
+          "draftEmpty": "暂无草案",
+          "draftDefault": "未命名草案",
+          "rulesTitle": "硬约束",
+          "rulesActive": "已启用硬约束，本体将限制抽取范围。",
+          "rulesInactive": "未启用硬约束，抽取将更自由。",
+          "structureHint": "章节标题将作为结构节点，宁可少但要准。",
+          "updatedAt": "更新时间：{{time}}"
+        },
+        "status": {
+          "idle": "未生成草案",
+          "running": "草案生成中：{{current}} / {{total}}",
+          "completed": "草案已生成",
+          "failed": "草案生成失败：{{message}}"
+        },
+        "versionStatus": {
+          "active": "生效",
+          "draft": "草案",
+          "archived": "已归档"
+        },
+        "source": {
+          "auto": "自动生成",
+          "manual": "手动",
+          "import": "导入",
+          "unknown": "未知"
+        },
+        "versions": {
+          "title": "版本历史",
+          "empty": "暂无本体版本",
+          "columns": {
+            "name": "名称",
+            "status": "状态",
+            "source": "来源",
+            "items": "条目",
+            "updated": "更新时间",
+            "actions": "操作"
+          },
+          "stats": {
+            "total": "总条目",
+            "approved": "已通过",
+            "pending": "待审"
+          }
+        },
+        "draftSummary": {
+          "total": "条目总数",
+          "approved": "已通过",
+          "pending": "待审",
+          "rejected": "已拒绝",
+          "entities": "实体类型",
+          "relations": "关系类型",
+          "attributes": "属性类型",
+          "structures": "结构类型"
+        },
+        "dialog": {
+          "title": "本体草案审核",
+          "kindLabel": "类型筛选",
+          "search": "搜索名称/描述/别名",
+          "empty": "暂无本体草案条目。",
+          "aliases": "别名",
+          "constraints": "约束",
+          "evidence": "证据",
+          "meta": "元数据",
+          "details": "详情",
+          "addTitle": "新增草案条目",
+          "editTitle": "编辑草案条目",
+          "nameLabel": "名称",
+          "descriptionLabel": "说明",
+          "aliasesLabel": "别名（逗号分隔）",
+          "aliasesHint": "多个别名可用逗号或分号分隔",
+          "constraintsLabel": "约束（JSON）",
+          "constraintsHint": "请输入 JSON 对象，例如 {\"required\": true}",
+          "statusLabel": "状态",
+          "invalidJson": "约束必须是合法 JSON 对象",
+          "nameRequired": "名称不能为空",
+          "save": "保存"
+        },
+        "publishDialog": {
+          "title": "发布本体",
+          "description": "发布后将作为知识库硬约束生效，可用于后续抽取与过滤。",
+          "nameLabel": "版本名称（可选）",
+          "confirm": "确认发布",
+          "cancel": "取消"
+        }
       },
       "discoveryDialog": {
         "title": "自动发现",
@@ -292,6 +428,7 @@
         "discoveryModeFacts": "事实候选",
         "discoveryModeInsights": "洞察模式",
         "insightScope": "洞察范围",
+        "insightScopePlaceholder": "请选择洞察范围",
         "insightScopeDocument": "单文档洞察",
         "insightScopeCross": "跨文档洞察",
         "insightDomain": "洞察领域",
@@ -308,6 +445,7 @@
         "includeRelations": "同时抽取关系",
         "limitsTitle": "抽取限制",
         "autoChunking": "按文档长度自动抽样",
+        "fullChunkScan": "全量分块分析（耗时）",
         "chunkStrategy": "抽样策略",
         "chunkStrategyUniform": "均匀抽样",
         "chunkStrategyLeading": "优先前置分片",
@@ -316,11 +454,15 @@
         "documentLimit": "单次抽取文档数",
         "documentLimitHelper": "1-50，默认 6",
         "maxChunks": "每文档分片数",
-        "maxChunksHelper": "1-50，默认 3",
+        "maxChunksHelper": "1-50，默认 3（全量分析开启后忽略）",
         "maxTextChars": "每分片字符数上限",
         "maxTextCharsHelper": "200-4000，默认 1800",
         "maxItems": "每类型最大条数",
         "maxItemsHelper": "1-30，默认 12",
+        "batchSize": "批大小",
+        "batchSizeHelper": "每次请求合并分块数（1-6），数值越大越快",
+        "batchConcurrency": "并发度",
+        "batchConcurrencyHelper": "并行请求数（1-8），注意 API 限流",
         "strategyTitle": "抽取策略",
         "mode": "抽取模式",
         "modeDirect": "直接抽取",
@@ -1403,7 +1545,14 @@
       "superAdmin": "超级管理员",
       "tenantAdmin": "租户管理员",
       "member": "成员"
-    }
+    },
+    "discoveryProgressShort": "发现中 {{percent}}% - {{kb}}",
+    "discoveryProgressPreparing": "发现中 - {{kb}}",
+    "discoveryProgressDocs": "文档 {{current}} / {{total}}",
+    "discoveryProgressChunks": "分片 {{current}} / {{total}}",
+    "discoveryProgressDocLabel": "当前文档：{{doc}}",
+    "discoveryCancel": "终止自动发现",
+    "discoveryCancelling": "正在终止..."
   },
   "team": {
     "errors": {

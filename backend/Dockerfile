@@ -5,7 +5,6 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# System deps (add any you find necessary later)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
@@ -13,16 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
  && rm -rf /var/lib/apt/lists/*
 
-# Install Python deps first for layer caching
 COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && pip install -r /app/requirements.txt
 
-# Copy application
 COPY . /app/backend
 
 WORKDIR /app/backend
 
 EXPOSE 8000
 
-# Use reload for dev; run migrations on startup
-CMD ["sh", "/app/backend/scripts/entrypoint-dev.sh"]
+CMD ["sh", "/app/backend/scripts/entrypoint.sh"]

@@ -18,6 +18,9 @@ const api = axios.create({
   },
 });
 
+const LONG_TIMEOUT = 300000;
+const UPLOAD_TIMEOUT = 600000;
+
 // 保险：在本地开发时强制使用相对路径，确保走 Vite 代理
 if (isDev) {
   api.defaults.baseURL = '';
@@ -120,6 +123,9 @@ export const knowledgeBaseApi = {
       max_chunks?: number;
       max_text_chars?: number;
       max_items?: number;
+      full_chunk_scan?: boolean;
+      batch_size?: number;
+      batch_concurrency?: number;
       auto_chunking?: boolean;
       chunk_strategy?: 'uniform' | 'leading' | 'head_tail' | 'diverse';
       mode?: 'direct' | 'summary';
@@ -133,12 +139,85 @@ export const knowledgeBaseApi = {
       insight_scope?: 'document' | 'cross';
       insight_domain?: string;
       document_ids?: number[];
+      run_async?: boolean;
+      resume?: boolean;
     }
-  ) => api.post(`/api/v1/knowledge-bases/${kbName}/semantic/discover`, data),
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/semantic/discover`, data, { timeout: LONG_TIMEOUT }),
 
   // 语义候选发现进度
   getSemanticDiscoveryProgress: (kbName: string) =>
     api.get(`/api/v1/knowledge-bases/${kbName}/semantic/discover/status`),
+
+  // 终止语义候选发现
+  cancelSemanticDiscovery: (kbName: string) =>
+    api.post(`/api/v1/knowledge-bases/${kbName}/semantic/discover/cancel`),
+
+  // 本体草案生成
+  createOntologyDraft: (
+    kbName: string,
+    data?: {
+      run_async?: boolean;
+      max_chunks?: number;
+      max_text_chars?: number;
+      min_confidence?: number;
+      auto_approve_confidence?: number;
+      auto_approve_min_docs?: number;
+    }
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/ontology/draft`, data || {}),
+
+  // 本体草案进度
+  getOntologyDraftStatus: (kbName: string) =>
+    api.get(`/api/v1/knowledge-bases/${kbName}/ontology/draft/status`),
+
+  // 本体版本列表
+  getOntologyVersions: (kbName: string) =>
+    api.get(`/api/v1/knowledge-bases/${kbName}/ontology/versions`),
+
+  // 本体草案条目
+  getOntologyDraftItems: (
+    kbName: string,
+    params?: { version_id?: number; status_filter?: string; kind?: string }
+  ) => api.get(`/api/v1/knowledge-bases/${kbName}/ontology/draft/items`, { params }),
+
+  // 新增本体草案条目
+  createOntologyDraftItem: (
+    kbName: string,
+    data: {
+      kind: 'entity_type' | 'relation_type' | 'attribute_type' | 'structure_type';
+      name: string;
+      description?: string;
+      aliases?: string[];
+      constraints?: Record<string, any>;
+      meta?: Record<string, any>;
+      status?: 'pending' | 'approved' | 'rejected';
+    }
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/ontology/draft/items`, data),
+
+  // 批量更新本体草案条目状态
+  updateOntologyDraftItemsStatus: (
+    kbName: string,
+    data: { ids: number[]; status: 'pending' | 'approved' | 'rejected' }
+  ) => api.patch(`/api/v1/knowledge-bases/${kbName}/ontology/draft/items/status`, data),
+
+  // 更新本体草案条目
+  updateOntologyDraftItem: (
+    kbName: string,
+    itemId: number,
+    data: {
+      name?: string;
+      description?: string;
+      aliases?: string[];
+      constraints?: Record<string, any>;
+      status?: 'pending' | 'approved' | 'rejected';
+      meta?: Record<string, any>;
+    }
+  ) => api.patch(`/api/v1/knowledge-bases/${kbName}/ontology/draft/items/${itemId}`, data),
+
+  // 发布本体版本
+  publishOntology: (
+    kbName: string,
+    data?: { version_id?: number; name?: string }
+  ) => api.post(`/api/v1/knowledge-bases/${kbName}/ontology/publish`, data || {}),
 
   // 批量更新候选状态
   updateSemanticCandidateStatus: (
@@ -234,6 +313,7 @@ export const documentApi = {
     api.post(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       signal,
+      timeout: UPLOAD_TIMEOUT,
     }),
   
   // 删除文档
@@ -256,6 +336,7 @@ export const documentApi = {
     api.post(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/preview-chunks`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
       signal,
+      timeout: LONG_TIMEOUT,
     }),
 
   // 获取文档处理状态（全局路由，无需KB）

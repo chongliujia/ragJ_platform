@@ -19,6 +19,7 @@ from app.api.api_v1.endpoints import (
     api_keys,
     evaluations,
     semantic,
+    ontology,
 )
 
 api_router = APIRouter()
@@ -36,6 +37,9 @@ knowledge_bases.router.include_router(
 )
 knowledge_bases.router.include_router(
     semantic.router, prefix="/{kb_name}/semantic", tags=["Semantic Layer"]
+)
+knowledge_bases.router.include_router(
+    ontology.router, prefix="/{kb_name}/ontology", tags=["Ontology"]
 )
 api_router.include_router(
     knowledge_bases.router, prefix="/knowledge-bases", tags=["Knowledge Bases"]

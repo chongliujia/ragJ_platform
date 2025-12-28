@@ -545,7 +545,16 @@ async def force_delete_knowledge_base(
             status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found"
         )
 
-    # 删除知识库中的所有文档
+    # 删除语义候选与本体草案
+    from app.db.models.semantic_candidate import SemanticCandidate
+    from app.db.models.ontology import OntologyItem, OntologyVersion
+    db.query(OntologyItem).filter(OntologyItem.knowledge_base_id == kb_id).delete()
+    db.query(OntologyVersion).filter(OntologyVersion.knowledge_base_id == kb_id).delete()
+    db.query(SemanticCandidate).filter(SemanticCandidate.knowledge_base_id == kb_id).delete()
+
+    # 删除知识库中的所有文档与分块
+    from app.db.models.document_chunk import DocumentChunk
+    db.query(DocumentChunk).filter(DocumentChunk.knowledge_base_name == kb.name).delete()
     db.query(Document).filter(Document.knowledge_base_id == kb_id).delete()
 
     # 删除知识库

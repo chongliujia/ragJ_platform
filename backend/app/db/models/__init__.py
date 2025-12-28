@@ -27,6 +27,7 @@ from .user_model_config import UserProviderConfig, UserModelConfig
 from .agent import Agent
 from .evaluation import EvaluationDataset, EvaluationRun
 from .semantic_candidate import SemanticCandidate
+from .ontology import OntologyVersion, OntologyItem
 
 __all__ = [
     "Base",
@@ -62,4 +63,6 @@ __all__ = [
     "EvaluationDataset",
     "EvaluationRun",
     "SemanticCandidate",
+    "OntologyVersion",
+    "OntologyItem",
 ]

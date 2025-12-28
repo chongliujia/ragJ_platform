@@ -26,7 +26,7 @@ class SemanticCandidate(Base):
     knowledge_base_id = Column(Integer, ForeignKey("knowledge_bases.id"), nullable=False, index=True)
     knowledge_base_name = Column(String(255), nullable=False, index=True)
 
-    type = Column(String(20), nullable=False)  # entity | relation | attribute
+    type = Column(String(20), nullable=False)  # entity | relation | attribute | structure | insight
     name = Column(String(255), nullable=False)
     status = Column(String(20), default="pending", nullable=False)  # pending | approved | rejected
     confidence = Column(Float, default=0.5)

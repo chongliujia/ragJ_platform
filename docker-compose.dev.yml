@@ -64,8 +64,8 @@ services:
     container_name: ragj_frontend
     restart: unless-stopped
     # Avoid re-running `npm ci` on every restart (it requires network and can fail),
-    # only install deps when node_modules is missing/empty.
-    command: sh -c "if [ ! -d node_modules ] || [ -z \"$(ls -A node_modules 2>/dev/null)\" ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 5173"
+    # only install deps when node_modules is missing or vite is not present.
+    command: sh -c "if [ ! -x node_modules/.bin/vite ]; then npm ci; fi && npm run dev -- --host 0.0.0.0 --port 5173"
     volumes:
       - ./frontend:/app/frontend
       - /app/frontend/node_modules
@@ -73,6 +73,8 @@ services:
       - "5173:5173"
     environment:
       # Used in vite proxy or code if referenced (use service DNS inside Docker network)
+      - NODE_ENV=development
+      - NPM_CONFIG_PRODUCTION=false
       - VITE_BACKEND_URL=http://backend:8000
     depends_on:
       - backend

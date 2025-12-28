@@ -134,6 +134,7 @@
         "entities": "Entity candidates",
         "relations": "Relation candidates",
         "attributes": "Attribute candidates",
+        "structures": "Structure candidates",
         "insights": "Insight candidates"
       },
       "graph": {
@@ -145,18 +146,36 @@
         "zoomOut": "Zoom out",
         "reset": "Reset view",
         "controls": "Graph controls",
+        "modeLabel": "View mode",
+        "modeAll": "All candidates",
+        "modeStructure": "Structure only",
         "layoutLabel": "Layout",
         "layoutRadial": "Radial",
         "layoutGrid": "Grid",
         "showRelations": "Show relations",
+        "showStructures": "Show structures",
+        "groupStructures": "Group structures by document",
+        "collapseDocuments": "Collapse structure groups",
+        "structureDepth": "Structure depth",
+        "structureDepthHelper": "0 = unlimited, max {{max}}",
+        "nodeLimitToggle": "Limit node count",
+        "nodeLimit": "Max nodes",
+        "nodeLimitHelper": "Range {{min}} - {{max}}",
+        "labelMode": "Label mode",
+        "labelAuto": "Auto (hide on large graphs)",
+        "labelShow": "Always show",
+        "labelHide": "Hide labels",
         "showAttributes": "Show attributes",
-        "focusSelection": "Focus selection"
+        "focusSelection": "Focus selection",
+        "prunedNotice": "Showing {{visible}} / {{total}} nodes (pruned)",
+        "showAll": "Show all"
       },
       "tabs": {
         "all": "All",
         "entities": "Entities",
         "relations": "Relations",
         "attributes": "Attributes",
+        "structure": "Structure",
         "insights": "Insights"
       },
       "filters": {
@@ -173,6 +192,7 @@
         "entity": "Entity",
         "relation": "Relation",
         "attribute": "Attribute",
+        "structure": "Structure",
         "insight": "Insight"
       },
       "status": {
@@ -221,8 +241,14 @@
           "conflicts": "Conflict hints",
           "aliases": "Aliases",
           "attributes": "Attributes",
+          "structure": "Structure",
           "insight": "Insight details",
           "evidence": "Evidence"
+        },
+        "structure": {
+          "doc": "Document",
+          "level": "Level",
+          "parent": "Parent"
         },
         "insight": {
           "type": "Type",
@@ -275,12 +301,122 @@
         "fetchError": "Failed to load candidates",
         "discoveryError": "Auto discovery failed",
         "updateError": "Failed to update candidate status",
-        "mergeError": "Failed to merge candidate"
+        "mergeError": "Failed to merge candidate",
+        "ontologyError": "Ontology operation failed"
       },
       "progress": {
-        "running": "Discovering: {{current}} / {{total}} documents processed",
+        "preparing": "Preparing discovery progress...",
+        "running": "Document progress: {{current}} / {{total}}",
+        "overallChunks": "Total chunks: {{current}} / {{total}}",
+        "currentDoc": "Current document: {{doc}}",
+        "runningChunks": "Chunk progress: {{current}} / {{total}}",
+        "runningChunksDoc": "Chunk progress ({{doc}}): {{current}} / {{total}}",
+        "backgroundNote": "Runs in the background. You can leave this page and check progress later.",
+        "cancel": "Stop discovery",
+        "cancelling": "Stopping...",
         "completed": "Discovery completed ({{total}} documents)",
+        "cancelled": "Discovery stopped",
         "failed": "Discovery failed: {{message}}"
+      },
+      "ontology": {
+        "title": "Ontology Management",
+        "description": "Generate and maintain ontology constraints for structured extraction.",
+        "actions": {
+          "generate": "Generate draft",
+          "review": "Review draft",
+          "publish": "Publish ontology",
+          "refresh": "Refresh versions",
+          "addItem": "Add item",
+          "edit": "Edit",
+          "approve": "Approve",
+          "reject": "Reject"
+        },
+        "cards": {
+          "activeTitle": "Active ontology",
+          "activeEmpty": "No active version published",
+          "draftTitle": "Draft progress",
+          "draftEmpty": "No draft available",
+          "draftDefault": "Untitled draft",
+          "rulesTitle": "Hard constraints",
+          "rulesActive": "Hard constraints are enabled and will limit extraction.",
+          "rulesInactive": "Hard constraints are not enabled; extraction is more open.",
+          "structureHint": "Section titles become structure nodes; keep it lean but precise.",
+          "updatedAt": "Updated: {{time}}"
+        },
+        "status": {
+          "idle": "No draft generated",
+          "running": "Draft running: {{current}} / {{total}}",
+          "completed": "Draft generated",
+          "failed": "Draft failed: {{message}}"
+        },
+        "versionStatus": {
+          "active": "Active",
+          "draft": "Draft",
+          "archived": "Archived"
+        },
+        "source": {
+          "auto": "Auto",
+          "manual": "Manual",
+          "import": "Import",
+          "unknown": "Unknown"
+        },
+        "versions": {
+          "title": "Version history",
+          "empty": "No ontology versions yet",
+          "columns": {
+            "name": "Name",
+            "status": "Status",
+            "source": "Source",
+            "items": "Items",
+            "updated": "Updated",
+            "actions": "Actions"
+          },
+          "stats": {
+            "total": "Total",
+            "approved": "Approved",
+            "pending": "Pending"
+          }
+        },
+        "draftSummary": {
+          "total": "Total items",
+          "approved": "Approved",
+          "pending": "Pending",
+          "rejected": "Rejected",
+          "entities": "Entity types",
+          "relations": "Relation types",
+          "attributes": "Attribute types",
+          "structures": "Structure types"
+        },
+        "dialog": {
+          "title": "Ontology Draft Review",
+          "kindLabel": "Type filter",
+          "search": "Search name/description/alias",
+          "empty": "No ontology draft items.",
+          "aliases": "Aliases",
+          "constraints": "Constraints",
+          "evidence": "Evidence",
+          "meta": "Metadata",
+          "details": "Details",
+          "addTitle": "Add draft item",
+          "editTitle": "Edit draft item",
+          "nameLabel": "Name",
+          "descriptionLabel": "Description",
+          "aliasesLabel": "Aliases (comma-separated)",
+          "aliasesHint": "Separate multiple aliases with commas or semicolons",
+          "constraintsLabel": "Constraints (JSON)",
+          "constraintsHint": "Enter a JSON object, e.g. {\"required\": true}",
+          "statusLabel": "Status",
+          "invalidJson": "Constraints must be valid JSON object",
+          "nameRequired": "Name is required",
+          "save": "Save"
+        },
+        "publishDialog": {
+          "title": "Publish ontology",
+          "description": "Publishing enables hard constraints for downstream extraction and filtering.",
+          "nameLabel": "Version name (optional)",
+          "confirm": "Publish",
+          "cancel": "Cancel"
+        }
       },
       "discoveryDialog": {
         "title": "Auto discovery",
@@ -292,6 +428,7 @@
         "discoveryModeFacts": "Fact candidates",
         "discoveryModeInsights": "Insight mode",
         "insightScope": "Insight scope",
+        "insightScopePlaceholder": "Select insight scope",
         "insightScopeDocument": "Single-document insights",
         "insightScopeCross": "Cross-document insights",
         "insightDomain": "Insight domain",
@@ -308,6 +445,7 @@
         "includeRelations": "Include relations",
         "limitsTitle": "Extraction limits",
         "autoChunking": "Auto scale by document length",
+        "fullChunkScan": "Full chunk scan (slower)",
         "chunkStrategy": "Sampling strategy",
         "chunkStrategyUniform": "Uniform sampling",
         "chunkStrategyLeading": "Leading chunks first",
@@ -316,11 +454,15 @@
         "documentLimit": "Documents per discovery",
         "documentLimitHelper": "1-50, default 6",
         "maxChunks": "Chunks per document",
-        "maxChunksHelper": "1-50, default 3",
+        "maxChunksHelper": "1-50, default 3 (ignored when full scan is on)",
         "maxTextChars": "Max chars per chunk",
         "maxTextCharsHelper": "200-4000, default 1800",
         "maxItems": "Max items per type",
         "maxItemsHelper": "1-30, default 12",
+        "batchSize": "Batch size",
+        "batchSizeHelper": "Chunks per request (1-6). Larger is faster",
+        "batchConcurrency": "Concurrency",
+        "batchConcurrencyHelper": "Parallel requests (1-8). Watch rate limits",
         "strategyTitle": "Extraction strategy",
         "mode": "Extraction mode",
         "modeDirect": "Direct extraction",
@@ -1403,7 +1545,14 @@
       "superAdmin": "Super Admin",
       "tenantAdmin": "Tenant Admin",
       "member": "Member"
-    }
+    },
+    "discoveryProgressShort": "Discovery {{percent}}% - {{kb}}",
+    "discoveryProgressPreparing": "Discovery - {{kb}}",
+    "discoveryProgressDocs": "Documents {{current}} / {{total}}",
+    "discoveryProgressChunks": "Chunks {{current}} / {{total}}",
+    "discoveryProgressDocLabel": "Current document: {{doc}}",
+    "discoveryCancel": "Stop discovery",
+    "discoveryCancelling": "Stopping..."
   },
   "team": {
     "errors": {
