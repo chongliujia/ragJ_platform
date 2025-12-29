@@ -58,9 +58,8 @@ import {
   ZoomOut as ZoomOutIcon,
 } from '@mui/icons-material';
 import { alpha, useTheme } from '@mui/material/styles';
-import ForceGraph3D from 'react-force-graph-3d';
-import type { ForceGraphMethods } from 'react-force-graph-3d';
-import SpriteText from 'three-spritetext';
+import ForceGraph2D from 'react-force-graph-2d';
+import type { ForceGraphMethods } from 'react-force-graph-2d';
 import { documentApi, knowledgeBaseApi } from '../services/api';
 import { authApi } from '../services/authApi';
 import { SEMANTIC_DISCOVERY_TRACKER_KEY } from '../constants/storage';
@@ -162,6 +161,7 @@ type GraphNodeKind = 'entity' | 'attribute' | 'structure' | 'document';
 type GraphEdgeKind = 'relation' | 'attribute';
 type GraphMode = 'all' | 'structure';
 type GraphLabelMode = 'auto' | 'show' | 'hide';
+type GraphLayoutMode = 'radial' | 'grid' | 'label';
 
 interface GraphNode {
   id: string;
@@ -184,18 +184,21 @@ interface GraphEdge {
   relationKind?: 'structure';
 }
 
-type WebGLGraphProps = {
+type Graph2DProps = {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  layoutMode: 'radial' | 'grid';
+  layoutMode: GraphLayoutMode;
   mode: GraphMode;
   groupByDoc: boolean;
-  labelEnabled: boolean;
+  nodeLabelEnabled: boolean;
+  edgeLabelEnabled: boolean;
   interactive?: boolean;
   selectedNodeId?: string | null;
   selectedEdgeId?: string | null;
   focusSelection?: boolean;
   onReady?: (graph: ForceGraphMethods) => void;
+  highlightTerms: string[];
+  candidateMap?: Map<string, SemanticCandidate>;
 };
 
 const EXTRACTION_MAX_CHUNKS_LIMIT = 50;
@@ -218,6 +221,10 @@ const EXTRACTION_MAX_SUMMARY_CHARS = 4000;
 const DOCUMENT_SEARCH_PAGE_SIZE = 30;
 const GRAPH_DEFAULT_STRUCTURE_LEVEL = 2;
 const GRAPH_DEFAULT_NODE_LIMIT = 1200;
+const GRAPH_SURFACE_COLOR = '#0B0F14';
+const GRAPH_SURFACE_GRADIENT =
+  'radial-gradient(120% 120% at 12% 6%, rgba(56, 189, 248, 0.12), rgba(11, 15, 20, 0) 60%), radial-gradient(120% 120% at 86% 18%, rgba(34, 211, 238, 0.1), rgba(11, 15, 20, 0) 55%)';
+const GRAPH_SURFACE_TEXT_MUTED = 'rgba(226, 232, 240, 0.72)';
 const GRAPH_MIN_NODE_LIMIT = 200;
 const GRAPH_MAX_NODE_LIMIT = 10000;
 const GRAPH_LABEL_AUTO_THRESHOLD = 800;
@@ -315,23 +322,87 @@ type DocumentOption = {
   status?: string;
 };
 
-const WebGLGraph: React.FC<WebGLGraphProps> = ({
+const Graph2D: React.FC<Graph2DProps> = ({
   nodes,
   edges,
   layoutMode,
   mode,
   groupByDoc,
-  labelEnabled,
+  nodeLabelEnabled,
+  edgeLabelEnabled,
   interactive = true,
   selectedNodeId,
   selectedEdgeId,
   focusSelection,
   onReady,
+  highlightTerms,
+  candidateMap,
 }) => {
   const theme = useTheme();
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<ForceGraphMethods | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [hoveredNode, setHoveredNode] = useState<GraphRenderNode | null>(null);
+  const [hoveredEdge, setHoveredEdge] = useState<GraphRenderLink | null>(null);
+  const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null);
+  type GraphRenderNode = {
+    id: string;
+    label: string;
+    kind: GraphNodeKind;
+    status: CandidateStatus;
+    candidateId?: string;
+    x?: number;
+    y?: number;
+    size: number;
+    color: string;
+    strokeColor: string;
+    glowColor: string;
+    highlighted: boolean;
+    searchMatched: boolean;
+  };
+  type GraphRenderLink = {
+    id: string;
+    source: string | { id: string; x?: number; y?: number };
+    target: string | { id: string; x?: number; y?: number };
+    label: string;
+    color: string;
+    highlighted: boolean;
+    kind: GraphEdgeKind;
+    status: CandidateStatus;
+    candidateId?: string;
+    searchMatched: boolean;
+  };
+
+  const graphNodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+  const formatConfidence = (value?: number) =>
+    Number.isFinite(value) ? `${Math.round((value || 0) * 100)}%` : '-';
+  const getKindLabel = (kind: GraphNodeKind) => {
+    if (kind === 'document') {
+      return t('knowledgeBase.semanticLayer.details.structure.doc');
+    }
+    if (kind === 'entity') {
+      return t('knowledgeBase.semanticLayer.types.entity');
+    }
+    if (kind === 'structure') {
+      return t('knowledgeBase.semanticLayer.types.structure');
+    }
+    if (kind === 'attribute') {
+      return t('knowledgeBase.semanticLayer.types.attribute');
+    }
+    return kind;
+  };
+  const getEdgeLabel = (kind: GraphEdgeKind) => {
+    if (kind === 'relation') {
+      return t('knowledgeBase.semanticLayer.types.relation');
+    }
+    if (kind === 'attribute') {
+      return t('knowledgeBase.semanticLayer.types.attribute');
+    }
+    return kind;
+  };
+  const getStatusLabel = (status: CandidateStatus) =>
+    t(`knowledgeBase.semanticLayer.status.${status}`);
 
   const layoutPositions = useMemo(() => {
     const positions = new Map<string, { x: number; y: number }>();
@@ -408,6 +479,33 @@ const WebGLGraph: React.FC<WebGLGraphProps> = ({
       return positions;
     }
 
+    if (layoutMode === 'label') {
+      const kindOrder: GraphNodeKind[] = ['document', 'structure', 'entity', 'attribute'];
+      const groupSpacing = 320;
+      const cellSpacing = 60;
+      const maxColumns = 6;
+      kindOrder.forEach((kind, groupIndex) => {
+        const list = nodes.filter((node) => node.kind === kind).sort((a, b) => a.label.localeCompare(b.label));
+        if (list.length === 0) return;
+        const columns = Math.min(maxColumns, Math.ceil(Math.sqrt(list.length)));
+        const rows = Math.ceil(list.length / columns);
+        const groupCenterX = groupIndex * groupSpacing;
+        const groupCenterY = 0;
+        list.forEach((node, index) => {
+          const row = Math.floor(index / columns);
+          const col = index % columns;
+          const xOffset = (col - (columns - 1) / 2) * cellSpacing;
+          const yOffset = (row - (rows - 1) / 2) * cellSpacing;
+          positions.set(node.id, {
+            x: groupCenterX + xOffset,
+            y: groupCenterY + yOffset,
+          });
+        });
+      });
+      centerPositions();
+      return positions;
+    }
+
     if (mode === 'structure' && groupByDoc) {
       const groupMap = new Map<string, GraphNode[]>();
       const docNodes = nodes.filter((node) => node.kind === 'document');
@@ -480,19 +578,40 @@ const WebGLGraph: React.FC<WebGLGraphProps> = ({
   }, [groupByDoc, layoutMode, mode, nodes]);
 
   const graphPayload = useMemo(() => {
+    const normalizeValue = (value: string) => value.trim().toLowerCase();
+    const terms = highlightTerms.map(normalizeValue).filter(Boolean);
+    const matchesTerm = (value: string) =>
+      terms.length > 0 && terms.some((term) => value.includes(term));
     const statusColors: Record<CandidateStatus, string> = {
       approved: theme.palette.success.main,
       pending: theme.palette.warning.main,
       rejected: theme.palette.error.main,
     };
     const kindBase: Record<GraphNodeKind, string> = {
-      document: theme.palette.secondary.main,
-      structure: theme.palette.info.main,
-      entity: theme.palette.primary.main,
-      attribute: theme.palette.text.secondary,
+      document: '#5CC8FF',
+      structure: '#F7B84B',
+      entity: '#42D39E',
+      attribute: '#F472B6',
+    };
+    const edgePalette = {
+      relation: {
+        base: 'rgba(226, 232, 240, 0.45)',
+        muted: 'rgba(226, 232, 240, 0.16)',
+      },
+      attribute: {
+        base: 'rgba(125, 211, 252, 0.45)',
+        muted: 'rgba(125, 211, 252, 0.18)',
+      },
     };
     const highlightNodes = new Set<string>();
     const highlightEdges = new Set<string>();
+    const searchMatchedNodes = new Set<string>();
+    nodes.forEach((node) => {
+      const label = normalizeValue(node.label || '');
+      if (matchesTerm(label)) {
+        searchMatchedNodes.add(node.id);
+      }
+    });
     if (selectedEdgeId) {
       const edge = edges.find((item) => item.id === selectedEdgeId);
       if (edge) {
@@ -518,48 +637,58 @@ const WebGLGraph: React.FC<WebGLGraphProps> = ({
       entity: 9,
       attribute: 7,
     };
-    const depthIndex: Record<GraphNodeKind, number> = {
-      document: -2,
-      structure: -1,
-      entity: 0,
-      attribute: 1,
-    };
-    const zSpacing = 140;
-    const structureZSpacing = 40;
 
-    const graphNodes = nodes.map((node) => {
-      const baseColor = node.kind === 'document' ? kindBase.document : statusColors[node.status];
-      const color =
-        hasHighlight && !highlightNodes.has(node.id) && !focusSelection
-          ? alpha(baseColor, 0.2)
-          : baseColor;
-      const baseDepth = depthIndex[node.kind] ?? 0;
-      const z = baseDepth * zSpacing +
-        (node.kind === 'structure' ? (node.structureLevel ?? 1) * structureZSpacing : 0);
+    const graphNodes: GraphRenderNode[] = nodes.map((node) => {
+      const isHighlighted = highlightNodes.has(node.id);
+      const isSearchMatched = searchMatchedNodes.has(node.id);
+      const isDimmed = hasHighlight && !isHighlighted && !focusSelection && !isSearchMatched;
+      const baseFill = node.kind === 'document' ? kindBase.document : statusColors[node.status];
+      const baseStroke = kindBase[node.kind];
+      const color = isDimmed ? alpha(baseFill, 0.25) : baseFill;
+      const strokeColor = isDimmed ? alpha(baseStroke, 0.4) : baseStroke;
+      const glowColor = node.kind === 'document'
+        ? alpha(kindBase.document, isHighlighted ? 0.7 : 0.45)
+        : alpha(statusColors[node.status], isHighlighted ? 0.7 : 0.45);
       return {
         id: node.id,
         label: node.label,
         kind: node.kind,
+        status: node.status,
+        candidateId: node.candidateId,
         x: layoutPositions.get(node.id)?.x ?? 0,
         y: layoutPositions.get(node.id)?.y ?? 0,
-        z,
         size: nodeSize[node.kind] || 6,
         color,
+        strokeColor,
+        glowColor,
+        highlighted: isHighlighted,
+        searchMatched: isSearchMatched,
       };
     });
 
-    const graphLinks = edges.map((edge) => {
-      const baseColor = theme.palette.common.black;
-      const color =
-        hasHighlight && !highlightEdges.has(edge.id) && !focusSelection
-          ? alpha(baseColor, 0.2)
-          : baseColor;
+    const graphLinks: GraphRenderLink[] = edges.map((edge) => {
+      const isHighlighted = highlightEdges.has(edge.id);
+      const sourceLabel = graphNodeMap.get(edge.from)?.label || '';
+      const targetLabel = graphNodeMap.get(edge.to)?.label || '';
+      const isSearchMatched = matchesTerm(normalizeValue(edge.label || '')) ||
+        matchesTerm(normalizeValue(sourceLabel)) ||
+        matchesTerm(normalizeValue(targetLabel)) ||
+        searchMatchedNodes.has(edge.from) ||
+        searchMatchedNodes.has(edge.to);
+      const isDimmed = hasHighlight && !isHighlighted && !focusSelection && !isSearchMatched;
+      const palette = edgePalette[edge.kind];
+      const color = isDimmed ? palette.muted : palette.base;
       return {
         id: edge.id,
         source: edge.from,
         target: edge.to,
         label: edge.label || '',
         color,
+        highlighted: isHighlighted,
+        kind: edge.kind,
+        status: edge.status,
+        candidateId: edge.candidateId,
+        searchMatched: isSearchMatched,
       };
     });
 
@@ -567,6 +696,8 @@ const WebGLGraph: React.FC<WebGLGraphProps> = ({
   }, [
     edges,
     focusSelection,
+    graphNodeMap,
+    highlightTerms,
     layoutPositions,
     mode,
     nodes,
@@ -575,21 +706,125 @@ const WebGLGraph: React.FC<WebGLGraphProps> = ({
     theme,
   ]);
 
-  const nodeThreeObject = useCallback(
-    (node: { label?: string; size?: number }) => {
-      if (!labelEnabled) return null;
-      const sprite = new SpriteText(node.label || '');
-      sprite.color = '#111';
-      sprite.textHeight = 5;
-      sprite.backgroundColor = 'rgba(255,255,255,0)';
-      sprite.borderWidth = 0;
-      sprite.material.depthWrite = false;
-      sprite.position.x = (node.size ?? 6) * 1.6;
-      sprite.position.y = (node.size ?? 6) * 0.2;
-      return sprite;
+  const nodeCanvasObject = useCallback(
+    (node: GraphRenderNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      const x = node.x ?? 0;
+      const y = node.y ?? 0;
+      const radius = node.size + (node.highlighted ? 3 : 0);
+      ctx.save();
+      ctx.beginPath();
+      ctx.fillStyle = node.color;
+      ctx.shadowColor = node.glowColor;
+      ctx.shadowBlur = (node.highlighted ? 18 : 12) / globalScale;
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = (node.highlighted ? 2.6 : 1.4) / globalScale;
+      ctx.strokeStyle = node.strokeColor;
+      ctx.stroke();
+      ctx.restore();
+
+      if (node.searchMatched) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.lineWidth = 2.2 / globalScale;
+        ctx.strokeStyle = '#FDE68A';
+        ctx.shadowColor = 'rgba(250, 204, 21, 0.7)';
+        ctx.shadowBlur = 10 / globalScale;
+        ctx.arc(x, y, radius + 3, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      if (!nodeLabelEnabled) return;
+      const label = node.label;
+      if (!label) return;
+      ctx.save();
+      const fontSize = 12 / globalScale;
+      const fontFamily = theme.typography.fontFamily || 'sans-serif';
+      ctx.font = `${fontSize}px ${fontFamily}`;
+      const textWidth = ctx.measureText(label).width;
+      const paddingX = 4 / globalScale;
+      const paddingY = 2 / globalScale;
+      const labelX = x + radius + 6 / globalScale;
+      const labelY = y;
+      ctx.fillStyle = 'rgba(11, 15, 20, 0.78)';
+      ctx.fillRect(
+        labelX - paddingX,
+        labelY - fontSize / 2 - paddingY,
+        textWidth + paddingX * 2,
+        fontSize + paddingY * 2
+      );
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#E2E8F0';
+      ctx.fillText(label, labelX, labelY);
+      ctx.restore();
     },
-    [labelEnabled]
+    [nodeLabelEnabled, theme.typography.fontFamily]
   );
+
+  const linkCanvasObject = useCallback(
+    (link: GraphRenderLink, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      if (!edgeLabelEnabled) return;
+      const label = link.label;
+      if (!label) return;
+      const source = link.source as unknown as { x?: number; y?: number };
+      const target = link.target as unknown as { x?: number; y?: number };
+      if (!source || !target || typeof source.x !== 'number' || typeof source.y !== 'number') {
+        return;
+      }
+      if (typeof target.x !== 'number' || typeof target.y !== 'number') return;
+      const x = (source.x + target.x) / 2;
+      const y = (source.y + target.y) / 2;
+      const angle = Math.atan2(target.y - source.y, target.x - source.x);
+      const textAngle = angle > Math.PI / 2 || angle < -Math.PI / 2 ? angle + Math.PI : angle;
+      const fontSize = 10 / globalScale;
+      const fontFamily = theme.typography.fontFamily || 'sans-serif';
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(textAngle);
+      ctx.font = `${fontSize}px ${fontFamily}`;
+      const textWidth = ctx.measureText(label).width;
+      const paddingX = 4 / globalScale;
+      const paddingY = 2 / globalScale;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.fillRect(
+        -textWidth / 2 - paddingX,
+        -fontSize / 2 - paddingY,
+        textWidth + paddingX * 2,
+        fontSize + paddingY * 2
+      );
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = link.searchMatched ? '#FDE68A' : '#E2E8F0';
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    },
+    [edgeLabelEnabled, theme.typography.fontFamily]
+  );
+
+  const updateHoverPosition = useCallback((event?: MouseEvent) => {
+    if (!event || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    setHoverPosition({
+      x: Math.max(12, Math.min(rect.width - 12, event.clientX - rect.left + 12)),
+      y: Math.max(12, Math.min(rect.height - 12, event.clientY - rect.top + 12)),
+    });
+  }, []);
+
+  const handleMouseMove = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!hoveredNode && !hoveredEdge) return;
+      updateHoverPosition(event.nativeEvent);
+    },
+    [hoveredEdge, hoveredNode, updateHoverPosition]
+  );
+
+  const clearHover = useCallback(() => {
+    setHoveredNode(null);
+    setHoveredEdge(null);
+    setHoverPosition(null);
+  }, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -637,39 +872,143 @@ const WebGLGraph: React.FC<WebGLGraphProps> = ({
     graph.d3ReheatSimulation?.();
   }, [graphPayload]);
 
+  const hoveredCandidate = useMemo(() => {
+    if (!candidateMap) return undefined;
+    if (hoveredNode?.candidateId) return candidateMap.get(hoveredNode.candidateId);
+    if (hoveredEdge?.candidateId) return candidateMap.get(hoveredEdge.candidateId);
+    return undefined;
+  }, [candidateMap, hoveredEdge?.candidateId, hoveredNode?.candidateId]);
+
+  const resolveLinkNodeId = (value: GraphRenderLink['source']) =>
+    typeof value === 'string' ? value : value.id;
+  const hoverSourceLabel = hoveredEdge
+    ? graphNodeMap.get(resolveLinkNodeId(hoveredEdge.source))?.label
+    : undefined;
+  const hoverTargetLabel = hoveredEdge
+    ? graphNodeMap.get(resolveLinkNodeId(hoveredEdge.target))?.label
+    : undefined;
+
   return (
     <Box
       ref={containerRef}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={clearHover}
       sx={{
+        position: 'relative',
         width: '100%',
         height: '100%',
         pointerEvents: interactive ? 'auto' : 'none',
-        bgcolor: '#fff',
+        bgcolor: GRAPH_SURFACE_COLOR,
+        backgroundImage: GRAPH_SURFACE_GRADIENT,
+        backgroundRepeat: 'no-repeat',
+        backgroundSize: 'cover',
+        borderRadius: 1,
+        overflow: 'hidden',
       }}
     >
       {dimensions.width > 0 && dimensions.height > 0 && (
-        <ForceGraph3D
+        <ForceGraph2D
           ref={graphRef}
           graphData={graphPayload}
           width={dimensions.width}
           height={dimensions.height}
-          backgroundColor="#ffffff"
-          showNavInfo={false}
+          backgroundColor="rgba(0, 0, 0, 0)"
           forceEngine="ngraph"
           cooldownTicks={180}
           nodeRelSize={4}
           nodeVal="size"
-          nodeColor={(node) => (node as { color: string }).color}
-          linkColor={(link) => (link as { color: string }).color}
-          linkOpacity={0.85}
-          linkWidth={1}
-          nodeLabel={(node) => (node as { label?: string }).label || ''}
-          linkLabel={(link) => (link as { label?: string }).label || ''}
+          nodeColor={(node) => (node as GraphRenderNode).color}
+          linkColor={(link) => (link as GraphRenderLink).color}
+          linkOpacity={1}
+          linkWidth={(link) => {
+            const edge = link as GraphRenderLink;
+            const base = edge.kind === 'attribute' ? 0.7 : 1.1;
+            if (edge.highlighted) return base + 1.6;
+            if (edge.searchMatched) return base + 0.9;
+            return base;
+          }}
+          linkCurvature={(link) => ((link as GraphRenderLink).kind === 'relation' ? 0.12 : 0.04)}
+          linkLineDash={(link) => ((link as GraphRenderLink).kind === 'attribute' ? [4, 4] : null)}
+          linkDirectionalArrowLength={(link) => ((link as GraphRenderLink).kind === 'relation' ? 8 : 5)}
+          linkDirectionalArrowRelPos={1}
+          linkDirectionalArrowColor={(link) => (link as GraphRenderLink).color}
+          nodeLabel={(node) => (nodeLabelEnabled ? (node as GraphRenderNode).label || '' : '')}
+          linkLabel={(link) => (edgeLabelEnabled ? (link as GraphRenderLink).label || '' : '')}
           enableNodeDrag={interactive}
-          enableNavigationControls={interactive}
-          nodeThreeObject={labelEnabled ? nodeThreeObject : undefined}
-          nodeThreeObjectExtend={labelEnabled}
+          onNodeHover={(node, event) => {
+            if (!interactive) return;
+            if (node) {
+              setHoveredNode(node as GraphRenderNode);
+              setHoveredEdge(null);
+              updateHoverPosition(event as MouseEvent);
+            } else {
+              setHoveredNode(null);
+            }
+          }}
+          onLinkHover={(link, event) => {
+            if (!interactive) return;
+            if (link) {
+              setHoveredEdge(link as GraphRenderLink);
+              setHoveredNode(null);
+              updateHoverPosition(event as MouseEvent);
+            } else {
+              setHoveredEdge(null);
+            }
+          }}
+          linkCanvasObject={linkCanvasObject}
+          linkCanvasObjectMode="after"
+          nodeCanvasObject={nodeCanvasObject}
+          nodeCanvasObjectMode="replace"
         />
+      )}
+      {hoverPosition && (hoveredNode || hoveredEdge) && (
+        <Paper
+          elevation={4}
+          sx={{
+            position: 'absolute',
+            left: hoverPosition.x,
+            top: hoverPosition.y,
+            transform: 'translate(8px, 8px)',
+            p: 1.25,
+            borderRadius: 1.5,
+            maxWidth: 280,
+            bgcolor: 'rgba(15, 23, 42, 0.92)',
+            color: '#E2E8F0',
+            border: '1px solid rgba(148, 163, 184, 0.25)',
+            pointerEvents: 'none',
+          }}
+        >
+          <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#F8FAFC' }}>
+            {hoveredNode?.label || hoveredEdge?.label || (hoveredEdge ? getEdgeLabel(hoveredEdge.kind) : '')}
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'rgba(148, 163, 184, 0.9)' }}>
+            {hoveredNode
+              ? `${getKindLabel(hoveredNode.kind)} · ${getStatusLabel(hoveredNode.status)}`
+              : hoveredEdge
+                ? `${getEdgeLabel(hoveredEdge.kind)} · ${getStatusLabel(hoveredEdge.status)}`
+                : ''}
+          </Typography>
+          <Stack spacing={0.4} sx={{ mt: 0.75 }}>
+            {hoveredCandidate && (
+              <Typography variant="caption">
+                {t('knowledgeBase.semanticLayer.details.meta.confidence')}: {formatConfidence(hoveredCandidate.confidence)}
+              </Typography>
+            )}
+            {hoveredCandidate?.evidence?.length ? (
+              <Typography variant="caption">
+                {t('knowledgeBase.semanticLayer.details.sections.evidence')}: {hoveredCandidate.evidence.length}
+              </Typography>
+            ) : null}
+            {hoveredEdge && (
+              <Typography variant="caption">
+                {hoveredEdge.kind === 'relation'
+                  ? t('knowledgeBase.semanticLayer.details.sections.relation')
+                  : t('knowledgeBase.semanticLayer.details.sections.attributes')
+                }: {hoverSourceLabel || '-'} → {hoverTargetLabel || '-'}
+              </Typography>
+            )}
+          </Stack>
+        </Paper>
       )}
     </Box>
   );
@@ -680,8 +1019,8 @@ const STATUS_PRIORITY: Record<CandidateStatus, number> = {
   pending: 2,
   rejected: 1,
 };
-const GRAPH_MIN_DISTANCE = 120;
-const GRAPH_MAX_DISTANCE = 8000;
+const GRAPH_MIN_ZOOM = 0.08;
+const GRAPH_MAX_ZOOM = 8;
 const normalize = (value: string) => value.trim().toLowerCase();
 const extractStructureLabel = (value: string) => {
   const parts = value.split(' / ');
@@ -769,7 +1108,7 @@ const KnowledgeBaseSemantic: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [graphDialogOpen, setGraphDialogOpen] = useState(false);
-  const [graphLayoutMode, setGraphLayoutMode] = useState<'radial' | 'grid'>('radial');
+  const [graphLayoutMode, setGraphLayoutMode] = useState<GraphLayoutMode>('label');
   const [graphShowRelations, setGraphShowRelations] = useState(true);
   const [graphShowAttributes, setGraphShowAttributes] = useState(true);
   const [graphShowStructures, setGraphShowStructures] = useState(true);
@@ -780,6 +1119,8 @@ const KnowledgeBaseSemantic: React.FC = () => {
   const [graphLimitEnabled, setGraphLimitEnabled] = useState(true);
   const [graphMaxNodes, setGraphMaxNodes] = useState(String(GRAPH_DEFAULT_NODE_LIMIT));
   const [graphLabelMode, setGraphLabelMode] = useState<GraphLabelMode>('show');
+  const [graphShowNodeLabels, setGraphShowNodeLabels] = useState(true);
+  const [graphShowEdgeLabels, setGraphShowEdgeLabels] = useState(true);
   const [graphGroupStructuresByDoc, setGraphGroupStructuresByDoc] = useState(true);
   const [graphCollapseDocuments, setGraphCollapseDocuments] = useState(false);
   const [graphFocusSelection, setGraphFocusSelection] = useState(false);
@@ -1166,6 +1507,11 @@ const KnowledgeBaseSemantic: React.FC = () => {
     }
     return Array.from(terms).filter(Boolean);
   }, [search, selectedCandidate]);
+
+  const candidateMap = useMemo(
+    () => new Map(filteredCandidates.map((candidate) => [candidate.id, candidate])),
+    [filteredCandidates]
+  );
 
   const selectedVisibleIds = useMemo(
     () => selectedIds.filter((id) => filteredCandidates.some((candidate) => candidate.id === id)),
@@ -2190,25 +2536,11 @@ const KnowledgeBaseSemantic: React.FC = () => {
   const zoomGraph = useCallback((factor: number) => {
     const graph = graphDialogRef.current;
     if (!graph) return;
-    const camera = graph.camera();
-    const controls = graph.controls();
-    if (!camera) return;
-    const target = controls?.target || { x: 0, y: 0, z: 0 };
-    const dx = camera.position.x - target.x;
-    const dy = camera.position.y - target.y;
-    const dz = camera.position.z - target.z;
-    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-    const nextDistance = clamp(distance / factor, GRAPH_MIN_DISTANCE, GRAPH_MAX_DISTANCE);
-    const ratio = nextDistance / distance;
-    graph.cameraPosition(
-      {
-        x: target.x + dx * ratio,
-        y: target.y + dy * ratio,
-        z: target.z + dz * ratio,
-      },
-      target,
-      200
-    );
+    if (typeof graph.zoom !== 'function') return;
+    const currentZoom = graph.zoom();
+    if (typeof currentZoom !== 'number') return;
+    const nextZoom = clamp(currentZoom * factor, GRAPH_MIN_ZOOM, GRAPH_MAX_ZOOM);
+    graph.zoom(nextZoom, 200);
   }, []);
   const showAllGraph = useCallback(() => {
     setGraphLimitEnabled(false);
@@ -2741,11 +3073,18 @@ const KnowledgeBaseSemantic: React.FC = () => {
     };
   }, [graphData.edges.length, graphData.nodes.length, graphView.edges.length, graphView.nodes.length]);
 
-  const graphLabelEnabled = useMemo(() => {
+  const graphNodeLabelEnabled = useMemo(() => {
+    if (!graphShowNodeLabels) return false;
+    if (graphLabelMode === 'hide') return false;
+    return true;
+  }, [graphLabelMode, graphShowNodeLabels]);
+
+  const graphEdgeLabelEnabled = useMemo(() => {
+    if (!graphShowEdgeLabels) return false;
     if (graphLabelMode === 'show') return true;
     if (graphLabelMode === 'hide') return false;
     return graphView.nodes.length <= GRAPH_LABEL_AUTO_THRESHOLD;
-  }, [graphLabelMode, graphView.nodes.length]);
+  }, [graphLabelMode, graphShowEdgeLabels, graphView.nodes.length]);
 
   const handlePreviewGraph = useCallback((graph: ForceGraphMethods) => {
     graphPreviewRef.current = graph;
@@ -3289,13 +3628,16 @@ const KnowledgeBaseSemantic: React.FC = () => {
             }}
           >
             <Box sx={{ width: '100%', height: { xs: 240, md: 340 } }}>
-              <WebGLGraph
+              <Graph2D
                 nodes={graphView.nodes}
                 edges={graphView.edges}
                 layoutMode={graphLayoutMode}
                 mode={graphMode}
                 groupByDoc={graphGroupStructuresByDoc}
-                labelEnabled={graphLabelEnabled}
+                nodeLabelEnabled={graphNodeLabelEnabled}
+                edgeLabelEnabled={graphEdgeLabelEnabled}
+                highlightTerms={highlightTerms}
+                candidateMap={candidateMap}
                 interactive
                 selectedNodeId={selectedGraphNodeId}
                 selectedEdgeId={selectedGraphEdgeId}
@@ -4804,13 +5146,14 @@ const KnowledgeBaseSemantic: React.FC = () => {
                     value={graphLayoutMode}
                     label={t('knowledgeBase.semanticLayer.graph.layoutLabel')}
                     onChange={(event) => {
-                      setGraphLayoutMode(event.target.value as 'radial' | 'grid');
+                      setGraphLayoutMode(event.target.value as GraphLayoutMode);
                       resetGraphView();
                     }}
-                  >
-                    <MenuItem value="radial">{t('knowledgeBase.semanticLayer.graph.layoutRadial')}</MenuItem>
-                    <MenuItem value="grid">{t('knowledgeBase.semanticLayer.graph.layoutGrid')}</MenuItem>
-                  </Select>
+                    >
+                      <MenuItem value="radial">{t('knowledgeBase.semanticLayer.graph.layoutRadial')}</MenuItem>
+                      <MenuItem value="label">{t('knowledgeBase.semanticLayer.graph.layoutLabelGroup')}</MenuItem>
+                      <MenuItem value="grid">{t('knowledgeBase.semanticLayer.graph.layoutGrid')}</MenuItem>
+                    </Select>
                 </FormControl>
                 <FormControlLabel
                   control={
@@ -4908,6 +5251,26 @@ const KnowledgeBaseSemantic: React.FC = () => {
                   control={
                     <Switch
                       size="small"
+                      checked={graphShowNodeLabels}
+                      onChange={(event) => setGraphShowNodeLabels(event.target.checked)}
+                    />
+                  }
+                  label={t('knowledgeBase.semanticLayer.graph.showNodeLabels')}
+                />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size="small"
+                      checked={graphShowEdgeLabels}
+                      onChange={(event) => setGraphShowEdgeLabels(event.target.checked)}
+                    />
+                  }
+                  label={t('knowledgeBase.semanticLayer.graph.showEdgeLabels')}
+                />
+                <FormControlLabel
+                  control={
+                    <Switch
+                      size="small"
                       checked={graphShowAttributes}
                       onChange={(event) => setGraphShowAttributes(event.target.checked)}
                     />
@@ -4991,7 +5354,10 @@ const KnowledgeBaseSemantic: React.FC = () => {
                 width: '100%',
                 height: '100%',
                 minHeight: '70vh',
-                bgcolor: 'background.default',
+                bgcolor: GRAPH_SURFACE_COLOR,
+                backgroundImage: GRAPH_SURFACE_GRADIENT,
+                backgroundRepeat: 'no-repeat',
+                backgroundSize: 'cover',
               }}
             >
               {graphView.nodes.length === 0 ? (
@@ -5001,7 +5367,7 @@ const KnowledgeBaseSemantic: React.FC = () => {
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: 'text.secondary',
+                    color: GRAPH_SURFACE_TEXT_MUTED,
                   }}
                 >
                   <Stack spacing={1} alignItems="center">
@@ -5016,13 +5382,16 @@ const KnowledgeBaseSemantic: React.FC = () => {
                   </Stack>
                 </Box>
               ) : (
-                <WebGLGraph
+                <Graph2D
                   nodes={graphView.nodes}
                   edges={graphView.edges}
                   layoutMode={graphLayoutMode}
                   mode={graphMode}
                   groupByDoc={graphGroupStructuresByDoc}
-                  labelEnabled={graphLabelEnabled}
+                  nodeLabelEnabled={graphNodeLabelEnabled}
+                  edgeLabelEnabled={graphEdgeLabelEnabled}
+                  highlightTerms={highlightTerms}
+                  candidateMap={candidateMap}
                   interactive
                   selectedNodeId={selectedGraphNodeId}
                   selectedEdgeId={selectedGraphEdgeId}

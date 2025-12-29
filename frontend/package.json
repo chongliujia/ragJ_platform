@@ -23,15 +23,13 @@
     "i18next-browser-languagedetector": "^8.2.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-force-graph-3d": "^1.29.0",
+    "react-force-graph-2d": "^1.29.0",
     "react-i18next": "^15.6.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.6.3",
     "react-syntax-highlighter": "^15.6.1",
     "ngraph.forcelayout": "^3.1.1",
     "ngraph.graph": "^20.0.1",
-    "three": "^0.165.0",
-    "three-spritetext": "^1.9.1",
     "reactflow": "^11.11.4"
   },
   "devDependencies": {
